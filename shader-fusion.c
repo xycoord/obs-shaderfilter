@@ -382,7 +382,7 @@ static bool reserved_sorted = false;
 static bool is_reserved(const char *s, size_t len)
 {
 	if (!reserved_sorted) {
-		qsort(reserved, sizeof(reserved) / sizeof(reserved[0]), sizeof(reserved[0]), cmp_str);
+		qsort((void *)reserved, sizeof(reserved) / sizeof(reserved[0]), sizeof(reserved[0]), cmp_str);
 		reserved_sorted = true;
 	}
 	if (len >= 3 && strncmp(s, "_sf", 3) == 0)
@@ -393,7 +393,7 @@ static bool is_reserved(const char *s, size_t len)
 	memcpy(buf, s, len);
 	buf[len] = 0;
 	const char *key = buf;
-	return bsearch(&key, reserved, sizeof(reserved) / sizeof(reserved[0]), sizeof(reserved[0]), cmp_str) != NULL;
+	return bsearch(&key, (const void *)reserved, sizeof(reserved) / sizeof(reserved[0]), sizeof(reserved[0]), cmp_str) != NULL;
 }
 
 /* Names that appear after a '.' (struct members, swizzles, methods) keep
