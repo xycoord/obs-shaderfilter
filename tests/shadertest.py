@@ -277,6 +277,10 @@ BENCH = {
                      "Luminance.shader"],
     "single": ["hue-rotaton.shader"],
     "none": [],
+    # Glow with room to spread, mid-chain: a link into an expanded filter.
+    "chain5_expand": ["hue-rotaton.shader", "chromatic-aberration.shader",
+                      ("glow.shader", {"expand_left": 16, "expand_right": 16, "expand_top": 16, "expand_bottom": 16}),
+                      "color_grade_filter.shader", "vignetting.shader"],
 }
 
 
@@ -534,7 +538,9 @@ def bench_cases(suite: str, chain_mode: str) -> list[dict]:
                                                     "chain": [shader_file(c) for c in chain[1:]]}}],
                           "steps": [{"dt": 0.05}]})
         else:
-            cases.append({"name": n, "source": "main", "filters": [filt(c) for c in chain], "steps": [{"dt": 0.05}]})
+            cases.append({"name": n, "source": "main",
+                          "filters": [filt(c[0], **c[1]) if isinstance(c, tuple) else filt(c) for c in chain],
+                          "steps": [{"dt": 0.05}]})
     return cases
 
 
@@ -543,8 +549,9 @@ def cmd_bench(args) -> int:
     work.mkdir(parents=True, exist_ok=True)
     xvfb = ensure_display()
     try:
-        imgs = make_images(work, [(1920, 1080)])
-        spec = {"width": 1920, "height": 1080, "images": imgs[(1920, 1080)],
+        w, h = args.size
+        imgs = make_images(work, [(w, h)])
+        spec = {"width": w, "height": h, "images": imgs[(w, h)],
                 "cases": bench_cases(args.suite, args.chain_mode),
                 "bench": {"frames": args.frames, "warmup": 20, "dt": 1 / 60}}
         allres: dict[str, list[float]] = {}
@@ -595,6 +602,8 @@ def main() -> int:
     pb.add_argument("--chain-mode", default="separate", choices=["separate", "multi"])
     pb.add_argument("--frames", type=int, default=120)
     pb.add_argument("--repeats", type=int, default=3)
+    pb.add_argument("--size", type=int, nargs=2, default=[1920, 1080], metavar=("W", "H"),
+                    help="canvas size; a tiny one (64 36) measures per-frame CPU overhead")
     pb.add_argument("--out", default=tempfile.gettempdir() + "/shadertest-bench")
     args = p.parse_args()
     if not args.obs_prefix or not args.harness_build:
