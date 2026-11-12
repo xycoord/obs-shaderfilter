@@ -21,6 +21,9 @@ export HARNESS_BUILD=$WORK/harness-build
 
 setup() {
 	if command -v apt-get >/dev/null && [ "$(id -u)" = 0 ]; then
+		# A fresh CI runner's package lists can be out of date, so the
+		# packages they name are no longer on the mirror.
+		apt-get update -qq
 		DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
 			build-essential cmake ninja-build git pkg-config python3-numpy python3-pil xvfb \
 			libgl1-mesa-dri libegl-mesa0 libegl-dev libgl-dev libopengl-dev libglx-dev libpng-dev \
