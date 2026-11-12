@@ -1201,7 +1201,7 @@ static void library_free(library_t *lib)
 		bfree(lib->array[i].category);
 		bfree(lib->array[i].name);
 	}
-	da_free(*lib);
+	da_free((*lib));
 }
 
 static char *trimmed(const char *s, size_t len)
@@ -1219,7 +1219,7 @@ static bool contains_ci(const char *haystack, const char *needle);
 
 static void library_load(const char *dir, library_t *lib)
 {
-	da_init(*lib);
+	da_init((*lib));
 	struct dstr path = {0};
 	dstr_printf(&path, "%s/library.ini", dir);
 	char *text = os_quick_read_utf8_file(path.array);
@@ -1257,7 +1257,7 @@ static void library_load(const char *dir, library_t *lib)
 								   : contains_ci(flags, "medium") ? 1 : 0;
 			bfree(flags);
 		}
-		da_push_back(*lib, &it);
+		da_push_back((*lib), &it);
 	}
 	strlist_free(lines);
 	bfree(text);
@@ -1532,7 +1532,7 @@ static void free_shader_list(shader_list_t *list)
 		bfree(list->array[i].label);
 		bfree(list->array[i].category);
 	}
-	da_free(*list);
+	da_free((*list));
 }
 
 static bool contains_ci(const char *haystack, const char *needle)
@@ -1552,7 +1552,7 @@ static bool contains_ci(const char *haystack, const char *needle)
 static void list_shaders(const char *dir, bool transitions, const char *search, const char *category,
 			 shader_list_t *out)
 {
-	da_init(*out);
+	da_init((*out));
 	/* Templates and examples in the bundled folder are starting points, not
 	 * shaders to use; in the person's own folders everything is listed. */
 	char *bundled_dir = examples_dir();
@@ -1602,7 +1602,7 @@ static void list_shaders(const char *dir, bool transitions, const char *search, 
 		struct shader_entry e = {path.array,
 					 it && *it->name ? bstrdup(it->name) : friendly_shader_name(path.array),
 					 bstrdup(it ? it->category : ""), rank, it ? it->cost : 0};
-		da_push_back(*out, &e);
+		da_push_back((*out), &e);
 	}
 	os_closedir(d);
 	library_free(&lib);
@@ -1652,7 +1652,7 @@ static void library_categories(const char *dir, category_list_t *out)
 			seen = astrcmpi(out->array[k], c) == 0;
 		if (!seen) {
 			char *copy = bstrdup(c);
-			da_push_back(*out, &copy);
+			da_push_back((*out), &copy);
 		}
 	}
 	library_free(&lib);
@@ -1885,7 +1885,6 @@ static void update_browse_status(obs_properties_t *props, obs_data_t *settings, 
 		return;
 	const char *search = obs_data_get_string(settings, "shader_search");
 	const char *category = obs_data_get_string(settings, "shader_category");
-	const bool narrowed = (search && *search) || (category && *category);
 	/* "8 of 11 in Blur & Glow, matching "blur"" / "154 shaders" */
 	struct dstr text = {0};
 	if (n == 0) {
@@ -2077,12 +2076,12 @@ static void presets_free(preset_list_t *list)
 		bfree(list->array[i].name);
 		obs_data_release(list->array[i].values);
 	}
-	da_free(*list);
+	da_free((*list));
 }
 
 static void presets_load(const char *shader_path, preset_list_t *out)
 {
-	da_init(*out);
+	da_init((*out));
 	if (!shader_path || !*shader_path)
 		return;
 	struct dstr path = {0};
@@ -2111,7 +2110,7 @@ static void presets_load(const char *shader_path, preset_list_t *out)
 			if (!end)
 				continue;
 			struct shader_preset preset = {trimmed(line + 1, end - line - 1), obs_data_create()};
-			da_push_back(*out, &preset);
+			da_push_back((*out), &preset);
 			continue;
 		}
 		const char *eq = strchr(line, '=');
@@ -3753,10 +3752,8 @@ static obs_properties_t *shader_filter_properties(void *data)
 		if (has_messages && !bundled)
 			add_compiler_messages(props, settings, errs, warns);
 	}
-	if (inline_code)
-	{
-		obs_property_t *note = obs_properties_add_text(props, "inline_note", obs_module_text("ShaderFilter.InlineNote"),
-							       OBS_TEXT_INFO);
+	if (inline_code) {
+		obs_properties_add_text(props, "inline_note", obs_module_text("ShaderFilter.InlineNote"), OBS_TEXT_INFO);
 		/* the rest of the story is on the Shader list's help icon */
 		obs_property_set_long_description(pick, obs_module_text("ShaderFilter.InlineNoteHelp"));
 	}
