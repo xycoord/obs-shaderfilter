@@ -12,12 +12,12 @@ jobs:
     env:
       WORK: ${{ github.workspace }}/.tests
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Cache test libobs
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .tests/libobs/prefix
           key: libobs-33.0.1-${{ hashFiles('tests/setup/build-libobs.sh') }}
@@ -38,7 +38,7 @@ jobs:
 
       - name: Upload report and diff montages
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: parity-report
           path: |
