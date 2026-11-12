@@ -1732,9 +1732,7 @@ static void update_browse_status(obs_properties_t *props, obs_data_t *settings, 
 			dstr_catf(&text, obs_module_text("ShaderFilter.BrowseIn"), category);
 		if (search && *search)
 			dstr_catf(&text, obs_module_text("ShaderFilter.BrowseMatching"), search);
-		if (pos) {
-			dstr_cat(&text, obs_module_text("ShaderFilter.ArrowTip"));
-		} else {
+		if (!pos) {
 			const char *file = obs_data_get_string(settings, "shader_file_name");
 			if (obs_data_get_bool(settings, "from_file") && file && *file) {
 				char *name = shader_display_name(file);
@@ -3400,10 +3398,6 @@ static obs_properties_t *shader_filter_properties(void *data)
 	obs_property_set_modified_callback(file_name, shader_filter_file_name_changed);
 
 	const char *error_message = obs_data_get_string(settings, "error_message");
-	if (!has_file && !inline_code && !(error_message && *error_message))
-		obs_property_text_set_info_word_wrap(
-			obs_properties_add_text(props, "hint_choose", obs_module_text("ShaderFilter.HintChoose"), OBS_TEXT_INFO),
-			false);
 
 	/* What's wrong (or special) about the shader, right under it. A bundled
 	 * shader isn't the person's to fix: no path, no Reload, and its compiler
@@ -3481,8 +3475,8 @@ static obs_properties_t *shader_filter_properties(void *data)
 	obs_property_set_modified_callback(search, shader_search_changed);
 	obs_property_set_visible(search, browsing);
 
-	/* Where the shader is in the (narrowed) list, and how to step through it:
-	 * the arrow keys on the Shader list apply the next or previous entry. */
+	/* Where the shader is in the (narrowed) list. (The arrow keys on the
+	 * Shader list apply the next or previous entry, as in any dropdown.) */
 	obs_property_text_set_info_word_wrap(obs_properties_add_text(props, "browse_status", "", OBS_TEXT_INFO), false);
 
 
