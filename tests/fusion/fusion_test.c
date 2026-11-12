@@ -86,6 +86,20 @@ static int selftest(void)
 		failures++;
 	}
 	bfree(r);
+	/* A macro used inside a sampler_state body is renamed with its #define. */
+	const char *macro_sampler[] = {"#define MODE Point\nsampler_state px { Filter = MODE; };\n" BODY(
+					       "return image.Sample(px, v_in.uv * 2.0);"),
+				       BODY("return image.Sample(textureSampler, v_in.uv);")};
+	if ((r = sf_fusion_build(macro_sampler, 2, tb, "")) == NULL || !strstr(r, "#define _sf0_MODE Point") ||
+	    !strstr(r, "Filter = _sf0_MODE;")) {
+		printf("FAIL macro in sampler_state not renamed with its #define:\n%s\n", r ? r : "(not built)");
+		failures++;
+	}
+	bfree(r);
+	if (sf_fusion_can_feed(up_clip[0]) || sf_fusion_can_feed(up_discard[0]) || !sf_fusion_can_feed(ok[0])) {
+		printf("FAIL sf_fusion_can_feed\n");
+		failures++;
+	}
 	/* A builtin's name the stage defines itself is renamed. */
 	const char *own_floor[] = {"uniform float floor = 0.5;\n" BODY("return image.Sample(textureSampler, v_in.uv) * floor;"),
 				   BODY("return image.Sample(textureSampler, v_in.uv);")};

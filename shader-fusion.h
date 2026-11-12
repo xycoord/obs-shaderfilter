@@ -27,6 +27,10 @@
 /* True if the template shader body samples `image` only at the current pixel. */
 bool sf_fusion_is_pointwise(const char *body);
 
+/* True if the body can be fused into a downstream stage (it never discards:
+ * in one pass that would kill the downstream filter's pixel too). */
+bool sf_fusion_can_feed(const char *body);
+
 /* Build the fused effect text, or NULL if the bodies can't be fused. bodies[0]
  * is the most upstream stage; every stage after the first must be pointwise.
  * With one body this is just that shader with template_end (used for the

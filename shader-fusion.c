@@ -307,6 +307,20 @@ static bool macro_writes(const char *src)
 	return false;
 }
 
+bool sf_fusion_can_feed(const char *body)
+{
+	if (!body)
+		return false;
+	struct toks t;
+	tokenize(body, &t);
+	bool ok = true;
+	for (size_t i = 0; ok && i < t.a.num; i++)
+		if (tok_is(&t, i, "discard") || (tok_is(&t, i, "clip") && tok_is(&t, i + 1, "(")))
+			ok = false;
+	da_free(t.a);
+	return ok;
+}
+
 bool sf_fusion_is_pointwise(const char *body)
 {
 	if (!body || macro_writes(body))
@@ -463,6 +477,15 @@ static bool user_defined(const struct toks *t, size_t idx)
 	return false;
 }
 
+/* Is the identifier at idx defined with #define in this text? */
+static bool is_macro(const struct toks *t, size_t idx)
+{
+	for (size_t i = 0; i + 2 < t->a.num; i++)
+		if (tok_is(t, i, "#") && tok_is(t, i + 1, "define") && tok_same(t, i + 2, idx))
+			return true;
+	return false;
+}
+
 static void emit_prefix(struct dstr *out, size_t stage)
 {
 	dstr_catf(out, "_sf%zu_", stage);
@@ -491,6 +514,10 @@ static void emit_stage(struct dstr *out, const struct toks *t, const struct poin
 		}
 		if (i > 0 && sampler_body_end && i < sampler_body_end && !tok_is(t, i - 1, "sampler_state") &&
 		    tk->type == TOK_IDENT) {
+			/* ...except a macro the stage defines, which is renamed
+			 * everywhere else and so must be here too. */
+			if (rename && is_macro(t, i))
+				emit_prefix(out, stage);
 			dstr_ncat(out, t->src + tk->start, tk->len);
 			continue;
 		}

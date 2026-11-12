@@ -382,6 +382,7 @@ struct shader_filter_data {
 	 * changes whenever the effect is rebuilt. */
 	char *shader_body;
 	bool pointwise;
+	bool can_feed;
 	bool own_technique;
 	long effect_gen;
 	/* Ticks left in which derived effects may be compiled while showing,
@@ -693,6 +694,7 @@ static void shader_filter_reload_effect(struct shader_filter_data *filter)
 	bfree(filter->shader_body);
 	filter->shader_body = NULL;
 	filter->pointwise = false;
+	filter->can_feed = false;
 	filter->own_technique = false;
 	filter->effect_gen = os_atomic_inc_long(&effect_generation);
 	filter->fresh_ticks = 3;
@@ -733,6 +735,7 @@ static void shader_filter_reload_effect(struct shader_filter_data *filter)
 		if (use_template && !filter->own_technique && !filter->transition && !strstr(shader_text, "USE_PM_ALPHA")) {
 			filter->shader_body = shader_text;
 			filter->pointwise = sf_fusion_is_pointwise(shader_text);
+			filter->can_feed = sf_fusion_can_feed(shader_text);
 		} else {
 			bfree(shader_text);
 		}
@@ -3717,7 +3720,7 @@ static size_t collect_fusion_group(struct shader_filter_data *last, struct shade
 		enum link_kind kind;
 		obs_source_t *ref;
 		struct shader_filter_data *up = linked_upstream(cur, &kind, &ref, check_size);
-		if (up && kind != LINK_DIRECT) {
+		if (up && (kind != LINK_DIRECT || !up->can_feed)) {
 			obs_source_release(ref);
 			up = NULL;
 		}
@@ -3998,8 +4001,19 @@ static enum downstream_use downstream_use(struct shader_filter_data *filter)
 			continue;
 		enum link_kind kind;
 		obs_source_t *ref;
-		if (linked_upstream(down, &kind, &ref, false) == filter)
-			use = (kind == LINK_DIRECT && down->pointwise && !fusion_disabled()) ? DOWN_FUSED : DOWN_LINKED;
+		if (linked_upstream(down, &kind, &ref, false) == filter) {
+			use = DOWN_LINKED;
+			if (kind == LINK_DIRECT && down->pointwise && filter->can_feed && !fusion_disabled()) {
+				/* Unless the downstream run's effect is known to have
+				 * failed, it will take us in. */
+				struct shader_filter_data *stages[SF_MAX_FUSED];
+				obs_source_t *refs[SF_MAX_FUSED];
+				size_t n = collect_fusion_group(down, stages, refs, false);
+				struct derived_effect *de = find_derived(down, stages, n);
+				use = (de && de->failed) ? DOWN_LINKED : DOWN_FUSED;
+				release_refs(refs, n);
+			}
+		}
 		obs_source_release(ref);
 	}
 	release_refs(ds.found, ds.num);
@@ -4008,13 +4022,14 @@ static enum downstream_use downstream_use(struct shader_filter_data *filter)
 
 /* Prepare the derived effects this filter will need, during video_tick.
  *
- * Compiling an effect stalls the graphics thread, so it is only done when a
- * stall happens anyway or can't be seen: in the few ticks after one of the
- * filters involved had its own effect (re)built (loading a scene collection,
- * editing a shader; every source ticks from load, visible or not), or while
- * the source isn't showing. Never on a render, and never just because a
- * filter was toggled live: until the effect for the new arrangement exists,
- * the filters render linked or the normal way, which is correct, just slower.
+ * Compiling an effect stalls the graphics thread, and with it every output
+ * (all sources tick on it before the frame is rendered, visible or not), so it
+ * is only done when a stall happens anyway: in the few ticks after one of the
+ * filters involved had its own effect (re)built - loading a scene collection,
+ * adding a filter, editing a shader, "Reload effect". Never on a render, and
+ * never because filters were toggled, reordered or removed: until the effect
+ * for the new arrangement exists, the filters render linked or the normal way,
+ * which is correct, just slower.
  *
  * Besides the effect for its own run, a filter that a downstream filter takes
  * input from keeps a single-filter derived effect, so that toggling a filter
@@ -4031,8 +4046,7 @@ static void prepare_derived(struct shader_filter_data *filter)
 	obs_source_t *refs[SF_MAX_FUSED];
 	size_t n = collect_fusion_group(filter, stages, refs, false);
 
-	obs_source_t *parent = obs_filter_get_parent(filter->context);
-	bool allowed = !parent || !obs_source_showing(parent);
+	bool allowed = false;
 	for (size_t i = 0; i < n && !allowed; i++)
 		allowed = stages[i]->fresh_ticks > 0;
 
