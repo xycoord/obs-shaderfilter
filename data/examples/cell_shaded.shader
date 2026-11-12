@@ -7,6 +7,7 @@ uniform int Angle_Steps<
     int minimum = 1;
     int maximum = 20;
     int step = 1;
+    string tooltip = "Number of angle steps, limited to 1 - 20. Edit cell_shaded.shader to remove the limit at your own risk.";
 > = 5;
 uniform int Radius_Steps<
     string label = "Radius Steps";
@@ -14,6 +15,7 @@ uniform int Radius_Steps<
     int minimum = 0;
     int maximum = 20;
     int step = 1;
+    string tooltip = "Number of radius steps, limited to 0 - 20. Edit cell_shaded.shader to remove the limit at your own risk.";
 > = 9; 
 uniform float ampFactor<
     string label = "amp Factor";
@@ -22,9 +24,6 @@ uniform float ampFactor<
     float maximum = 100.0;
     float step = 0.01;
 > = 2.0;
-uniform string notes<
-    string widget_type = "info";
-> = "Steps limited in range from 0 to 20. Edit cell_shaded.shader to remove limits at your own risk.";
 
 float4 mainImage(VertData v_in) : TARGET
 {

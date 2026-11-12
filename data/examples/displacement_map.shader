@@ -1,17 +1,19 @@
 uniform string displacement_info<
   string label = "Displacement";
   string widget_type = "info";
-> = "Displaces the current image with the Mask Layer. Red channel is affected to X (horizontal) displacement and Green channel to Y (vertical). rgb(.5, .5, .5) is no displacement.";
+> = "Displaces the current image using the Mask Layer.";
 
 uniform float displacement_x<
   string label = "Displacement X (px)";
+  string tooltip = "Horizontal (X) displacement in pixels, driven by the red channel of the Mask Layer.";
 > = 16.0;
 
 uniform float displacement_y<
   string label = "Displacement Y (px)";
+  string tooltip = "Vertical (Y) displacement in pixels, driven by the green channel of the Mask Layer.";
 > = 16.0;
 
-uniform texture2d mask_layer <string label = "Mask Layer";>;
+uniform texture2d mask_layer <string label = "Mask Layer"; string tooltip = "Image whose red and green channels drive the displacement. Mid-gray, rgb(0.5, 0.5, 0.5), means no displacement.";>;
 
 float4 mainImage(VertData v_in) : TARGET
 {
