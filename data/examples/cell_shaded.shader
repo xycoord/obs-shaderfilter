@@ -41,21 +41,16 @@ float4 mainImage(VertData v_in) : TARGET
 	float4 origColor = c0;
 	float4 accumulatedColor = float4(0,0,0,0);
 
-	for (int radiusStep = 0; radiusStep < radiusSteps; radiusStep++) {
-		float radius = minRadius + radiusStep * radiusDelta;
+	// Angles outside, radii inside: each direction's cos/sin is worked out once.
+	for (float angle=0; angle <(2*PI); angle += angleDelta) {
+		float2 direction = float2(cos(angle), sin(angle));
 
-		for (float angle=0; angle <(2*PI); angle += angleDelta) {
-			float2 currentCoord;
-
-			float xDiff = radius * cos(angle);
-			float yDiff = radius * sin(angle);
-			
-			currentCoord = v_in.uv + float2(xDiff, yDiff);
-			float4 currentColor = image.Sample(textureSampler, currentCoord);
+		for (int radiusStep = 0; radiusStep < radiusSteps; radiusStep++) {
+			float radius = minRadius + radiusStep * radiusDelta;
+			float4 currentColor = image.Sample(textureSampler, v_in.uv + radius * direction);
 			float4 colorDiff = abs(c0 - currentColor);
 			float currentFraction = (radiusSteps + 1 - radiusStep) / (radiusSteps + 1);
 			accumulatedColor +=  currentFraction * colorDiff / totalSteps;
-			
 		}
 	}
 	accumulatedColor *= ampFactor;

@@ -3,6 +3,9 @@
 
 #define INV_SQRT_OF_2PI 0.39894228040143267793994605993439  // 1.0/SQRT_OF_2PI
 #define INV_PI          0.31830988618379067153776752674503
+#ifndef SD_CUTOFF
+#define SD_CUTOFF 4.0
+#endif
 
 uniform float uSigma<
     string label = "Sigma";
@@ -38,14 +41,16 @@ uniform float uThreshold<
 // NOTE: image's texture2d data will be supplied by the OBS shaderfilter by default
 float4 smartDeNoise(float2 uv, float2 size, float sigma, float kSigma, float threshold)
 {
-    float radius = round(kSigma * sigma);
+    // Pixels further than SD_CUTOFF sigmas from the centre get a spatial weight
+    // below exp(-SD_CUTOFF^2 / 2) and can't change the result visibly, so the
+    // kernel stops there even when K-Sigma asks for a wider one.
+    float radius = round(min(kSigma, SD_CUTOFF) * sigma);
     float radQ = radius * radius;
 
-    float invSigmaQx2 = 0.5 / (sigma * sigma);   // 1.0 / (sigma^2 * 2.0)
-    float invSigmaQx2PI = INV_PI * invSigmaQx2;  // 1/(2 * PI * sigma^2)
-
-    float invThresholdSqx2 = 0.5 / (threshold * threshold);   // 1.0 / (sigma^2 * 2.0)
-    float invThresholdSqrt2PI = INV_SQRT_OF_2PI / threshold;  // 1.0 / (sqrt(2*PI) * sigma^2)
+    // The normalising constants of both Gaussians cancel in aBuff / zBuff.
+    float invSigmaQx2 = 0.5 / (sigma * sigma);
+    float invThresholdSqx2 = 0.5 / (threshold * threshold);
+    float2 texel = 1.0 / size;
 
     float4 centrPx = image.Sample(textureSampler, uv);
 
@@ -59,15 +64,14 @@ float4 smartDeNoise(float2 uv, float2 size, float sigma, float kSigma, float thr
         d.y = -pt;
         for (; d.y <= pt; d.y += 1.0)
         {
-            float blurFactor = exp((-dot(d, d)) * invSigmaQx2) * invSigmaQx2PI;
-            float4 walkPx = image.Sample(textureSampler, uv + (d / size));
+            float4 walkPx = image.Sample(textureSampler, uv + d * texel);
             float4 dC = walkPx - centrPx;
-            float deltaFactor = (exp((-dot(dC.xyz, dC.xyz)) * invThresholdSqx2) * invThresholdSqrt2PI) * blurFactor;
+            float deltaFactor = exp(-dot(d, d) * invSigmaQx2 - dot(dC.xyz, dC.xyz) * invThresholdSqx2);
             zBuff += deltaFactor;
-            aBuff += (walkPx * deltaFactor);
+            aBuff += walkPx * deltaFactor;
         }
     }
-    return aBuff / float4(zBuff, zBuff, zBuff, zBuff);
+    return aBuff / zBuff;
 }
 
 float4 mainImage(VertData v_in) : TARGET
