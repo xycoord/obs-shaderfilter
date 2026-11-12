@@ -43,6 +43,7 @@
 
 #include "obsenv.h"
 #include "properties-view.hpp"
+#include <QThread>
 
 static const char *style = R"(
 QWidget { background: transparent; color: #FEFEFE; font-size: 10pt; }
@@ -245,8 +246,10 @@ int main(int argc, char **argv)
 
 		/* A second passes before the screenshot, as between setting a
 		 * filter up and coming back to it. */
-		for (int t = 0; t < 60; t++)
+		for (int t = 0; t < 60; t++) {
 			env_tick(1.0f / 60.0f);
+			QThread::msleep(20);
+		}
 
 		size_t sel = (size_t)obs_data_get_int(shot, "select");
 		if (sel >= filters.size())
@@ -338,10 +341,11 @@ int main(int argc, char **argv)
 			QComboBox *combo = combos[combo_index];
 			QListView lv;
 			lv.setModel(combo->model());
-			lv.setStyleSheet("QListView { background: #272A33; } QListView::item { padding: 3px; }");
+			lv.setStyleSheet("QListView { background: #272A33; } QListView::item { padding: 3px; } "
+					 "QListView::item:disabled { color: #8F96A6; }");
 			lv.setCurrentIndex(combo->model()->index(combo->currentIndex(), 0));
 			int rowh = lv.sizeHintForRow(0) > 0 ? lv.sizeHintForRow(0) : 22;
-			lv.resize(std::max(combo->width(), 420), std::min(combo->count() * rowh + 8, 2400));
+			lv.resize(std::max(combo->width(), 420), std::min(combo->count() * rowh + 8, 4800));
 			lv.show();
 			app.processEvents();
 			lv.grab().save(QString("%1/%2_list.png").arg(out, shot_name));

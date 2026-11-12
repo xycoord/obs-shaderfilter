@@ -22,8 +22,10 @@ file(WRITE ${CMAKE_BINARY_DIR}/patched/properties-view.cpp "${PV}")
 file(READ ${S}/qt/wrappers/qt-wrappers.cpp QW)
 string(REPLACE "mb.setOption(QMessageBox::Option::DontUseNativeDialog, true);" "" QW "${QW}")
 file(WRITE ${CMAKE_BINARY_DIR}/patched/qt-wrappers.cpp "${QW}")
+file(WRITE ${CMAKE_BINARY_DIR}/check.svg "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"14\" height=\"14\" viewBox=\"0 0 14 14\"><path d=\"M3 7.5l2.5 2.5L11 4.5\" fill=\"none\" stroke=\"#FEFEFE\" stroke-width=\"2\"/></svg>")
 file(WRITE ${CMAKE_BINARY_DIR}/res.qrc "<RCC><qresource prefix=\"/res/images\">
 <file alias=\"help.svg\">${OBS_SOURCE_DIR}/frontend/forms/images/help.svg</file>
+<file alias=\"check.svg\">${CMAKE_BINARY_DIR}/check.svg</file>
 <file alias=\"help_light.svg\">${OBS_SOURCE_DIR}/frontend/forms/images/help_light.svg</file>
 </qresource></RCC>")
 
