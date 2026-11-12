@@ -93,9 +93,10 @@ float4 mainImage(VertData v_in) : TARGET
 {
     float4 c = image.Sample(textureSampler, v_in.uv);
 
-    // A new pattern Speed times a second (kept small so the hash stays precise).
+    // A new pattern Speed times a second; the sequence repeats only after
+    // 9973 patterns (7 minutes at 24), small enough for the hash to stay precise.
     float frame = Speed > 0 ? floor(elapsed_time * float(Speed)) : 0.0;
-    float seed = fmod(frame, 997.0) * 1.618 + rand_instance_f * 61.0;
+    float seed = fmod(frame, 9973.0) * 1.618 + rand_instance_f * 61.0;
 
     // Grain size in this source's pixels. Grains smaller than a pixel would
     // average out within it: use one per pixel, weakened to match.
@@ -103,11 +104,17 @@ float4 mainImage(VertData v_in) : TARGET
     float fine = min(cell_px, 1.0);
     cell_px = max(cell_px, 1.0);
 
-    // Grain centres sit every cell_px pixels; at 1, one per pixel. Two layers
-    // on grids turned against each other, so large grain has no visible grid.
+    // Grain centres sit every cell_px pixels; at 1, one per pixel. Large grain
+    // would show the grid they sit on, so from 2 px a second layer on a grid
+    // turned against the first fades in (fully from 3 px); below that it
+    // isn't needed and isn't computed.
     float2 p = (v_in.uv * uv_size - 0.5) / cell_px;
-    float2 q = float2(0.8660 * p.x - 0.5 * p.y, 0.5 * p.x + 0.8660 * p.y) + 0.37;
-    float3 n = (grain_layer(p, seed) + grain_layer(q, seed + 101.0)) * 0.70711;
+    float3 n = grain_layer(p, seed);
+    float second = saturate(cell_px - 2.0);
+    if (second > 0.0) {
+        float2 q = float2(0.8660 * p.x - 0.5 * p.y, 0.5 * p.x + 0.8660 * p.y) + 0.37;
+        n = (n + second * grain_layer(q, seed + 101.0)) / sqrt(1.0 + second * second);
+    }
 
     // Black-and-white grain uses the first channel's noise for all three.
     float3 grain = lerp(n.xxx, n, Color_Amount * 0.01);
@@ -117,6 +124,7 @@ float4 mainImage(VertData v_in) : TARGET
     float response = luma < 0.5 ? lerp(Shadows * 0.01, 1.0, smoothstep(0.0, 0.5, luma))
                                 : lerp(1.0, Highlights * 0.01, smoothstep(0.5, 1.0, luma));
 
-    c.rgb = saturate(c.rgb + grain * (Amount * 0.0015 * response * fine));
+    // Kept above 0 but not clipped at 1, so HDR highlights survive.
+    c.rgb = max(c.rgb + grain * (Amount * 0.0015 * response * fine), 0.0);
     return c;
 }
