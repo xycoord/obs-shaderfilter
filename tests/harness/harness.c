@@ -50,6 +50,7 @@
 extern void obs_source_video_tick(obs_source_t *source, float seconds);
 
 static void (*freeze_ns)(uint64_t) = NULL;
+static void (*gl_counts)(uint64_t *, uint64_t *) = NULL;
 static uint64_t sim_ns = 1000000000ULL * 1000;
 static uint32_t canvas_w = 640, canvas_h = 360;
 static FILE *results;
@@ -291,7 +292,10 @@ static void run_case(obs_data_t *c, obs_data_t *bench)
 		int warmup = (int)obs_data_get_int(bench, "warmup");
 		float dt = (float)obs_data_get_double(bench, "dt");
 		double *times = bzalloc(sizeof(double) * frames);
+		uint64_t draws0 = 0, px0 = 0, draws1 = 0, px1 = 0;
 		for (int i = -warmup; i < frames; i++) {
+			if (i == 0 && gl_counts)
+				gl_counts(&draws0, &px0);
 			double t0 = now_ms();
 			tick_all(dt);
 			obs_enter_graphics();
@@ -301,12 +305,17 @@ static void run_case(obs_data_t *c, obs_data_t *bench)
 			if (i >= 0)
 				times[i] = now_ms() - t0;
 		}
+		if (gl_counts)
+			gl_counts(&draws1, &px1);
 		qsort(times, frames, sizeof(double), cmp_double);
 		double sum = 0;
 		for (int i = 0; i < frames; i++)
 			sum += times[i];
 		dstr_printf(&timing, ", \"median_ms\": %.4f, \"mean_ms\": %.4f, \"p10_ms\": %.4f, \"p90_ms\": %.4f",
 			    times[frames / 2], sum / frames, times[frames / 10], times[frames * 9 / 10]);
+		if (draws1 > draws0)
+			dstr_catf(&timing, ", \"draws_per_frame\": %.2f, \"mpix_per_frame\": %.3f",
+				  (double)(draws1 - draws0) / frames, (double)(px1 - px0) / frames / 1e6);
 		bfree(times);
 	}
 
@@ -375,6 +384,7 @@ int main(int argc, char **argv)
 		return 2;
 	}
 	freeze_ns = (void (*)(uint64_t))dlsym(RTLD_DEFAULT, "detshim_freeze_ns");
+	gl_counts = (void (*)(uint64_t *, uint64_t *))dlsym(RTLD_DEFAULT, "detshim_gl_counts");
 	base_set_log_handler(log_handler, NULL);
 	os_mkdirs(out_dir);
 

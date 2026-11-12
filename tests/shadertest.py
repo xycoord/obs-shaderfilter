@@ -501,16 +501,23 @@ def cmd_bench(args) -> int:
                 "cases": bench_cases(args.suite, args.chain_mode),
                 "bench": {"frames": args.frames, "warmup": 20, "dt": 1 / 60}}
         allres: dict[str, list[float]] = {}
+        counts: dict[str, tuple] = {}
+        os.environ["SHADERTEST_COUNT_GL"] = "1"
         for r in range(args.repeats):
             res = run_harness(args, args.plugin, args.data, spec, work / f"run{r}", bench=True)
             for e in res:
                 if e.get("error"):
                     print(f"error in {e['name']}: {e['error'][:200]}", file=sys.stderr)
                 allres.setdefault(e["name"], []).append(e["median_ms"])
-        summary = {k: {"median_ms": float(np.median(v)), "runs": v} for k, v in allres.items()}
+                counts[e["name"]] = (e.get("draws_per_frame"), e.get("mpix_per_frame"))
+        summary = {k: {"median_ms": float(np.median(v)), "runs": v, "draws_per_frame": counts[k][0],
+                       "mpix_per_frame": counts[k][1]} for k, v in allres.items()}
         (work / "bench.json").write_text(json.dumps(summary, indent=1))
         for k, v in summary.items():
-            print(f"{k:16} median {v['median_ms']:8.3f} ms   runs {' '.join(f'{x:.3f}' for x in v['runs'])}")
+            gl = ""
+            if v["draws_per_frame"] is not None:
+                gl = f"   draws {v['draws_per_frame']:6.2f}  Mpix {v['mpix_per_frame']:7.2f}"
+            print(f"{k:16} median {v['median_ms']:8.3f} ms{gl}   runs {' '.join(f'{x:.3f}' for x in v['runs'])}")
         return 0
     finally:
         if xvfb:
