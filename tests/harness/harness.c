@@ -239,12 +239,22 @@ static void run_case(obs_data_t *c, obs_data_t *bench)
 			obs_source_t *filter = obs_source_create(obs_data_get_string(f, "id"), fname.array, fs, NULL);
 			dstr_free(&fname);
 			obs_source_filter_add(target, filter);
+			if (obs_data_has_user_value(f, "enabled") && !obs_data_get_bool(f, "enabled"))
+				obs_source_set_enabled(filter, false);
 			da_push_back(filters, &filter);
 			obs_data_release(fs);
 			obs_data_release(f);
 		}
 		obs_data_array_release(fa);
 		obs_scene_add(scene, target);
+		if (obs_data_get_bool(c, "duplicate_item")) {
+			/* The same source shown twice: its filters render twice per frame. */
+			obs_sceneitem_t *item = obs_scene_add(scene, target);
+			struct vec2 pos = {(float)canvas_w / 3.0f, (float)canvas_h / 4.0f};
+			struct vec2 scale = {0.5f, 0.5f};
+			obs_sceneitem_set_pos(item, &pos);
+			obs_sceneitem_set_scale(item, &scale);
+		}
 		root = obs_source_get_ref(scene_src);
 	}
 
@@ -312,8 +322,8 @@ static void run_case(obs_data_t *c, obs_data_t *bench)
 			obs_source_filter_remove(target, filters.array[i]);
 			obs_source_release(filters.array[i]);
 		}
-		obs_sceneitem_t *item = obs_scene_find_source(scene, obs_source_get_name(target));
-		if (item)
+		obs_sceneitem_t *item;
+		while ((item = obs_scene_find_source(scene, obs_source_get_name(target))) != NULL)
 			obs_sceneitem_remove(item);
 		obs_source_release(target);
 	} else {

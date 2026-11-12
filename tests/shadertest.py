@@ -157,9 +157,19 @@ def parity_cases(suite: str) -> list[dict]:
     cases.append({"name": "x_tex_source_displacement", "source": "main",
                   "filters": [filt("displacement_map.shader", mask_layer_source="alt", displacement_x=0.02, displacement_y=0.01)], "steps": STEPS})
     # Temporal: previous_output accumulates over frames.
+    # Temporal: previous_output / previous_image need a moving input, so an
+    # animated shader runs upstream.
+    temporal_steps = [{"dt": 0.05}] + [{"dt": 0.07, "capture": i % 3 == 2} for i in range(9)]
     cases.append({"name": "x_temporal_motion_blur", "source": "main",
-                  "filters": [filt("motion_blur.shader")],
-                  "steps": [{"dt": 0.05}] + [{"dt": 0.05, "capture": i % 3 == 2} for i in range(9)]})
+                  "filters": [filt("hue-rotaton.shader", Speed=60.0), filt("motion_blur.shader", strength=0.6)],
+                  "steps": temporal_steps})
+    cases.append({"name": "x_temporal_previous_image", "source": "main",
+                  "filters": [filt("hue-rotaton.shader", Speed=60.0),
+                              {"id": "shader_filter", "settings": {"shader_text": PREV_IMAGE_SHADER}}],
+                  "steps": temporal_steps})
+    cases.append({"name": "x_temporal_motion_blur_expand", "source": "main",
+                  "filters": [filt("ZigZag.shader"), filt("motion_blur.shader", strength=0.8, expand_left=12, expand_bottom=6)],
+                  "steps": temporal_steps})
     # Chains.
     for i, chain in enumerate(CHAINS):
         cases.append({"name": f"x_chain{i}", "source": "main", "filters": [filt(n) for n in chain], "steps": STEPS})
@@ -172,6 +182,19 @@ def parity_cases(suite: str) -> list[dict]:
     cases.append({"name": "x_chain_dupe", "source": "main",
                   "filters": [filt("hue-rotaton.shader", Speed=40.0), filt("hue-rotaton.shader", Speed=-80.0)],
                   "steps": STEPS})
+    # A disabled filter in the middle of a chain.
+    cases.append({"name": "x_chain_disabled_middle", "source": "main",
+                  "filters": [filt("hue-rotaton.shader", Speed=30.0),
+                              dict(filt("Invert.shader"), enabled=False),
+                              filt("chromatic-aberration.shader")],
+                  "steps": STEPS})
+    # The filtered source shown twice in the scene: every filter renders twice per frame.
+    cases.append({"name": "x_render_twice_chain", "source": "main", "duplicate_item": True,
+                  "filters": [filt("hue-rotaton.shader", Speed=30.0), filt("glow.shader"), filt("VHS.shader")],
+                  "steps": STEPS})
+    cases.append({"name": "x_render_twice_temporal", "source": "main", "duplicate_item": True,
+                  "filters": [filt("hue-rotaton.shader", Speed=60.0), filt("motion_blur.shader", strength=0.6)],
+                  "steps": temporal_steps})
     if suite == "quick":
         keep = {"f_Invert_shader", "f_glow_shader", "f_VHS_shader", "tr_fade_transition_shader",
                 "x_inline_default", "x_chain0", "x_chain_expand", "x_temporal_motion_blur",
@@ -195,6 +218,16 @@ float4 mainImage(VertData v_in) : TARGET
     float4 c = image.Sample(textureSampler, v_in.uv);
     float4 n = image.Sample(textureSampler, v_in.uv + uv_pixel_interval * float2(3.0, 2.0));
     return lerp(c, n * tint, strength * (0.5 + 0.5 * sin(elapsed_time)));
+}
+"""
+
+PREV_IMAGE_SHADER = """
+uniform texture2d previous_image;
+float4 mainImage(VertData v_in) : TARGET
+{
+    float4 c = image.Sample(textureSampler, v_in.uv);
+    float4 p = previous_image.Sample(textureSampler, v_in.uv);
+    return float4(abs(c.rgb - p.rgb) * 4.0 + c.rgb * 0.25, c.a);
 }
 """
 
