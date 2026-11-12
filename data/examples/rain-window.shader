@@ -208,16 +208,14 @@ float4 mainImage(VertData v_in) : TARGET
 
     if(blurSize > 0.0){
         // Blur calculations
+        float2 centre = debug ? UV+c : UV+n;
         for(float d=0.0; d<Pi; d+=Pi/Directions)
         {
+            // One cos/sin per direction rather than per sample.
+            float2 step_uv = float2(cos(d),sin(d))*Radius;
             for(float i=1.0/Quality; i<=1.0; i+=1.0/Quality)
             {
-                float2 uv2;
-                if(debug){
-                    uv2 = UV+c+float2(cos(d),sin(d))*Radius*i;
-                } else{
-                    uv2 = UV+n+float2(cos(d),sin(d))*Radius*i;
-                }
+                float2 uv2 = centre+step_uv*i;
                 float3 t = image.Sample(textureSampler, uv2).rgb;
                 col = col + t;       
             }
