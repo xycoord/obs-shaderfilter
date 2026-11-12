@@ -1,7 +1,10 @@
 // Film Grain for obs-shaderfilter.
-// Gaussian-distributed grain, sized in pixels and smoothly interpolated between
-// grain centres, strongest in the midtones as on film. It only reads the pixel
-// it draws, so the plugin can merge it into a neighbouring shader filter's pass.
+// Gaussian-distributed grain, smoothly interpolated between grain centres and
+// strongest in the midtones, as on film. Like film grain it belongs to the
+// frame: its size is given for a 1080-line picture and scales with the
+// source, so a small source scaled up in a scene doesn't get coarse grain.
+// It only reads the pixel it draws, so the plugin can merge it into a
+// neighbouring shader filter's pass.
 
 uniform float Amount<
     string label = "Amount";
@@ -13,7 +16,7 @@ uniform float Amount<
 > = 30.0;
 uniform float Grain_Size<
     string label = "Grain Size";
-    string tooltip = "Size of a grain, in pixels of the source. 1 is the finest.";
+    string tooltip = "Size of a grain, in pixels of a 1080-line picture. Grain belongs to the frame, so it scales with the source: twice as many pixels across at 4K, finer on smaller sources.";
     string widget_type = "slider";
     float minimum = 1.0;
     float maximum = 6.0;
@@ -78,8 +81,14 @@ float4 mainImage(VertData v_in) : TARGET
     float frame = Speed > 0 ? floor(elapsed_time * float(Speed)) : 0.0;
     float seed = fmod(frame, 997.0) * 1.618 + rand_instance_f * 61.0;
 
-    // Grain centres sit every Grain_Size pixels; at size 1, one per pixel.
-    float2 p = (v_in.uv * uv_size - 0.5) / max(Grain_Size, 1.0);
+    // Grain size in this source's pixels. Grains smaller than a pixel would
+    // average out within it: use one per pixel, weakened to match.
+    float cell_px = Grain_Size * uv_size.y / 1080.0;
+    float fine = min(cell_px, 1.0);
+    cell_px = max(cell_px, 1.0);
+
+    // Grain centres sit every cell_px pixels; at 1, one per pixel.
+    float2 p = (v_in.uv * uv_size - 0.5) / cell_px;
     float2 cell = floor(p);
     float2 f = p - cell;
     float2 u = f * f * (3.0 - 2.0 * f);
@@ -101,6 +110,6 @@ float4 mainImage(VertData v_in) : TARGET
     float response = luma < 0.5 ? lerp(Shadows * 0.01, 1.0, smoothstep(0.0, 0.5, luma))
                                 : lerp(1.0, Highlights * 0.01, smoothstep(0.5, 1.0, luma));
 
-    c.rgb = saturate(c.rgb + grain * (Amount * 0.0015 * response));
+    c.rgb = saturate(c.rgb + grain * (Amount * 0.0015 * response * fine));
     return c;
 }
