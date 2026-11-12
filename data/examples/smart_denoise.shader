@@ -1,11 +1,7 @@
 // Smart DeNoise By Michele Morrone (https://github.com/BrutPitt/glslSmartDeNoise)
 // Converted to OBS version of HLSL by Euiko on February 10, 2025
 
-#define INV_SQRT_OF_2PI 0.39894228040143267793994605993439  // 1.0/SQRT_OF_2PI
-#define INV_PI          0.31830988618379067153776752674503
-#ifndef SD_CUTOFF
 #define SD_CUTOFF 4.0
-#endif
 
 uniform float uSigma<
     string label = "Sigma";
@@ -16,6 +12,7 @@ uniform float uSigma<
 > = 5.0;  // default value based on shadertoy
 uniform float uKSigma<
     string label = "K-Sigma";
+    string tooltip = "Radius of the blur, in multiples of Sigma. Beyond 4 the extra pixels are too faint to show, so larger values look (and cost) the same as 4.";
     string widget_type = "slider";
     float minimum = 0.01;
     float maximum = 24; // max based on the webgl sample, which is 24 
