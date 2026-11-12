@@ -769,6 +769,8 @@ static void mark_error_in_name(struct shader_filter_data *filter, obs_data_t *se
 	dstr_free(&marked);
 }
 
+static char *examples_dir(void);
+
 static void shader_filter_reload_effect(struct shader_filter_data *filter)
 {
 	obs_data_t *settings = obs_source_get_settings(filter->context);
@@ -875,7 +877,14 @@ static void shader_filter_reload_effect(struct shader_filter_data *filter)
 		} else {
 			obs_data_set_string(settings, "last_error", obs_module_text("ShaderFilter.Unknown"));
 		}
-		set_error_message(settings, obs_module_text("ShaderFilter.CantCompile"),
+		const char *failed_file = obs_data_get_bool(settings, "from_file")
+						  ? obs_data_get_string(settings, "shader_file_name")
+						  : NULL;
+		char *bundled = examples_dir();
+		const bool from_library = failed_file && bundled && strncmp(failed_file, bundled, strlen(bundled)) == 0;
+		bfree(bundled);
+		set_error_message(settings,
+				  obs_module_text(from_library ? "ShaderFilter.CantCompileLibrary" : "ShaderFilter.CantCompile"),
 				  obs_data_get_bool(settings, "from_file") ? obs_data_get_string(settings, "shader_file_name")
 									   : NULL,
 				  obs_data_get_string(settings, "last_error"));
@@ -1708,17 +1717,24 @@ static void update_browse_status(obs_properties_t *props, obs_data_t *settings, 
 	const char *search = obs_data_get_string(settings, "shader_search");
 	const char *category = obs_data_get_string(settings, "shader_category");
 	const bool narrowed = (search && *search) || (category && *category);
+	/* "8 of 11 in Blur & Glow, matching "blur"" / "154 shaders" */
 	struct dstr text = {0};
-	if (n == 0)
+	if (n == 0) {
 		dstr_copy(&text, obs_module_text("ShaderFilter.BrowseNone"));
-	else if (pos)
-		dstr_printf(&text, obs_module_text(narrowed ? "ShaderFilter.BrowsePosMatching" : "ShaderFilter.BrowsePos"),
-			    (int)pos, (int)n);
-	else
-		dstr_printf(&text, obs_module_text(n == 1 ? "ShaderFilter.BrowseOne" : "ShaderFilter.BrowseMany"), (int)n);
+	} else {
+		if (pos)
+			dstr_printf(&text, obs_module_text("ShaderFilter.BrowsePos"), (int)pos, (int)n);
+		else
+			dstr_printf(&text, obs_module_text(n == 1 ? "ShaderFilter.BrowseOne" : "ShaderFilter.BrowseMany"),
+				    (int)n);
+		if (category && *category)
+			dstr_catf(&text, obs_module_text("ShaderFilter.BrowseIn"), category);
+		if (search && *search)
+			dstr_catf(&text, obs_module_text("ShaderFilter.BrowseMatching"), search);
+	}
 	obs_property_set_description(status, text.array);
 	obs_property_text_set_info_type(status, n == 0 ? OBS_TEXT_INFO_WARNING : OBS_TEXT_INFO_NORMAL);
-	obs_property_set_visible(status, (narrowed || pos) && obs_data_get_bool(settings, "browse_shaders"));
+	obs_property_set_visible(status, obs_data_get_bool(settings, "browse_shaders"));
 	dstr_free(&text);
 }
 
@@ -1744,7 +1760,7 @@ static bool browse_shaders_changed(obs_properties_t *props, obs_property_t *p, o
 		bf->browse_kept = show;
 		bf->browse_shown = show;
 	}
-	const char *keys[] = {"shader_category", "shader_search", "next_shader", "previous_shader"};
+	const char *keys[] = {"shader_category", "shader_search", "next_shader", "previous_shader", "browse_status"};
 	for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
 		obs_property_t *q = obs_properties_get(props, keys[i]);
 		if (q)
@@ -3389,10 +3405,12 @@ static obs_properties_t *shader_filter_properties(void *data)
 
 	/* The browsing tools show on a filter with no shader yet. Once a filter
 	 * has a shader they start hidden each time its settings are opened,
-	 * unless the person opened them on this filter themselves. */
+	 * unless the person opened them on this filter themselves, or its
+	 * shader fails (so another is a click away). */
 	const bool refreshing = filter && os_gettime_ns() < filter->props_refresh_until;
+	const bool failing = error_message && *error_message;
 	if (has_file || inline_code) {
-		if (!refreshing && !(filter && filter->browse_kept))
+		if (!refreshing && !(filter && filter->browse_kept) && !failing)
 			obs_data_set_bool(settings, "browse_shaders", false);
 	} else if (!obs_data_has_user_value(settings, "browse_shaders")) {
 		obs_data_set_bool(settings, "browse_shaders", true);
@@ -3403,6 +3421,16 @@ static obs_properties_t *shader_filter_properties(void *data)
 	obs_property_t *browse = obs_properties_add_bool(props, "browse_shaders", obs_module_text("ShaderFilter.Browse"));
 	obs_property_set_long_description(browse, obs_module_text("ShaderFilter.BrowseHelp"));
 	obs_property_set_modified_callback(browse, browse_shaders_changed);
+
+	/* Stepping (the most used) first, then ways to narrow what it steps through. */
+	obs_property_t *next = obs_properties_add_button2(props, "next_shader", obs_module_text("ShaderFilter.NextShader"),
+							  next_shader_clicked, data);
+	obs_property_set_visible(next, browsing);
+	obs_property_t *prev = obs_properties_add_button2(props, "previous_shader",
+							  obs_module_text("ShaderFilter.PreviousShader"), previous_shader_clicked,
+							  data);
+	obs_property_set_visible(prev, browsing);
+	obs_properties_add_text(props, "browse_status", "", OBS_TEXT_INFO);
 
 	category_list_t categories;
 	da_init(categories);
@@ -3429,14 +3457,6 @@ static obs_properties_t *shader_filter_properties(void *data)
 	obs_property_set_modified_callback(search, shader_search_changed);
 	obs_property_set_visible(search, browsing);
 
-	obs_property_t *next = obs_properties_add_button2(props, "next_shader", obs_module_text("ShaderFilter.NextShader"),
-							  next_shader_clicked, data);
-	obs_property_set_visible(next, browsing);
-	obs_property_t *prev = obs_properties_add_button2(props, "previous_shader",
-							  obs_module_text("ShaderFilter.PreviousShader"), previous_shader_clicked,
-							  data);
-	obs_property_set_visible(prev, browsing);
-	obs_properties_add_text(props, "browse_status", "", OBS_TEXT_INFO);
 	size_t pos;
 	size_t n_listed = fill_shader_list(pick, settings, transition, &pos);
 	update_browse_status(props, settings, n_listed, pos);
@@ -3473,7 +3493,13 @@ static obs_properties_t *shader_filter_properties(void *data)
 		}
 	}
 	if (inline_code)
-		obs_properties_add_text(props, "inline_note", obs_module_text("ShaderFilter.InlineNote"), OBS_TEXT_INFO);
+	{
+		obs_property_t *note = obs_properties_add_text(props, "inline_note", obs_module_text("ShaderFilter.InlineNote"),
+							       OBS_TEXT_INFO);
+		obs_property_text_set_info_word_wrap(note, false);
+		/* the rest of the story is on the Shader list's help icon */
+		obs_property_set_long_description(pick, obs_module_text("ShaderFilter.InlineNoteHelp"));
+	}
 	if (has_file && filter && path_is_effect(file) && has_shader_neighbour(filter))
 		obs_properties_add_text(props, "effect_note", obs_module_text("ShaderFilter.EffectNote"), OBS_TEXT_INFO);
 
@@ -3771,7 +3797,7 @@ static obs_properties_t *shader_filter_properties(void *data)
 		char *name = auto_filter_name(filter, file);
 		struct dstr label = {0};
 		dstr_printf(&label, obs_module_text("ShaderFilter.RenameAfterShader"), name);
-		obs_property_t *rename = obs_properties_add_button2(adv, "rename_after_shader", label.array,
+		obs_property_t *rename = obs_properties_add_button2(props, "rename_after_shader", label.array,
 								    rename_after_shader_clicked, data);
 		obs_property_set_long_description(rename, obs_module_text("ShaderFilter.RenameHelp"));
 		dstr_free(&label);
