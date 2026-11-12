@@ -279,6 +279,15 @@ struct effect_param_data {
 	} step;
 };
 
+/* GPU timer queries for one frame's pass; results are read a few frames
+ * later, when the GPU has long finished, so reading never stalls. */
+#define GPU_TIMER_SLOTS 6
+struct gpu_timer_slot {
+	gs_timer_t *timer;
+	gs_timer_range_t *range; /* NULL where the driver has none (OpenGL) */
+	bool pending;
+};
+
 struct shader_filter_data {
 	obs_source_t *context;
 	gs_effect_t *effect;
@@ -300,6 +309,17 @@ struct shader_filter_data {
 	 * told apart from libobs re-running callbacks when it builds the panel. */
 	bool browse_kept;
 	bool browse_shown;
+
+	/* Measured GPU time of this filter's own pass (graphics thread). */
+	struct gpu_timer_slot gpu_slots[GPU_TIMER_SLOTS];
+	size_t gpu_slot;
+	double gpu_sum_ms;
+	uint32_t gpu_samples;
+	uint64_t gpu_window_start;
+	float gpu_ms;          /* average over the last second; < 0 if not drawn */
+	bool gpu_merged;       /* runs inside the next shader filter's pass */
+	uint32_t gpu_group;    /* filters drawn in this filter's pass, itself included */
+	bool gpu_props_waiting; /* the panel was built before there was a figure */
 	struct dstr last_path;
 	bool last_from_file;
 	bool transition;
@@ -1057,6 +1077,8 @@ static void *shader_filter_create(obs_data_t *settings, obs_source_t *source)
 	struct shader_filter_data *filter = bzalloc(sizeof(struct shader_filter_data));
 	filter->context = source;
 	filter->reload_effect = true;
+	filter->gpu_ms = -1.0f;
+	filter->gpu_group = 1;
 
 	dstr_init(&filter->last_path);
 	dstr_copy(&filter->last_path, obs_data_get_string(settings, "shader_file_name"));
@@ -1097,6 +1119,10 @@ static void shader_filter_destroy(void *data)
 		gs_texrender_destroy(filter->previous_output_texrender);
 	if (filter->sprite_buffer)
 		gs_vertexbuffer_destroy(filter->sprite_buffer);
+	for (size_t i = 0; i < GPU_TIMER_SLOTS; i++) {
+		gs_timer_destroy(filter->gpu_slots[i].timer);
+		gs_timer_range_destroy(filter->gpu_slots[i].range);
+	}
 	obs_leave_graphics();
 
 	if (!filter->transition)
@@ -1135,6 +1161,7 @@ struct shader_entry {
 	char *label;
 	char *category;
 	size_t rank; /* category's place in library.ini; uncategorised last */
+	int cost;    /* from library.ini, see struct library_item */
 };
 
 /* A folder's library.ini: "file = Category | Display name" under [shaders]. */
@@ -1143,6 +1170,7 @@ struct library_item {
 	char *category;
 	char *name;
 	bool space; /* draws outside the image: offer "Add Space Around the Image" up front */
+	int cost;   /* rough GPU cost: 0 light, 1 medium, 2 heavy, 3 very heavy */
 };
 typedef DARRAY(struct library_item) library_t;
 
@@ -1201,9 +1229,12 @@ static void library_load(const char *dir, library_t *lib)
 		const char *bar2 = bar ? strchr(bar + 1, '|') : NULL;
 		it.name = bar ? trimmed(bar + 1, bar2 ? (size_t)(bar2 - bar - 1) : strlen(bar + 1)) : bstrdup("");
 		it.space = false;
+		it.cost = 0;
 		if (bar2) {
 			char *flags = trimmed(bar2 + 1, strlen(bar2 + 1));
 			it.space = contains_ci(flags, "space");
+			it.cost = contains_ci(flags, "very heavy") ? 3 : contains_ci(flags, "heavy") ? 2
+								   : contains_ci(flags, "medium") ? 1 : 0;
 			bfree(flags);
 		}
 		da_push_back(*lib, &it);
@@ -1472,7 +1503,7 @@ static void list_shaders(const char *dir, bool transitions, const char *search, 
 		}
 		struct shader_entry e = {path.array,
 					 it && *it->name ? bstrdup(it->name) : friendly_shader_name(path.array),
-					 bstrdup(it ? it->category : ""), rank};
+					 bstrdup(it ? it->category : ""), rank, it ? it->cost : 0};
 		da_push_back(*out, &e);
 	}
 	os_closedir(d);
@@ -1670,7 +1701,13 @@ static size_t fill_shader_list(obs_property_t *pick, obs_data_t *settings, bool 
 			dstr_free(&h);
 			last_category = c;
 		}
-		obs_property_list_add_string(pick, list.array[i].label, list.array[i].path);
+		static const char *cost_fmt[] = {"%s", "ShaderFilter.CostMedium", "ShaderFilter.CostHeavy",
+						 "ShaderFilter.CostVeryHeavy"};
+		const int cost = list.array[i].cost;
+		struct dstr label = {0};
+		dstr_printf(&label, cost > 0 && cost <= 3 ? obs_module_text(cost_fmt[cost]) : "%s", list.array[i].label);
+		obs_property_list_add_string(pick, label.array, list.array[i].path);
+		dstr_free(&label);
 		if (has_file && strcmp(list.array[i].path, file) == 0) {
 			listed = true;
 			*pos = i + 1;
@@ -1700,6 +1737,10 @@ static size_t fill_shader_list(obs_property_t *pick, obs_data_t *settings, bool 
 		dstr_printf(&help, obs_module_text("ShaderFilter.ShaderHelpFile"), file);
 	else
 		dstr_printf(&help, obs_module_text("ShaderFilter.ShaderHelpFolder"), lib);
+	if (any_category) {
+		dstr_cat(&help, "\n\n");
+		dstr_cat(&help, obs_module_text("ShaderFilter.CostHelp"));
+	}
 	obs_property_set_long_description(pick, help.array);
 	dstr_free(&help);
 	size_t n = list.num;
@@ -1893,6 +1934,158 @@ static void add_compiler_messages(obs_properties_t *props, obs_data_t *settings,
 		obs_property_text_set_info_type(w, OBS_TEXT_INFO_WARNING);
 		obs_property_set_visible(w, visible);
 	}
+}
+
+/* Presets: "<shader file name without extension>.presets.ini" next to the
+ * shader, one [section] per preset, "parameter = value" lines in it. */
+struct shader_preset {
+	char *name;
+	obs_data_t *values; /* parameter name -> value text */
+};
+typedef DARRAY(struct shader_preset) preset_list_t;
+
+static void presets_free(preset_list_t *list)
+{
+	for (size_t i = 0; i < list->num; i++) {
+		bfree(list->array[i].name);
+		obs_data_release(list->array[i].values);
+	}
+	da_free(*list);
+}
+
+static void presets_load(const char *shader_path, preset_list_t *out)
+{
+	da_init(*out);
+	if (!shader_path || !*shader_path)
+		return;
+	struct dstr path = {0};
+	dstr_copy(&path, shader_path);
+	const char *slash = strrchr(path.array, '/');
+	const char *bslash = strrchr(path.array, '\\');
+	if (bslash > slash)
+		slash = bslash;
+	char *dot = strrchr(path.array, '.');
+	if (dot && (!slash || dot > slash))
+		dstr_resize(&path, dot - path.array);
+	dstr_cat(&path, ".presets.ini");
+	char *text = os_quick_read_utf8_file(path.array);
+	dstr_free(&path);
+	if (!text)
+		return;
+	char **lines = strlist_split(text, '\n', false);
+	for (char **l = lines; l && *l; l++) {
+		const char *line = *l;
+		while (*line == ' ' || *line == '\t')
+			line++;
+		if (!*line || *line == ';' || *line == '#' || *line == '\r')
+			continue;
+		if (*line == '[') {
+			const char *end = strchr(line, ']');
+			if (!end)
+				continue;
+			struct shader_preset preset = {trimmed(line + 1, end - line - 1), obs_data_create()};
+			da_push_back(*out, &preset);
+			continue;
+		}
+		const char *eq = strchr(line, '=');
+		if (!eq || !out->num)
+			continue;
+		char *key = trimmed(line, eq - line);
+		char *value = trimmed(eq + 1, strlen(eq + 1));
+		size_t vlen = strlen(value);
+		while (vlen && (value[vlen - 1] == '\r' || value[vlen - 1] == ' '))
+			value[--vlen] = 0;
+		obs_data_set_string(out->array[out->num - 1].values, key, value);
+		bfree(key);
+		bfree(value);
+	}
+	strlist_free(lines);
+	bfree(text);
+}
+
+static struct effect_param_data *find_param(struct shader_filter_data *filter, const char *name)
+{
+	for (size_t i = 0; i < filter->stored_param_list.num; i++)
+		if (strcmp(filter->stored_param_list.array[i].name.array, name) == 0)
+			return &filter->stored_param_list.array[i];
+	return NULL;
+}
+
+static bool preset_bool(const char *v)
+{
+	return astrcmpi(v, "true") == 0 || astrcmpi(v, "yes") == 0 || atof(v) != 0.0;
+}
+
+/* Whether the filter's current values are the preset's (so the list shows it). */
+static bool preset_matches(struct shader_filter_data *filter, obs_data_t *settings, const struct shader_preset *preset)
+{
+	for (obs_data_item_t *it = obs_data_first(preset->values); it; obs_data_item_next(&it)) {
+		const char *key = obs_data_item_get_name(it);
+		const char *v = obs_data_item_get_string(it);
+		struct effect_param_data *param = find_param(filter, key);
+		bool same = true;
+		if (!param)
+			same = true;
+		else if (param->type == GS_SHADER_PARAM_FLOAT)
+			same = fabs(obs_data_get_double(settings, key) - atof(v)) < 1e-4;
+		else if (param->type == GS_SHADER_PARAM_INT)
+			same = obs_data_get_int(settings, key) == (long long)floor(atof(v) + 0.5);
+		else if (param->type == GS_SHADER_PARAM_BOOL)
+			same = obs_data_get_bool(settings, key) == preset_bool(v);
+		if (!same) {
+			obs_data_item_release(&it);
+			return false;
+		}
+	}
+	return true;
+}
+
+static void preset_apply(struct shader_filter_data *filter, obs_data_t *settings, const struct shader_preset *preset)
+{
+	for (obs_data_item_t *it = obs_data_first(preset->values); it; obs_data_item_next(&it)) {
+		const char *key = obs_data_item_get_name(it);
+		const char *v = obs_data_item_get_string(it);
+		struct effect_param_data *param = find_param(filter, key);
+		if (!param)
+			continue;
+		if (param->type == GS_SHADER_PARAM_FLOAT)
+			obs_data_set_double(settings, key, atof(v));
+		else if (param->type == GS_SHADER_PARAM_INT)
+			obs_data_set_int(settings, key, (long long)floor(atof(v) + 0.5));
+		else if (param->type == GS_SHADER_PARAM_BOOL)
+			obs_data_set_bool(settings, key, preset_bool(v));
+	}
+}
+
+/* The filter whose panel a (possibly nested) properties object belongs to. */
+static struct shader_filter_data *props_filter(obs_properties_t *props)
+{
+	for (; props; props = obs_properties_get_parent(props)) {
+		void *param = obs_properties_get_param(props);
+		if (param)
+			return param;
+	}
+	return NULL;
+}
+
+static bool shader_preset_changed(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
+{
+	UNUSED_PARAMETER(p);
+	struct shader_filter_data *filter = props_filter(props);
+	const char *name = obs_data_get_string(settings, "shader_preset");
+	if (!filter || !name || !*name || !obs_data_get_bool(settings, "from_file"))
+		return false;
+	preset_list_t presets;
+	presets_load(obs_data_get_string(settings, "shader_file_name"), &presets);
+	bool applied = false;
+	for (size_t i = 0; i < presets.num && !applied; i++) {
+		if (strcmp(presets.array[i].name, name) == 0 && !preset_matches(filter, settings, &presets.array[i])) {
+			preset_apply(filter, settings, &presets.array[i]);
+			applied = true;
+		}
+	}
+	presets_free(&presets);
+	return applied;
 }
 
 /* Whether a shader file is one of those shipped with the plugin. */
@@ -3486,6 +3679,27 @@ static obs_properties_t *shader_filter_properties(void *data)
 
 	/* ---- the shader's own settings ---- */
 	obs_properties_t *params = obs_properties_create();
+	if (filter && has_file && filter->stored_param_list.num) {
+		/* Presets first: choosing one sets the sliders below. The list shows
+		 * the preset the values match, or Custom. */
+		preset_list_t presets;
+		presets_load(file, &presets);
+		if (presets.num) {
+			obs_property_t *pl = obs_properties_add_list(params, "shader_preset", obs_module_text("ShaderFilter.Preset"),
+								     OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
+			obs_property_set_long_description(pl, obs_module_text("ShaderFilter.PresetHelp"));
+			obs_property_list_add_string(pl, obs_module_text("ShaderFilter.PresetCustom"), "");
+			const char *current = "";
+			for (size_t i = 0; i < presets.num; i++) {
+				obs_property_list_add_string(pl, presets.array[i].name, presets.array[i].name);
+				if (!*current && preset_matches(filter, settings, &presets.array[i]))
+					current = presets.array[i].name;
+			}
+			obs_data_set_string(settings, "shader_preset", current);
+			obs_property_set_modified_callback(pl, shader_preset_changed);
+		}
+		presets_free(&presets);
+	}
 	if (filter && (filter->param_audio_magnitude || filter->param_audio_peak)) {
 		obs_property_t *audio_source = obs_properties_add_list(params, "audio_source", "Audio source",
 								       OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
@@ -3750,6 +3964,35 @@ static obs_properties_t *shader_filter_properties(void *data)
 		dstr_free(&title);
 	} else {
 		obs_properties_destroy(params);
+	}
+
+	/* ---- what it costs, measured on this computer ---- */
+	if (filter && !transition && (has_file || inline_code)) {
+		struct dstr t = {0};
+		if (filter->gpu_merged) {
+			dstr_copy(&t, obs_module_text("ShaderFilter.GpuMerged"));
+		} else if (filter->gpu_ms >= 0.0f) {
+			struct obs_video_info ovi;
+			double frame_ms = 1000.0 / 60.0;
+			int fps = 60;
+			if (obs_get_video_info(&ovi) && ovi.fps_num && ovi.fps_den &&
+			    (double)ovi.fps_num / ovi.fps_den >= 1.0) {
+				frame_ms = 1000.0 * ovi.fps_den / ovi.fps_num;
+				fps = (int)((double)ovi.fps_num / ovi.fps_den + 0.5);
+			}
+			const double pct = filter->gpu_ms / frame_ms * 100.0;
+			if (filter->gpu_group > 1)
+				dstr_printf(&t, obs_module_text("ShaderFilter.GpuTimeGroup"), filter->gpu_ms, pct, fps,
+					    (int)filter->gpu_group - 1);
+			else
+				dstr_printf(&t, obs_module_text("ShaderFilter.GpuTime"), filter->gpu_ms, pct, fps);
+		} else {
+			dstr_copy(&t, obs_module_text("ShaderFilter.GpuMeasuring"));
+			filter->gpu_props_waiting = true;
+		}
+		obs_property_text_set_info_word_wrap(obs_properties_add_text(props, "gpu_time", t.array, OBS_TEXT_INFO),
+						     false);
+		dstr_free(&t);
 	}
 
 	/* ---- rarely needed ---- */
@@ -4121,9 +4364,12 @@ static void shader_filter_update(void *data, obs_data_t *settings)
 
 static void prepare_derived(struct shader_filter_data *filter);
 
+static void gpu_publish(struct shader_filter_data *filter);
+
 static void shader_filter_tick(void *data, float seconds)
 {
 	struct shader_filter_data *filter = data;
+	gpu_publish(filter);
 	obs_source_t *target = filter->transition ? filter->context : obs_filter_get_target(filter->context);
 	if (!target)
 		return;
@@ -4667,8 +4913,51 @@ static const char *out_form_technique(enum out_form form)
 	return form == OUT_LINKED ? "DrawLinked" : form == OUT_PREMUL ? "DrawPremul" : "Draw";
 }
 
+/* Read a finished query into the running average; false if not ready yet. */
+static bool gpu_timer_collect(struct shader_filter_data *filter, struct gpu_timer_slot *slot)
+{
+	bool disjoint = false;
+	uint64_t frequency = 0, ticks = 0;
+	if (!gs_timer_range_get_data(slot->range, &disjoint, &frequency) || !gs_timer_get_data(slot->timer, &ticks))
+		return false;
+	slot->pending = false;
+	if (!disjoint && frequency) {
+		filter->gpu_sum_ms += (double)ticks * 1000.0 / (double)frequency;
+		filter->gpu_samples++;
+	}
+	return true;
+}
+
+static struct gpu_timer_slot *gpu_timer_begin(struct shader_filter_data *filter)
+{
+	struct gpu_timer_slot *slot = &filter->gpu_slots[filter->gpu_slot];
+	if (!slot->timer) {
+		slot->timer = gs_timer_create();
+		slot->range = gs_timer_range_create();
+	}
+	if (!slot->timer || (slot->pending && !gpu_timer_collect(filter, slot)))
+		return NULL;
+	gs_timer_range_begin(slot->range);
+	gs_timer_begin(slot->timer);
+	return slot;
+}
+
+static void gpu_timer_end(struct shader_filter_data *filter, struct gpu_timer_slot *slot)
+{
+	if (!slot)
+		return;
+	gs_timer_end(slot->timer);
+	gs_timer_range_end(slot->range);
+	slot->pending = true;
+	filter->gpu_slot = (filter->gpu_slot + 1) % GPU_TIMER_SLOTS;
+}
+
 static void draw_shader(struct shader_filter_data *filter, gs_effect_t *effect, gs_texture_t *texture, enum out_form form)
 {
+	/* This is the filter's own pass (with any filters merged into it); the
+	 * passes of filters before it happen before this, so aren't counted. */
+	struct gpu_timer_slot *timing = gpu_timer_begin(filter);
+
 	gs_blend_state_push();
 	gs_reset_blend_state();
 	gs_enable_blending(false);
@@ -4696,6 +4985,7 @@ static void draw_shader(struct shader_filter_data *filter, gs_effect_t *effect, 
 	}
 
 	gs_blend_state_pop();
+	gpu_timer_end(filter, timing);
 }
 
 static void render_shader(struct shader_filter_data *filter, gs_texture_t *texture, float f, obs_source_t *filter_to,
@@ -5091,6 +5381,52 @@ enum downstream_use {
 	DOWN_FUSED,  /* one compiles us into its own pass */
 };
 
+static enum downstream_use downstream_use(struct shader_filter_data *filter);
+
+/* Once a second (on the graphics thread): the average GPU time of the
+ * filter's own pass, and how it is drawn, for its settings panel. */
+static void gpu_publish(struct shader_filter_data *filter)
+{
+	const uint64_t now = os_gettime_ns();
+	if (!filter->gpu_window_start) {
+		filter->gpu_window_start = now;
+		return;
+	}
+	if (now - filter->gpu_window_start < 1000000000ULL)
+		return;
+	filter->gpu_window_start = now;
+	filter->gpu_ms = filter->gpu_samples ? (float)(filter->gpu_sum_ms / filter->gpu_samples) : -1.0f;
+	filter->gpu_sum_ms = 0.0;
+	filter->gpu_samples = 0;
+
+	filter->gpu_merged = false;
+	filter->gpu_group = 1;
+	if (!filter->transition) {
+		filter->gpu_merged = downstream_use(filter) == DOWN_FUSED;
+		if (filter->shader_body) {
+			struct shader_filter_data *stages[SF_MAX_FUSED];
+			obs_source_t *refs[SF_MAX_FUSED];
+			stages[0] = filter;
+			refs[0] = NULL;
+			size_t n = collect_fusion_group(filter, stages, refs, true);
+			if (n >= 2) {
+				struct derived_effect *de = find_derived(filter, stages, n);
+				if (de && !de->failed)
+					filter->gpu_group = (uint32_t)n;
+			}
+			release_refs(refs, n);
+		}
+	}
+
+	/* A panel built before there was a figure is rebuilt once to show it
+	 * (as a refresh, so the browsing tools stay as they are). */
+	if (filter->gpu_props_waiting && (filter->gpu_ms >= 0.0f || filter->gpu_merged)) {
+		filter->gpu_props_waiting = false;
+		filter->props_refresh_until = now + 1000000000ULL;
+		obs_source_update_properties(filter->context);
+	}
+}
+
 static enum downstream_use downstream_use(struct shader_filter_data *filter)
 {
 	obs_source_t *parent = obs_filter_get_parent(filter->context);
@@ -5423,6 +5759,8 @@ static void *shader_transition_create(obs_data_t *settings, obs_source_t *source
 	struct shader_filter_data *filter = bzalloc(sizeof(struct shader_filter_data));
 	filter->context = source;
 	filter->reload_effect = true;
+	filter->gpu_ms = -1.0f;
+	filter->gpu_group = 1;
 	filter->transition = true;
 
 	dstr_init(&filter->last_path);

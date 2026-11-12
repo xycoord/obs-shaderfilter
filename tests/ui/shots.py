@@ -50,6 +50,11 @@ def shots():
                                          {"filter": 0, "property": "browse_shaders", "value": True},
                                          {"filter": 0, "property": "shader_category", "value": "Blur & Glow"}],
          "select": 0, "panel": True, "open_combo": 0},
+        # Film Grain with a preset chosen: the presets list, and the measured
+        # GPU time.
+        {"name": "8_preset", "filters": [{"settings": {}}],
+         "ui": pick(0, "film_grain.shader") + [{"filter": 0, "property": "shader_preset", "value": "16mm"}],
+         "select": 0, "panel": True},
         # A filter saved by an older version with code typed into it.
         {"name": "6_legacy_inline_code", "filters": [{"settings": {"shader_text": INLINE}}], "select": 0,
          "panel": True},

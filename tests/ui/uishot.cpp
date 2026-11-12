@@ -252,10 +252,17 @@ int main(int argc, char **argv)
 			}
 		}
 
-		/* A second passes before the screenshot, as between setting a
-		 * filter up and coming back to it. */
-		for (int t = 0; t < 60; t++) {
+		/* A few seconds pass before the screenshot, as between setting a
+		 * filter up and coming back to it, with the source on screen (so
+		 * the filters' GPU time has been measured). */
+		for (int t = 0; t < 125; t++) {
 			env_tick(1.0f / 60.0f);
+			if (t % 4 == 0) {
+				uint8_t *px = nullptr;
+				uint32_t pw, ph;
+				if (env_render(source, &px, &pw, &ph))
+					bfree(px);
+			}
 			QThread::msleep(20);
 		}
 

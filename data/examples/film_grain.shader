@@ -73,6 +73,22 @@ float3 grain_at(float2 cell, float seed)
     return (sum - 1.5) * 2.0;
 }
 
+// One layer of grain at grid position p: the four nearest centres blended
+// smoothly, keeping the spread the same everywhere (a plain blend would be
+// weaker between centres than on them).
+float3 grain_layer(float2 p, float seed)
+{
+    float2 cell = floor(p);
+    float2 f = p - cell;
+    float2 u = f * f * (3.0 - 2.0 * f);
+    float4 w = float4((1.0 - u.x) * (1.0 - u.y), u.x * (1.0 - u.y), (1.0 - u.x) * u.y, u.x * u.y);
+    float3 n = w.x * grain_at(cell, seed)
+             + w.y * grain_at(cell + float2(1.0, 0.0), seed)
+             + w.z * grain_at(cell + float2(0.0, 1.0), seed)
+             + w.w * grain_at(cell + float2(1.0, 1.0), seed);
+    return n / sqrt(dot(w, w));
+}
+
 float4 mainImage(VertData v_in) : TARGET
 {
     float4 c = image.Sample(textureSampler, v_in.uv);
@@ -87,20 +103,11 @@ float4 mainImage(VertData v_in) : TARGET
     float fine = min(cell_px, 1.0);
     cell_px = max(cell_px, 1.0);
 
-    // Grain centres sit every cell_px pixels; at 1, one per pixel.
+    // Grain centres sit every cell_px pixels; at 1, one per pixel. Two layers
+    // on grids turned against each other, so large grain has no visible grid.
     float2 p = (v_in.uv * uv_size - 0.5) / cell_px;
-    float2 cell = floor(p);
-    float2 f = p - cell;
-    float2 u = f * f * (3.0 - 2.0 * f);
-
-    // Blend the four nearest centres, keeping the spread the same everywhere
-    // (a plain blend would be weaker between centres than on them).
-    float4 w = float4((1.0 - u.x) * (1.0 - u.y), u.x * (1.0 - u.y), (1.0 - u.x) * u.y, u.x * u.y);
-    float3 n = w.x * grain_at(cell, seed)
-             + w.y * grain_at(cell + float2(1.0, 0.0), seed)
-             + w.z * grain_at(cell + float2(0.0, 1.0), seed)
-             + w.w * grain_at(cell + float2(1.0, 1.0), seed);
-    n /= sqrt(dot(w, w));
+    float2 q = float2(0.8660 * p.x - 0.5 * p.y, 0.5 * p.x + 0.8660 * p.y) + 0.37;
+    float3 n = (grain_layer(p, seed) + grain_layer(q, seed + 101.0)) * 0.70711;
 
     // Black-and-white grain uses the first channel's noise for all three.
     float3 grain = lerp(n.xxx, n, Color_Amount * 0.01);
