@@ -17,6 +17,7 @@ uniform float Luminosity<
 > = 0.5; //<Range(0.0, 1.0)>
 uniform float Spread<
     string label = "Spread";
+    string tooltip = "How wide each color band is. The shader limits it to between 0.25 and 10.";
     string widget_type = "slider";
     float minimum = 0.5;
     float maximum = 10.0;
@@ -49,9 +50,6 @@ uniform bool Apply_To_Image;
 uniform bool Replace_Image_Color;
 uniform bool Apply_To_Specific_Color;
 uniform float4 Color_To_Replace;
-uniform string Notes<
-    string widget_type = "info";
-> = "Spread is wideness of color and is limited between .25 and 10. Edit at your own risk";
 
 float hueToRGB(float v1, float v2, float vH) {
 	vH = frac(vH);

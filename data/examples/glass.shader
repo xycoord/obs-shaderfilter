@@ -3,6 +3,7 @@
 //Converted to OpenGl by Q-mii & Exeldro February 25, 2022
 uniform float Alpha_Percent<
     string label = "Alpha Percent";
+    string tooltip = "Opacity of the glass overlay.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 100.0;
@@ -10,6 +11,7 @@ uniform float Alpha_Percent<
 > = 100.0;
 uniform float Offset_Amount<
     string label = "Offset Amount";
+    string tooltip = "Changes the glass look by setting how far the image behind it is shifted.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 10.0;
@@ -17,6 +19,7 @@ uniform float Offset_Amount<
 > = 0.8;
 uniform int xSize<
     string label = "x Size";
+    string tooltip = "Horizontal size of the glass distortion.";
     string widget_type = "slider";
     int minimum = 1;
     int maximum = 100;
@@ -24,6 +27,7 @@ uniform int xSize<
 > = 8;
 uniform int ySize<
     string label = "y Size";
+    string tooltip = "Vertical size of the glass distortion.";
     string widget_type = "slider";
     int minimum = 1;
     int maximum = 100;
@@ -31,6 +35,7 @@ uniform int ySize<
 > = 8;
 uniform int Reflection_Offset<
     string label = "Reflection Offset";
+    string tooltip = "Changes the glass look by setting how far the reflection is shifted.";
     string widget_type = "slider";
     int minimum = 0;
     int maximum = 100;
@@ -46,9 +51,6 @@ uniform float Border_Offset<
 > = 0.5;
 uniform float4 Border_Color = {.8,.5,1.0,1.0};
 uniform float4 Glass_Color;
-uniform string notes<
-    string widget_type = "info";
-> = "xSize, ySize are for distortion. Offset Amount and Reflection Offset change glass properties. Alpha is Opacity of overlay.";
 
 float mod(float a, float b){
 	float d = a / b;

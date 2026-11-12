@@ -1,6 +1,7 @@
 //Converted to OpenGL by Exeldro February 21, 2022
 uniform int glow_percent<
     string label = "Glow percent";
+    string tooltip = "How much brightness the glow adds (0-100 recommended).";
     string widget_type = "slider";
     int minimum = 0;
     int maximum = 100;
@@ -8,6 +9,7 @@ uniform int glow_percent<
 > = 10;
 uniform int blur<
     string label = "Blur";
+    string tooltip = "How far the glow extends (1-4 recommended).";
     string widget_type = "slider";
     int minimum = 0;
     int maximum = 100;
@@ -15,6 +17,7 @@ uniform int blur<
 > = 1;
 uniform int min_brightness<
     string label = "Min brightness";
+    string tooltip = "Lowest brightness level that will glow.";
     string widget_type = "slider";
     int minimum = 0;
     int maximum = 100;
@@ -22,6 +25,7 @@ uniform int min_brightness<
 > = 27;
 uniform int max_brightness<
     string label = "Max brightness";
+    string tooltip = "Highest brightness level that will glow.";
     string widget_type = "slider";
     int minimum = 0;
     int maximum = 100;
@@ -29,15 +33,15 @@ uniform int max_brightness<
 > = 100;
 uniform int pulse_speed<
     string label = "Pulse speed";
+    string tooltip = "Speed of the glow pulse animation, from 0 to 100.";
     string widget_type = "slider";
     int minimum = 0;
     int maximum = 100;
     int step = 1;
 > = 0;
-uniform bool ease;
-uniform string notes<
-    string widget_type = "info";
-> = "'ease' - makes the animation pause at the begin and end for a moment,'glow_percent' - how much brightness to add (recommend 0-100). 'blur' - how far should the glow extend (recommend 1-4).'pulse_speed' - (0-100). 'min/max brightness' - floor and ceiling brightness level to target for glows.";
+uniform bool ease<
+    string tooltip = "Makes the animation pause for a moment at the start and end of each pulse.";
+>;
 
 
 float EaseInOutCircTimer(float t,float b,float c,float d){
