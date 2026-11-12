@@ -84,8 +84,9 @@ Add the filter to any source through "Filters" when right-clicking it; it is cal
   Choosing one applies it straight away and names the filter after it ("Glow", "Glow 2"…), so a stack of
   shader filters can be told apart; a name you typed yourself is never changed. A filter whose shader fails
   shows "⚠" before its name until it works again.
-- **Browse Shaders** shows Category and Search, to narrow the list, and Next/Previous Shader, to try the
-  shaders one after another while watching the preview.
+- After choosing a shader, **↑/↓ on the Shader list** applies the next or previous one, so you can step
+  through shaders while watching the preview. **Browse Shaders** shows Category and Search, to narrow the
+  list (and so what ↑/↓ steps through), with the shader's place in it ("Shader 8 of 11 in Blur & Glow").
 - The shader's parameters follow, in a "*Shader* Settings" group.
 - **Show Advanced Options** holds the rest: "Add Space Around the Image" (extra pixels on each side, for
   effects such as shadows that draw outside the source; shown next to the settings of shaders that need it),

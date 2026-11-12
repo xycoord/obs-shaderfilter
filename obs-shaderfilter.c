@@ -1732,22 +1732,20 @@ static void update_browse_status(obs_properties_t *props, obs_data_t *settings, 
 			dstr_catf(&text, obs_module_text("ShaderFilter.BrowseIn"), category);
 		if (search && *search)
 			dstr_catf(&text, obs_module_text("ShaderFilter.BrowseMatching"), search);
-		if (!pos) {
+		if (pos) {
+			dstr_cat(&text, obs_module_text("ShaderFilter.ArrowTip"));
+		} else {
 			const char *file = obs_data_get_string(settings, "shader_file_name");
 			if (obs_data_get_bool(settings, "from_file") && file && *file) {
 				char *name = shader_display_name(file);
 				dstr_catf(&text, obs_module_text("ShaderFilter.BrowseNotAmong"), name);
 				bfree(name);
-			} else {
-				dstr_cat(&text, obs_module_text("ShaderFilter.BrowseNoneChosen"));
 			}
 		}
 	}
 	obs_property_set_description(status, text.array);
 	obs_property_text_set_info_type(status, n == 0 ? OBS_TEXT_INFO_WARNING : OBS_TEXT_INFO_NORMAL);
 	obs_property_set_visible(status, obs_data_get_bool(settings, "browse_shaders"));
-	obs_property_set_enabled(obs_properties_get(props, "next_shader"), n > 0);
-	obs_property_set_enabled(obs_properties_get(props, "previous_shader"), n > 0);
 	dstr_free(&text);
 }
 
@@ -1773,7 +1771,7 @@ static bool browse_shaders_changed(obs_properties_t *props, obs_property_t *p, o
 		bf->browse_kept = show;
 		bf->browse_shown = show;
 	}
-	const char *keys[] = {"shader_category", "shader_search", "next_shader", "previous_shader", "browse_status"};
+	const char *keys[] = {"shader_category", "shader_search", "browse_status"};
 	for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
 		obs_property_t *q = obs_properties_get(props, keys[i]);
 		if (q)
@@ -1823,46 +1821,6 @@ static bool shader_filter_file_name_changed(obs_properties_t *props, obs_propert
 		return true;
 	}
 	return false;
-}
-
-static bool step_shader(struct shader_filter_data *filter, int dir)
-{
-	obs_data_t *settings = obs_source_get_settings(filter->context);
-	char *lib = library_dir(settings);
-	shader_list_t list;
-	const bool narrow = obs_data_get_bool(settings, "browse_shaders");
-	list_shaders(lib, filter->transition, narrow ? obs_data_get_string(settings, "shader_search") : "",
-		     narrow ? obs_data_get_string(settings, "shader_category") : "", &list);
-	bfree(lib);
-	if (list.num) {
-		const char *cur = obs_data_get_bool(settings, "from_file") ? obs_data_get_string(settings, "shader_file_name")
-									  : "";
-		long idx = -1;
-		for (size_t i = 0; i < list.num; i++)
-			if (strcmp(list.array[i].path, cur) == 0)
-				idx = (long)i;
-		long n = (long)list.num;
-		idx = idx < 0 ? (dir > 0 ? 0 : n - 1) : ((idx + dir) % n + n) % n;
-		choose_shader_file(filter, settings, list.array[idx].path);
-		obs_source_update(filter->context, NULL);
-	}
-	free_shader_list(&list);
-	obs_data_release(settings);
-	return true;
-}
-
-static bool next_shader_clicked(obs_properties_t *props, obs_property_t *property, void *data)
-{
-	UNUSED_PARAMETER(props);
-	UNUSED_PARAMETER(property);
-	return step_shader(data, 1);
-}
-
-static bool previous_shader_clicked(obs_properties_t *props, obs_property_t *property, void *data)
-{
-	UNUSED_PARAMETER(props);
-	UNUSED_PARAMETER(property);
-	return step_shader(data, -1);
 }
 
 static bool rename_after_shader_clicked(obs_properties_t *props, obs_property_t *property, void *data)
@@ -3482,12 +3440,10 @@ static obs_properties_t *shader_filter_properties(void *data)
 
 	/* The browsing tools show on a filter with no shader yet. Once a filter
 	 * has a shader they start hidden each time its settings are opened,
-	 * unless the person opened them on this filter themselves, or its
-	 * shader fails (so another is a click away). */
+	 * unless the person opened them on this filter themselves. */
 	const bool refreshing = filter && os_gettime_ns() < filter->props_refresh_until;
-	const bool failing = error_message && *error_message;
 	if (has_file || inline_code) {
-		if (!refreshing && !(filter && filter->browse_kept) && !failing)
+		if (!refreshing && !(filter && filter->browse_kept))
 			obs_data_set_bool(settings, "browse_shaders", false);
 	} else if (!obs_data_has_user_value(settings, "browse_shaders")) {
 		obs_data_set_bool(settings, "browse_shaders", true);
@@ -3525,15 +3481,9 @@ static obs_properties_t *shader_filter_properties(void *data)
 	obs_property_set_modified_callback(search, shader_search_changed);
 	obs_property_set_visible(search, browsing);
 
-	/* What to step through, where we are in it, then the steps. */
-	obs_property_t *next = obs_properties_add_button2(props, "next_shader", obs_module_text("ShaderFilter.NextShader"),
-							  next_shader_clicked, data);
-	obs_property_set_visible(next, browsing);
-	obs_property_t *prev = obs_properties_add_button2(props, "previous_shader",
-							  obs_module_text("ShaderFilter.PreviousShader"), previous_shader_clicked,
-							  data);
-	obs_property_set_visible(prev, browsing);
-	obs_properties_add_text(props, "browse_status", "", OBS_TEXT_INFO);
+	/* Where the shader is in the (narrowed) list, and how to step through it:
+	 * the arrow keys on the Shader list apply the next or previous entry. */
+	obs_property_text_set_info_word_wrap(obs_properties_add_text(props, "browse_status", "", OBS_TEXT_INFO), false);
 
 
 	size_t pos;
