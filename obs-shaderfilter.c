@@ -676,7 +676,7 @@ static void load_sprite_buffer(struct shader_filter_data *filter)
 	filter->sprite_buffer = gs_vertexbuffer_create(vbd, GS_DYNAMIC);
 }
 
-static char *friendly_shader_name(const char *path);
+static char *shader_display_name(const char *path);
 
 /* What the panel shows when the shader can't be used: a plain first line, then
  * the compiler's messages without the effect parser's "(null) (line, col): "
@@ -684,7 +684,7 @@ static char *friendly_shader_name(const char *path);
 static void set_error_message(obs_data_t *settings, const char *plain_fmt, const char *file, const char *details)
 {
 	struct dstr msg = {0}, errs = {0}, warns = {0};
-	char *name = file && *file ? friendly_shader_name(file) : bstrdup(obs_module_text("ShaderFilter.ThisShader"));
+	char *name = file && *file ? shader_display_name(file) : bstrdup(obs_module_text("ShaderFilter.ThisShader"));
 	dstr_printf(&msg, plain_fmt, name);
 	bfree(name);
 	if (file && *file) {
@@ -709,12 +709,36 @@ static void set_error_message(obs_data_t *settings, const char *plain_fmt, const
 		}
 		strlist_free(lines);
 	}
+	if (errs.len) {
+		const char *nl = strchr(errs.array, '\n');
+		dstr_cat(&msg, "\n");
+		dstr_ncat(&msg, errs.array, nl ? (size_t)(nl - errs.array) : errs.len);
+	}
 	obs_data_set_string(settings, "error_message", msg.array);
 	obs_data_set_string(settings, "error_details", errs.array ? errs.array : "");
 	obs_data_set_string(settings, "warning_details", warns.array ? warns.array : "");
 	dstr_free(&msg);
 	dstr_free(&errs);
 	dstr_free(&warns);
+}
+
+/* While its shader fails, a filter the plugin named shows it in the filter
+ * list ("Glow (error)"); names the person typed are left alone. */
+static void mark_error_in_name(struct shader_filter_data *filter, obs_data_t *settings, bool failed)
+{
+	if (filter->transition)
+		return;
+	const char *auto_name = obs_data_get_string(settings, "auto_name");
+	if (!auto_name || !*auto_name)
+		return;
+	const char *cur = obs_source_get_name(filter->context);
+	struct dstr marked = {0};
+	dstr_printf(&marked, obs_module_text("ShaderFilter.ErrorName"), auto_name);
+	if (failed && strcmp(cur, auto_name) == 0)
+		obs_source_set_name(filter->context, marked.array);
+	else if (!failed && strcmp(cur, marked.array) == 0)
+		obs_source_set_name(filter->context, auto_name);
+	dstr_free(&marked);
 }
 
 static void shader_filter_reload_effect(struct shader_filter_data *filter)
@@ -756,7 +780,10 @@ static void shader_filter_reload_effect(struct shader_filter_data *filter)
 		shader_text = load_shader_from_file(file_name);
 		if (!shader_text) {
 			obs_data_set_string(settings, "last_error", obs_module_text("ShaderFilter.FileLoadFailed"));
-			set_error_message(settings, obs_module_text("ShaderFilter.CantRead"), file_name, file_name);
+			set_error_message(settings,
+					  obs_module_text(os_file_exists(file_name) ? "ShaderFilter.CantRead"
+										    : "ShaderFilter.CantFind"),
+					  file_name, NULL);
 			goto end;
 		}
 	} else {
@@ -976,6 +1003,7 @@ static void shader_filter_reload_effect(struct shader_filter_data *filter)
 	}
 
 end:
+	mark_error_in_name(filter, settings, obs_data_has_user_value(settings, "error_message"));
 	obs_data_release(settings);
 }
 
@@ -1065,7 +1093,117 @@ static void shader_filter_destroy(void *data)
 struct shader_entry {
 	char *path;
 	char *label;
+	char *category;
 };
+
+/* A folder's library.ini: "file = Category | Display name" under [shaders]. */
+struct library_item {
+	char *stem;
+	char *category;
+	char *name;
+};
+typedef DARRAY(struct library_item) library_t;
+
+static void library_free(library_t *lib)
+{
+	for (size_t i = 0; i < lib->num; i++) {
+		bfree(lib->array[i].stem);
+		bfree(lib->array[i].category);
+		bfree(lib->array[i].name);
+	}
+	da_free(*lib);
+}
+
+static char *trimmed(const char *s, size_t len)
+{
+	while (len && (*s == ' ' || *s == '\t')) {
+		s++;
+		len--;
+	}
+	while (len && (s[len - 1] == ' ' || s[len - 1] == '\t' || s[len - 1] == '\r'))
+		len--;
+	return bstrdup_n(s, len);
+}
+
+static void library_load(const char *dir, library_t *lib)
+{
+	da_init(*lib);
+	struct dstr path = {0};
+	dstr_printf(&path, "%s/library.ini", dir);
+	char *text = os_quick_read_utf8_file(path.array);
+	dstr_free(&path);
+	if (!text)
+		return;
+	bool in_shaders = false;
+	char **lines = strlist_split(text, '\n', false);
+	for (char **l = lines; l && *l; l++) {
+		const char *line = *l;
+		while (*line == ' ' || *line == '\t')
+			line++;
+		if (*line == ';' || *line == '#' || !*line)
+			continue;
+		if (*line == '[') {
+			in_shaders = astrcmpi_n(line, "[shaders]", 9) == 0;
+			continue;
+		}
+		const char *eq = strchr(line, '=');
+		if (!in_shaders || !eq)
+			continue;
+		const char *val = eq + 1;
+		const char *bar = strchr(val, '|');
+		struct library_item it;
+		it.stem = trimmed(line, eq - line);
+		it.category = trimmed(val, bar ? (size_t)(bar - val) : strlen(val));
+		it.name = bar ? trimmed(bar + 1, strlen(bar + 1)) : bstrdup("");
+		da_push_back(*lib, &it);
+	}
+	strlist_free(lines);
+	bfree(text);
+}
+
+static const struct library_item *library_find(const library_t *lib, const char *path)
+{
+	const char *base = strrchr(path, '/');
+	const char *base2 = strrchr(path, '\\');
+	if (base2 > base)
+		base = base2;
+	base = base ? base + 1 : path;
+	const char *dot = strrchr(base, '.');
+	size_t len = dot ? (size_t)(dot - base) : strlen(base);
+	for (size_t i = 0; i < lib->num; i++)
+		if (strlen(lib->array[i].stem) == len && astrcmpi_n(lib->array[i].stem, base, len) == 0)
+			return &lib->array[i];
+	return NULL;
+}
+
+static char *parent_dir(const char *path)
+{
+	struct dstr d = {0};
+	dstr_copy(&d, path);
+	char *slash = strrchr(d.array, '/');
+	char *bslash = strrchr(d.array, '\\');
+	if (bslash > slash)
+		slash = bslash;
+	if (slash)
+		dstr_resize(&d, slash - d.array);
+	return d.array;
+}
+
+static char *friendly_shader_name(const char *path);
+
+/* The name shown for a shader file: its library.ini name, else one made from
+ * the file name. */
+static char *shader_display_name(const char *path)
+{
+	char *dir = parent_dir(path);
+	library_t lib;
+	library_load(dir, &lib);
+	bfree(dir);
+	const struct library_item *it = library_find(&lib, path);
+	char *name = it && *it->name ? bstrdup(it->name) : friendly_shader_name(path);
+	library_free(&lib);
+	return name;
+}
 
 typedef DARRAY(struct shader_entry) shader_list_t;
 
@@ -1208,6 +1346,7 @@ static void free_shader_list(shader_list_t *list)
 	for (size_t i = 0; i < list->num; i++) {
 		bfree(list->array[i].path);
 		bfree(list->array[i].label);
+		bfree(list->array[i].category);
 	}
 	da_free(*list);
 }
@@ -1223,15 +1362,21 @@ static bool contains_ci(const char *haystack, const char *needle)
 	return false;
 }
 
-/* The shaders in `dir` for a filter or a transition, by name, matching
- * `search` (if any). Starting points (templates, examples) are left out, and
- * an .effect with a .shader of the same name is listed once, as the .shader. */
-static void list_shaders(const char *dir, bool transitions, const char *search, shader_list_t *out)
+/* The shaders in `dir` for a filter or a transition, by name, in `category`
+ * (if any) and matching `search` (if any, against name and category).
+ * Starting points (templates, examples) are left out, and an .effect with a
+ * .shader of the same name is listed once, as the .shader. */
+static void list_shaders(const char *dir, bool transitions, const char *search, const char *category,
+			 shader_list_t *out)
 {
 	da_init(*out);
+	library_t lib;
+	library_load(dir, &lib);
 	os_dir_t *d = os_opendir(dir);
-	if (!d)
+	if (!d) {
+		library_free(&lib);
 		return;
+	}
 	struct os_dirent *ent;
 	while ((ent = os_readdir(d)) != NULL) {
 		if (ent->directory)
@@ -1258,13 +1403,17 @@ static void list_shaders(const char *dir, bool transitions, const char *search, 
 			dstr_free(&path);
 			continue;
 		}
-		struct shader_entry e = {path.array, friendly_shader_name(path.array)};
+		const struct library_item *it = library_find(&lib, path.array);
+		struct shader_entry e = {path.array,
+					 it && *it->name ? bstrdup(it->name) : friendly_shader_name(path.array),
+					 bstrdup(it ? it->category : "")};
 		da_push_back(*out, &e);
 	}
 	os_closedir(d);
+	library_free(&lib);
 	qsort(out->array, out->num, sizeof(struct shader_entry), cmp_entry);
 
-	/* Same name twice (corner-pin / corner_pin): add the file name. */
+	/* Same name twice: add the file name. */
 	for (size_t i = 0; i + 1 < out->num; i++) {
 		if (astrcmpi(out->array[i].label, out->array[i + 1].label) != 0)
 			continue;
@@ -1284,19 +1433,40 @@ static void list_shaders(const char *dir, bool transitions, const char *search, 
 			out->array[i].label = l.array;
 		}
 	}
-	/* Filter last, so a search for "corner" still disambiguates. */
-	if (search && *search) {
-		size_t w = 0;
-		for (size_t i = 0; i < out->num; i++) {
-			if (contains_ci(out->array[i].label, search)) {
-				out->array[w++] = out->array[i];
-			} else {
-				bfree(out->array[i].path);
-				bfree(out->array[i].label);
-			}
+	size_t w = 0;
+	for (size_t i = 0; i < out->num; i++) {
+		struct shader_entry *e = &out->array[i];
+		bool keep = (!category || !*category || astrcmpi(e->category, category) == 0) &&
+			    (contains_ci(e->label, search) || (*e->category && contains_ci(e->category, search)));
+		if (keep) {
+			out->array[w++] = *e;
+		} else {
+			bfree(e->path);
+			bfree(e->label);
+			bfree(e->category);
 		}
-		out->num = w;
 	}
+	out->num = w;
+}
+
+typedef DARRAY(char *) category_list_t;
+
+/* The categories used in a folder's library.ini, in file order. */
+static void library_categories(const char *dir, category_list_t *out)
+{
+	library_t lib;
+	library_load(dir, &lib);
+	for (size_t i = 0; i < lib.num; i++) {
+		const char *c = lib.array[i].category;
+		bool seen = !*c;
+		for (size_t k = 0; k < out->num && !seen; k++)
+			seen = astrcmpi(out->array[k], c) == 0;
+		if (!seen) {
+			char *copy = bstrdup(c);
+			da_push_back(*out, &copy);
+		}
+	}
+	library_free(&lib);
 }
 
 /* The folder whose shaders the list offers. */
@@ -1344,7 +1514,7 @@ static bool is_default_filter_name(const char *name)
 /* The name the filter would get for its shader, unique among its siblings. */
 static char *auto_filter_name(struct shader_filter_data *filter, const char *path)
 {
-	char *base = friendly_shader_name(path);
+	char *base = shader_display_name(path);
 	struct dstr name = {0};
 	dstr_copy(&name, base);
 	obs_source_t *parent = obs_filter_get_parent(filter->context);
@@ -1368,7 +1538,11 @@ static void auto_name_filter(struct shader_filter_data *filter, obs_data_t *sett
 		return;
 	const char *cur = obs_source_get_name(filter->context);
 	const char *last = obs_data_get_string(settings, "auto_name");
-	if (!force && !is_default_filter_name(cur) && strcmp(cur, last) != 0)
+	struct dstr marked = {0};
+	dstr_printf(&marked, obs_module_text("ShaderFilter.ErrorName"), last);
+	const bool automatic = is_default_filter_name(cur) || strcmp(cur, last) == 0 || (*last && strcmp(cur, marked.array) == 0);
+	dstr_free(&marked);
+	if (!force && !automatic)
 		return;
 	char *name = auto_filter_name(filter, path);
 	if (strcmp(cur, name) != 0)
@@ -1408,7 +1582,8 @@ static size_t fill_shader_list(obs_property_t *pick, obs_data_t *settings, bool 
 
 	char *lib = library_dir(settings);
 	shader_list_t list;
-	list_shaders(lib, transition, obs_data_get_string(settings, "shader_search"), &list);
+	list_shaders(lib, transition, obs_data_get_string(settings, "shader_search"),
+		     obs_data_get_string(settings, "shader_category"), &list);
 	bool listed = false;
 	for (size_t i = 0; i < list.num; i++) {
 		obs_property_list_add_string(pick, list.array[i].label, list.array[i].path);
@@ -1416,7 +1591,7 @@ static size_t fill_shader_list(obs_property_t *pick, obs_data_t *settings, bool 
 	}
 	if (has_file && !listed) {
 		/* The current shader always appears, even when filtered out. */
-		char *name = friendly_shader_name(file);
+		char *name = shader_display_name(file);
 		struct dstr label = {0};
 		dstr_printf(&label, os_file_exists(file) ? "%s" : obs_module_text("ShaderFilter.Missing"), name);
 		obs_property_list_insert_string(pick, has_code ? 3 : 2, label.array, file);
@@ -1436,6 +1611,26 @@ static size_t fill_shader_list(obs_property_t *pick, obs_data_t *settings, bool 
 	return n;
 }
 
+/* "12 shaders match ..." while narrowing the list; hidden otherwise. */
+static void update_browse_status(obs_properties_t *props, obs_data_t *settings, size_t n)
+{
+	obs_property_t *status = obs_properties_get(props, "browse_status");
+	if (!status)
+		return;
+	const char *search = obs_data_get_string(settings, "shader_search");
+	const char *category = obs_data_get_string(settings, "shader_category");
+	const bool narrowed = (search && *search) || (category && *category);
+	struct dstr text = {0};
+	if (n == 0)
+		dstr_copy(&text, obs_module_text("ShaderFilter.BrowseNone"));
+	else
+		dstr_printf(&text, obs_module_text(n == 1 ? "ShaderFilter.BrowseOne" : "ShaderFilter.BrowseMany"), (int)n);
+	obs_property_set_description(status, text.array);
+	obs_property_text_set_info_type(status, n == 0 ? OBS_TEXT_INFO_WARNING : OBS_TEXT_INFO_NORMAL);
+	obs_property_set_visible(status, narrowed && obs_data_get_bool(settings, "browse_shaders"));
+	dstr_free(&text);
+}
+
 static bool shader_search_changed(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
 {
 	UNUSED_PARAMETER(p);
@@ -1444,10 +1639,21 @@ static bool shader_search_changed(obs_properties_t *props, obs_property_t *p, ob
 	if (!filter || !pick)
 		return false;
 	size_t n = fill_shader_list(pick, settings, filter->transition);
-	obs_property_t *none = obs_properties_get(props, "search_none");
-	if (none)
-		obs_property_set_visible(none, n == 0);
+	update_browse_status(props, settings, n);
 	return true;
+}
+
+static bool browse_shaders_changed(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
+{
+	UNUSED_PARAMETER(p);
+	bool show = obs_data_get_bool(settings, "browse_shaders");
+	const char *keys[] = {"shader_category", "shader_search", "next_shader", "previous_shader"};
+	for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+		obs_property_t *q = obs_properties_get(props, keys[i]);
+		if (q)
+			obs_property_set_visible(q, show);
+	}
+	return shader_search_changed(props, p, settings);
 }
 
 static bool shader_pick_changed(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
@@ -1496,7 +1702,8 @@ static bool step_shader(struct shader_filter_data *filter, int dir)
 	obs_data_t *settings = obs_source_get_settings(filter->context);
 	char *lib = library_dir(settings);
 	shader_list_t list;
-	list_shaders(lib, filter->transition, obs_data_get_string(settings, "shader_search"), &list);
+	list_shaders(lib, filter->transition, obs_data_get_string(settings, "shader_search"),
+		     obs_data_get_string(settings, "shader_category"), &list);
 	bfree(lib);
 	if (list.num) {
 		const char *cur = obs_data_get_bool(settings, "from_file") ? obs_data_get_string(settings, "shader_file_name")
@@ -1547,8 +1754,8 @@ static bool show_compiler_messages_changed(obs_properties_t *props, obs_property
 {
 	UNUSED_PARAMETER(p);
 	bool show = obs_data_get_bool(settings, "show_compiler_messages");
-	obs_property_t *e = obs_properties_get(props, "error_details");
-	obs_property_t *w = obs_properties_get(props, "warning_details");
+	obs_property_t *e = obs_properties_get(props, "error_details_text");
+	obs_property_t *w = obs_properties_get(props, "warning_details_text");
 	if (e)
 		obs_property_set_visible(e, show);
 	if (w)
@@ -2981,6 +3188,43 @@ static inline void shader_filter_set_tooltip(obs_property_t *p, const struct dst
 		obs_property_set_long_description(p, tooltip->array);
 }
 
+/* Is a shader filter directly before or after this one (so an effect file,
+ * which can't share their pass, costs more)? */
+static bool neighbour_is(obs_source_t *parent, obs_source_t *child, void *param)
+{
+	UNUSED_PARAMETER(parent);
+	struct shader_filter_data *filter = param;
+	if (child == filter->context || strcmp(obs_source_get_id(child), "shader_filter") != 0)
+		return false;
+	return obs_filter_get_target(child) == filter->context;
+}
+
+struct neighbour_search {
+	struct shader_filter_data *filter;
+	bool found;
+};
+
+static void find_downstream_shader(obs_source_t *parent, obs_source_t *child, void *param)
+{
+	struct neighbour_search *ns = param;
+	if (neighbour_is(parent, child, ns->filter))
+		ns->found = true;
+}
+
+static bool has_shader_neighbour(struct shader_filter_data *filter)
+{
+	obs_source_t *target = obs_filter_get_target(filter->context);
+	if (target && obs_source_get_type(target) == OBS_SOURCE_TYPE_FILTER &&
+	    strcmp(obs_source_get_id(target), "shader_filter") == 0)
+		return true;
+	obs_source_t *parent = obs_filter_get_parent(filter->context);
+	if (!parent)
+		return false;
+	struct neighbour_search ns = {filter, false};
+	obs_source_enum_filters(parent, find_downstream_shader, &ns);
+	return ns.found;
+}
+
 static obs_properties_t *shader_filter_properties(void *data)
 {
 	struct shader_filter_data *filter = data;
@@ -2995,19 +3239,10 @@ static obs_properties_t *shader_filter_properties(void *data)
 	const bool has_file = from_file && file && *file;
 	const bool inline_code = !from_file && obs_data_has_user_value(settings, "shader_text");
 
-	/* ---- the shader: find, choose, step; then what it needs to say ---- */
-	obs_property_t *search = obs_properties_add_text(props, "shader_search", obs_module_text("ShaderFilter.Search"),
-							 OBS_TEXT_DEFAULT);
-	obs_property_set_long_description(search, obs_module_text("ShaderFilter.SearchHelp"));
-	obs_property_set_modified_callback(search, shader_search_changed);
-
+	/* ---- the shader, and (when browsing) ways to find and step through others ---- */
 	obs_property_t *pick = obs_properties_add_list(props, "shader_pick", obs_module_text("ShaderFilter.Shader"),
 						       OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
-	size_t listed = fill_shader_list(pick, settings, transition);
 	obs_property_set_modified_callback(pick, shader_pick_changed);
-	obs_property_t *none = obs_properties_add_text(props, "search_none", obs_module_text("ShaderFilter.SearchNone"),
-						       OBS_TEXT_INFO);
-	obs_property_set_visible(none, listed == 0);
 
 	/* Keep the list's selection in step with the shader actually used. */
 	const char *cur_pick = obs_data_get_string(settings, "shader_pick");
@@ -3019,62 +3254,86 @@ static obs_properties_t *shader_filter_properties(void *data)
 	obs_property_t *file_name = obs_properties_add_path(props, "shader_file_name",
 							    obs_module_text("ShaderFilter.ShaderFileName"), OBS_PATH_FILE,
 							    shader_filter_shader_file_filter, lib);
-	bfree(lib);
 	obs_property_set_visible(file_name, picking_other);
 	obs_property_set_modified_callback(file_name, shader_filter_file_name_changed);
 
-	/* Next and Previous stay right under the list whatever the shader, so
-	 * clicking through shaders never chases a moving button. */
-	obs_properties_add_button2(props, "next_shader", obs_module_text("ShaderFilter.NextShader"), next_shader_clicked,
-				   data);
-	obs_properties_add_button2(props, "previous_shader", obs_module_text("ShaderFilter.PreviousShader"),
-				   previous_shader_clicked, data);
+	/* Browsing is on for a filter with no shader yet and otherwise off, until
+	 * the person sets it; when off, only the Shader row sits above the
+	 * shader's settings. */
+	if (!obs_data_has_user_value(settings, "browse_shaders"))
+		obs_data_set_bool(settings, "browse_shaders", !has_file && !inline_code);
+	const bool browsing = obs_data_get_bool(settings, "browse_shaders");
+	obs_property_t *browse = obs_properties_add_bool(props, "browse_shaders", obs_module_text("ShaderFilter.Browse"));
+	obs_property_set_long_description(browse, obs_module_text("ShaderFilter.BrowseHelp"));
+	obs_property_set_modified_callback(browse, browse_shaders_changed);
+
+	category_list_t categories;
+	da_init(categories);
+	library_categories(lib, &categories);
+	if (categories.num) {
+		obs_property_t *cat = obs_properties_add_list(props, "shader_category", obs_module_text("ShaderFilter.Category"),
+							      OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
+		obs_property_list_add_string(cat, obs_module_text("ShaderFilter.AllCategories"), "");
+		for (size_t i = 0; i < categories.num; i++)
+			obs_property_list_add_string(cat, categories.array[i], categories.array[i]);
+		obs_property_set_modified_callback(cat, shader_search_changed);
+		obs_property_set_visible(cat, browsing);
+	} else if (*obs_data_get_string(settings, "shader_category")) {
+		obs_data_set_string(settings, "shader_category", "");
+	}
+	for (size_t i = 0; i < categories.num; i++)
+		bfree(categories.array[i]);
+	da_free(categories);
+	bfree(lib);
+
+	obs_property_t *search = obs_properties_add_text(props, "shader_search", obs_module_text("ShaderFilter.Search"),
+							 OBS_TEXT_DEFAULT);
+	obs_property_set_long_description(search, obs_module_text("ShaderFilter.SearchHelp"));
+	obs_property_set_modified_callback(search, shader_search_changed);
+	obs_property_set_visible(search, browsing);
+
+	obs_property_t *next = obs_properties_add_button2(props, "next_shader", obs_module_text("ShaderFilter.NextShader"),
+							  next_shader_clicked, data);
+	obs_property_set_visible(next, browsing);
+	obs_property_t *prev = obs_properties_add_button2(props, "previous_shader",
+							  obs_module_text("ShaderFilter.PreviousShader"), previous_shader_clicked,
+							  data);
+	obs_property_set_visible(prev, browsing);
+	obs_properties_add_text(props, "browse_status", "", OBS_TEXT_INFO);
+	update_browse_status(props, settings, fill_shader_list(pick, settings, transition));
 
 	const char *error_message = obs_data_get_string(settings, "error_message");
 	if (error_message && *error_message) {
-		obs_property_t *error = obs_properties_add_text(props, "error_message", obs_module_text("ShaderFilter.Error"),
-								 OBS_TEXT_INFO);
+		obs_property_t *error = obs_properties_add_text(props, "error_line", error_message, OBS_TEXT_INFO);
 		obs_property_text_set_info_type(error, OBS_TEXT_INFO_ERROR);
 		if (has_file)
 			obs_properties_add_button2(props, "reload_after_error", obs_module_text("ShaderFilter.ReloadEffect"),
 						   shader_filter_reload_effect_clicked, data);
-		obs_property_t *show = obs_properties_add_bool(props, "show_compiler_messages",
-							       obs_module_text("ShaderFilter.ShowCompilerMessages"));
-		obs_property_set_modified_callback(show, show_compiler_messages_changed);
-		const bool visible = obs_data_get_bool(settings, "show_compiler_messages");
 		const char *errs = obs_data_get_string(settings, "error_details");
 		const char *warns = obs_data_get_string(settings, "warning_details");
-		if (errs && *errs) {
-			obs_property_t *e = obs_properties_add_text(props, "error_details",
-								    obs_module_text("ShaderFilter.CompilerErrors"), OBS_TEXT_INFO);
-			obs_property_text_set_info_type(e, OBS_TEXT_INFO_ERROR);
-			obs_property_set_visible(e, visible);
-		}
-		if (warns && *warns) {
-			obs_property_t *w = obs_properties_add_text(props, "warning_details",
-								    obs_module_text("ShaderFilter.CompilerWarnings"),
-								    OBS_TEXT_INFO);
-			obs_property_text_set_info_type(w, OBS_TEXT_INFO_WARNING);
-			obs_property_set_visible(w, visible);
+		if ((errs && *errs) || (warns && *warns)) {
+			obs_property_t *show = obs_properties_add_bool(props, "show_compiler_messages",
+								       obs_module_text("ShaderFilter.ShowCompilerMessages"));
+			obs_property_set_modified_callback(show, show_compiler_messages_changed);
+			const bool visible = obs_data_get_bool(settings, "show_compiler_messages");
+			if (errs && *errs) {
+				obs_property_t *e = obs_properties_add_text(props, "error_details_text", errs, OBS_TEXT_INFO);
+				obs_property_text_set_info_type(e, OBS_TEXT_INFO_ERROR);
+				obs_property_set_visible(e, visible);
+			}
+			if (warns && *warns) {
+				obs_property_t *w = obs_properties_add_text(props, "warning_details_text", warns, OBS_TEXT_INFO);
+				obs_property_text_set_info_type(w, OBS_TEXT_INFO_WARNING);
+				obs_property_set_visible(w, visible);
+			}
 		}
 	} else if (!has_file && !inline_code) {
 		obs_properties_add_text(props, "hint_choose", obs_module_text("ShaderFilter.HintChoose"), OBS_TEXT_INFO);
 	}
 	if (inline_code)
 		obs_properties_add_text(props, "inline_note", obs_module_text("ShaderFilter.InlineNote"), OBS_TEXT_INFO);
-	if (has_file && path_is_effect(file))
+	if (has_file && filter && path_is_effect(file) && has_shader_neighbour(filter))
 		obs_properties_add_text(props, "effect_note", obs_module_text("ShaderFilter.EffectNote"), OBS_TEXT_INFO);
-
-	if (filter && !transition && (has_file || inline_code) &&
-	    is_default_filter_name(obs_source_get_name(filter->context))) {
-		char *name = has_file ? auto_filter_name(filter, file)
-				      : auto_filter_name(filter, obs_module_text("ShaderFilter.SavedCodeName"));
-		struct dstr label = {0};
-		dstr_printf(&label, obs_module_text("ShaderFilter.RenameAfterShader"), name);
-		obs_properties_add_button2(props, "rename_after_shader", label.array, rename_after_shader_clicked, data);
-		dstr_free(&label);
-		bfree(name);
-	}
 
 	/* ---- the shader's own settings ---- */
 	obs_properties_t *params = obs_properties_create();
@@ -3331,7 +3590,7 @@ static obs_properties_t *shader_filter_properties(void *data)
 	if (first_param) {
 		struct dstr title = {0};
 		if (has_file || inline_code) {
-			char *name = has_file ? friendly_shader_name(file) : bstrdup(obs_module_text("ShaderFilter.SavedCodeName"));
+			char *name = has_file ? shader_display_name(file) : bstrdup(obs_module_text("ShaderFilter.SavedCodeName"));
 			dstr_printf(&title, obs_module_text("ShaderFilter.SettingsOf"), name);
 			bfree(name);
 		} else {
@@ -3363,6 +3622,18 @@ static obs_properties_t *shader_filter_properties(void *data)
 			obs_property_int_set_suffix(e, " px");
 			obs_property_set_visible(e, visible);
 		}
+	}
+	if (filter && !transition && (has_file || inline_code) &&
+	    is_default_filter_name(obs_source_get_name(filter->context))) {
+		char *name = has_file ? auto_filter_name(filter, file)
+				      : auto_filter_name(filter, obs_module_text("ShaderFilter.SavedCodeName"));
+		struct dstr label = {0};
+		dstr_printf(&label, obs_module_text("ShaderFilter.RenameAfterShader"), name);
+		obs_property_t *rename = obs_properties_add_button2(adv, "rename_after_shader", label.array,
+								    rename_after_shader_clicked, data);
+		obs_property_set_long_description(rename, obs_module_text("ShaderFilter.RenameHelp"));
+		dstr_free(&label);
+		bfree(name);
 	}
 	if (has_file && !(error_message && *error_message)) {
 		obs_property_t *reload = obs_properties_add_button2(adv, "reload_effect", obs_module_text("ShaderFilter.ReloadEffect"),

@@ -45,7 +45,9 @@
 #include "properties-view.hpp"
 
 static const char *style = R"(
-QWidget { background: #1D1F26; color: #FEFEFE; font-size: 10pt; }
+QWidget { background: transparent; color: #FEFEFE; font-size: 10pt; }
+QWidget#root { background: #1D1F26; }
+QListView, QAbstractItemView { background: #272A33; }
 QLabel { background: transparent; }
 QListWidget, QComboBox, QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QAbstractSpinBox {
   background: #3C404D; border: 1px solid #3C404D; border-radius: 4px; padding: 3px 5px; }
@@ -57,7 +59,9 @@ QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 4px; }
 QScrollArea, QScrollArea > QWidget > QWidget { background: #272A33; border: none; }
 QSlider::groove:horizontal { height: 4px; background: #3C404D; }
 QSlider::handle:horizontal { background: #FEFEFE; width: 12px; margin: -5px 0; border-radius: 6px; }
-QCheckBox::indicator { width: 14px; height: 14px; }
+QCheckBox { background: transparent; }
+QCheckBox::indicator { width: 14px; height: 14px; border: 1px solid #8F96A6; border-radius: 3px; background: #3C404D; }
+QCheckBox::indicator:checked { background: #476BD7; border-color: #476BD7; image: url(:/res/images/check.svg); }
 QLabel[class="text-danger"] { color: #F25858; }
 QLabel[class="text-warning"] { color: #FFCC4C; }
 )";
@@ -239,12 +243,18 @@ int main(int argc, char **argv)
 			}
 		}
 
+		/* A second passes before the screenshot, as between setting a
+		 * filter up and coming back to it. */
+		for (int t = 0; t < 60; t++)
+			env_tick(1.0f / 60.0f);
+
 		size_t sel = (size_t)obs_data_get_int(shot, "select");
 		if (sel >= filters.size())
 			sel = filters.empty() ? 0 : filters.size() - 1;
 
 		/* --- the window --- */
 		QWidget window;
+		window.setObjectName("root");
 		int ww = 1100, wh = 860;
 		OBSDataArrayAutoRelease size = obs_data_get_array(shot, "size");
 		if (obs_data_array_count(size) == 2) {
