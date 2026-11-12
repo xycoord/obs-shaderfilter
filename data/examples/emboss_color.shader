@@ -3,6 +3,7 @@
 //Converted to OpenGL by Q-mii & Exeldro February 18, 2022
 uniform int Angle_Steps<
     string label = "Angle Steps";
+    string tooltip = "Number of directions sampled for the emboss, limited to 1-20. Edit the shader to remove the limit at your own risk.";
     string widget_type = "slider";
     int minimum = 1;
     int maximum = 20;
@@ -10,6 +11,7 @@ uniform int Angle_Steps<
 > = 9; //<range 1 - 20>
 uniform int Radius_Steps<
     string label = "Radius Steps";
+    string tooltip = "Number of distances sampled for the emboss, limited to 0-20. Edit the shader to remove the limit at your own risk.";
     string widget_type = "slider";
     int minimum = 0;
     int maximum = 20;
@@ -30,9 +32,6 @@ uniform int Up_Down_Percent<
     int step = 1;
 > = 0;
 uniform bool Apply_To_Alpha_Layer = true;
-uniform string notes<
-    string widget_type = "info";
-> = "Steps limited in range from 0 to 20. Edit shader to remove limits at your own risk.";
 
 float4 mainImage(VertData v_in) : TARGET
 {
@@ -53,21 +52,17 @@ float4 mainImage(VertData v_in) : TARGET
 
 	if (c0.a > 0.0 || Apply_To_Alpha_Layer == false)
 	{
-		for (int radiusStep = 0; radiusStep < radiusSteps; radiusStep++) {
-			float radius = minRadius + radiusStep * radiusDelta;
+		// Angles outside, radii inside: each direction's cos/sin is worked out once.
+		for (float angle = 0; angle < (2 * PI); angle += angleDelta) {
+			float2 direction = float2(cos(angle), sin(angle));
+			float side = sign(angle - PI);
 
-			for (float angle = 0; angle < (2 * PI); angle += angleDelta) {
-				float2 currentCoord;
-
-				float xDiff = radius * cos(angle);
-				float yDiff = radius * sin(angle);
-
-				currentCoord = v_in.uv + float2(xDiff, yDiff);
-				float4 currentColor = image.Sample(textureSampler, currentCoord);
+			for (int radiusStep = 0; radiusStep < radiusSteps; radiusStep++) {
+				float radius = minRadius + radiusStep * radiusDelta;
+				float4 currentColor = image.Sample(textureSampler, v_in.uv + radius * direction);
 				float4 colorDiff = abs(c0 - currentColor);
 				float currentFraction = ((radiusSteps + 1 - radiusStep)) / (radiusSteps + 1);
-				accumulatedColor += currentFraction * colorDiff / totalSteps * sign(angle - PI);;
-
+				accumulatedColor += currentFraction * colorDiff / totalSteps * side;
 			}
 		}
 		accumulatedColor *= ampFactor;

@@ -2,6 +2,7 @@
 uniform float4 color;
 uniform float lumaMax<
     string label = "Luma Max";
+    string tooltip = "Anything brighter than this becomes transparent.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 10.0;
@@ -9,6 +10,7 @@ uniform float lumaMax<
 > = 1.05;
 uniform float lumaMin<
     string label = "Luma Min";
+    string tooltip = "Anything darker than this becomes transparent.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 10.0;
@@ -16,6 +18,7 @@ uniform float lumaMin<
 > = 0.01;
 uniform float lumaMaxSmooth<
     string label = "Luma Max Smooth";
+    string tooltip = "Softens the Luma Max cutoff so the transparency fades in over this distance.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 10.0;
@@ -23,16 +26,18 @@ uniform float lumaMaxSmooth<
 > = 0.10;
 uniform float lumaMinSmooth<
     string label = "Luma Min Smooth";
+    string tooltip = "Softens the Luma Min cutoff so the transparency fades in over this distance.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 10.0;
     float step = 0.001;
 > = 0.01;
-uniform bool invertImageColor;
-uniform bool invertAlphaChannel;
-uniform string notes<
-    string widget_type = "info";
-> = "'luma max' - anything above will be transparent. 'luma min' - anything below will be transparent. 'luma(min or max)Smooth - make the transparency fade in or out by a distance. 'invert color' - inverts the color of the screen. 'invert alpha channel' - flips all settings on thier head, which is excellent for testing.";
+uniform bool invertImageColor<
+    string tooltip = "Inverts the colors of the image.";
+>;
+uniform bool invertAlphaChannel<
+    string tooltip = "Flips which areas are transparent, which is great for testing your settings.";
+>;
 
 float4 InvertColor(float4 rgba_in)
 {	

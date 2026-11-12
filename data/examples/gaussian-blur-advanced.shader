@@ -80,9 +80,11 @@ float4 mainImage(VertData v_in) : TARGET
     // Blur calculations
     [loop] for( float d=0.0; d<Pi; d+=Pi/Directions)
     {
+        // One cos/sin per direction rather than per sample.
+        float2 step_uv = float2(cos(d),sin(d))*Size/uv_size;
 		[loop] for(float i=1.0/Quality; i<=1.0; i+=1.0/Quality)
         {
-            float4 sc = image.Sample(textureSampler,v_in.uv+float2(cos(d),sin(d))*Size*i/uv_size);
+            float4 sc = image.Sample(textureSampler,v_in.uv+step_uv*i);
             transparent += sc.a;
 			count++;
             c += sc * sc.a;

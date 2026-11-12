@@ -60,14 +60,19 @@ float explosion(float2 uv, float2 p, float s, float n, float f, float t) {
 
     float m = 0.0;
     float dt = 0.5;
+    // Every particle fades in and out together; outside that window the
+    // explosion adds nothing, so its particles needn't be worked out at all.
+    float fade = smoothstep(2.0, 2.0 - dt, t) * smoothstep(0.0, dt, t);
+    if (fade <= 0.0)
+        return 0.0;
     float seed2 = 0.32;
 	for(float i = 0.0; i < n; i++) {
     	seed2 += i;
         float2 rand = float2(1.0, 2.0) * (float2(-1.0, 1.0) + 2.0 * N22(float2(seed2, i)));
     	float2 v = float2(cos(seed2), sin(seed2)) + rand;
-        m += particle(uv, p, v, s, t) * smoothstep(2.0, 2.0 - dt, t) * smoothstep(0.0, dt, t);
-    }   
-    return m;
+        m += particle(uv, p, v, s, t);
+    }
+    return m * fade;
 }
 
 float fireworks(float2 uv, float2 p, float h, float n, float s, float f, float t) {

@@ -27,7 +27,8 @@
 #define mix lerp
 
 uniform int Alpha_Percentage<
-    string label = "Aplha Percentage";
+    string label = "Alpha Percentage";
+    string tooltip = "Adjusts how strongly the fire color is applied.";
     string widget_type = "slider";
     int minimum = 0;
     int maximum = 100;
@@ -42,6 +43,7 @@ uniform int Speed<
 > = 100;
 uniform int Flame_Size<
     string label = "Flame Size";
+    string tooltip = "Flame size as a percentage of the screen size.";
     string widget_type = "slider";
     int minimum = 0;
     int maximum = 200;
@@ -61,6 +63,7 @@ uniform bool Invert <
 > = false;
 uniform float lumaMin<
     string label = "Luma min";
+    string tooltip = "Cuts out darker parts of the fire to reveal the background.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 1.0;
@@ -68,6 +71,7 @@ uniform float lumaMin<
 > = 0.01;
 uniform float lumaMinSmooth<
     string label = "Luma min smooth";
+    string tooltip = "Softness of the Luma min cutoff that reveals the background.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 1.0;
@@ -77,9 +81,6 @@ uniform bool Apply_To_Image;
 uniform bool Replace_Image_Color;
 uniform bool Apply_To_Specific_Color;
 uniform float4 Color_To_Replace;
-uniform string Notes<
-    string widget_type = "info";
-> = "Luma cuts reveals background, flame size is percentage screen size, Alpha Percentage adjusts color";
 
 vec3 rgb2hsv(vec3 c)
 {

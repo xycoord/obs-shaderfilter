@@ -21,6 +21,7 @@ uniform int scale<
 > = 1; // Size of characters
 uniform float4 base_color<
     string label = "Base color";
+    string tooltip = "Color used for the characters when Monochrome is enabled.";
 > = {0.0,1.0,0.0,1.0}; // Monochrome base color
 uniform bool monochrome<
     string label = "Monochrome";
@@ -33,9 +34,6 @@ uniform int character_set<
   int    option_1_value = 1;
   string option_1_label = "Small set of capital letters";
 > = 0;
-uniform string note<
-    string widget_type = "info";
-> = "Base color is used as monochrome base color.";
 
 float character(int n, float2 p)
 {

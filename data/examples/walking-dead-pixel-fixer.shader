@@ -146,8 +146,8 @@ float4 mainImage(VertData v_in) : TARGET
 
     if (!Bypass)
     {
-        int pixX = (int)round(pos.x);
-        int pixY = (int)round(pos.y);
+        int pixX = int(round(pos.x));
+        int pixY = int(round(pos.y));
 
         int borderwidth = 2;
 

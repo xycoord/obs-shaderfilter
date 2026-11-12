@@ -50,6 +50,7 @@ uniform bool Rotate_Pixels = false;
 uniform bool Rotate_Colors = false;
 uniform int center_width_percentage<
     string label = "center width percentage";
+    string tooltip = "Horizontal position of the spin axis used by Rotate Pixels, as a percentage of the width.";
     string widget_type = "slider";
     int minimum = 0;
     int maximum = 100;
@@ -57,6 +58,7 @@ uniform int center_width_percentage<
 > = 50;
 uniform int center_height_percentage<
     string label = "center height percentage";
+    string tooltip = "Vertical position of the spin axis used by Rotate Pixels, as a percentage of the height.";
     string widget_type = "slider";
     int minimum = 0;
     int maximum = 100;
@@ -65,7 +67,7 @@ uniform int center_height_percentage<
 
 uniform string notes<
     string widget_type = "info";
-> = " Choose axis, angle and speed, then rotate away! center_width_percentage & center_height_percentage allow you to change the pixel spin axis";
+> = "Choose an axis, angle and speed, then rotate away!";
 
 sampler_state textureSampler {
 	Filter    = Linear;

@@ -68,7 +68,8 @@ vec4 blur(vec2 U, vec2 scale)
     for (int i = 0; i < s * s; i++)
     {
         vec2 d = vec2(i % s, i / s) * float(sLOD) - float(samples) * 0.5;
-        O += gaussian(d) * image.SampleLevel(textureSampler, U + (scale * gaussian(d)), float(LOD));
+        float g = gaussian(d);
+        O += g * image.SampleLevel(textureSampler, U + (scale * g), float(LOD));
         //O += gaussian(d) * image.Sample(textureSampler, U + i * d * float(LOD));
         //O += image.Sample(textureSampler, U + gaussian(d) * float(LOD));
     }

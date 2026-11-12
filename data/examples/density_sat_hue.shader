@@ -3,7 +3,7 @@
 
 uniform string notes<
     string widget_type = "info";
-> = "Density adjustment shader: Density reduces luminance, while saturation is subtractively increased to avoid greyish colors.";
+> = "Density, saturation and hue adjustments per color range.";
 
 uniform float density_r <
     string label = "Red Density";
@@ -11,6 +11,7 @@ uniform float density_r <
     float minimum = -1.0;
     float maximum = 1.0;
     float step = 0.001;
+    string tooltip = "Density of reds. Density reduces luminance.";
 > = 0.0;
 
 uniform float saturation_r <
@@ -19,6 +20,7 @@ uniform float saturation_r <
     float minimum = -1.0;
     float maximum = 1.0;
     float step = 0.001;
+    string tooltip = "Saturation of reds. It is increased subtractively to avoid grayish colors.";
 > = 0.0;
 
 uniform float hueShift_r <
@@ -35,6 +37,7 @@ uniform float density_y <
     float minimum = -1.0;
     float maximum = 1.0;
     float step = 0.001;
+    string tooltip = "Density of yellows. Density reduces luminance.";
 > = 0.0;
 
 uniform float saturation_y <
@@ -43,6 +46,7 @@ uniform float saturation_y <
     float minimum = -1.0;
     float maximum = 1.0;
     float step = 0.001;
+    string tooltip = "Saturation of yellows. It is increased subtractively to avoid grayish colors.";
 > = 0.0;
 
 uniform float hueShift_y <
@@ -59,6 +63,7 @@ uniform float density_g <
     float minimum = -1.0;
     float maximum = 1.0;
     float step = 0.001;
+    string tooltip = "Density of greens. Density reduces luminance.";
 > = 0.0;
 
 uniform float saturation_g <
@@ -67,6 +72,7 @@ uniform float saturation_g <
     float minimum = -1.0;
     float maximum = 1.0;
     float step = 0.001;
+    string tooltip = "Saturation of greens. It is increased subtractively to avoid grayish colors.";
 > = 0.0;
 
 uniform float hueShift_g <
@@ -83,6 +89,7 @@ uniform float density_c <
     float minimum = -1.0;
     float maximum = 1.0;
     float step = 0.001;
+    string tooltip = "Density of cyans. Density reduces luminance.";
 > = 0.0;
 
 uniform float saturation_c <
@@ -91,6 +98,7 @@ uniform float saturation_c <
     float minimum = -1.0;
     float maximum = 1.0;
     float step = 0.001;
+    string tooltip = "Saturation of cyans. It is increased subtractively to avoid grayish colors.";
 > = 0.0;
 
 uniform float hueShift_c <
@@ -107,6 +115,7 @@ uniform float density_b <
     float minimum = -1.0;
     float maximum = 1.0;
     float step = 0.001;
+    string tooltip = "Density of blues. Density reduces luminance.";
 > = 0.0;
 
 uniform float saturation_b <
@@ -115,6 +124,7 @@ uniform float saturation_b <
     float minimum = -1.0;
     float maximum = 1.0;
     float step = 0.001;
+    string tooltip = "Saturation of blues. It is increased subtractively to avoid grayish colors.";
 > = 0.0;
 
 uniform float hueShift_b <
@@ -131,6 +141,7 @@ uniform float density_m <
     float minimum = -1.0;
     float maximum = 1.0;
     float step = 0.001;
+    string tooltip = "Density of magentas. Density reduces luminance.";
 > = 0.0;
 
 uniform float saturation_m <
@@ -139,6 +150,7 @@ uniform float saturation_m <
     float minimum = -1.0;
     float maximum = 1.0;
     float step = 0.001;
+    string tooltip = "Saturation of magentas. It is increased subtractively to avoid grayish colors.";
 > = 0.0;
 
 uniform float hueShift_m <
@@ -155,6 +167,7 @@ uniform float global_density <
     float minimum = -1.0;
     float maximum = 1.0;
     float step = 0.001;
+    string tooltip = "Density of all colors. Density reduces luminance.";
 > = 0.0;
 
 uniform float global_saturation < 
@@ -163,6 +176,7 @@ uniform float global_saturation <
     float minimum = -1.0;
     float maximum = 1.0;
     float step = 0.001;
+    string tooltip = "Saturation of all colors. It is increased subtractively to avoid grayish colors.";
 > = 0.0;
 
 // Tetrahedral interpolation based on the ordering of the input color channels

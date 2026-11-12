@@ -15,6 +15,7 @@ uniform float rand_f;
 
 uniform float alpha<
     string label = "Alpha";
+    string tooltip = "Adjusts the opacity of the copies (0.5-2.0 recommended).";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 3.0;
@@ -22,14 +23,12 @@ uniform float alpha<
 > = 1.0;
 uniform float copies<
     string label = "Copies";
+    string tooltip = "Number of copies to tile. Use a perfect square such as 4, 9 or 16.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 100.0;
     float step = 0.1;
 > = 4.0;
-uniform string notes<
-    string widget_type = "info";
-> = 'copies, use a number that has a square root. Alpha adjusts the alpha level of the copies (recommend 0.5-2.0 recommend)';
 
 sampler_state def_sampler {
 	Filter   = Linear;

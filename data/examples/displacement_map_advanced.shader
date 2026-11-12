@@ -1,18 +1,21 @@
 uniform string displacement_info<
   string label = "Displacement";
   string widget_type = "info";
-> = "Displaces the current image with the Mask Layer. Red channel is affected to X (horizontal) displacement and Green channel to Y (vertical). rgb(.5, .5, .5) is no displacement. You can choose the curve mapping to map values between -1 to 1 differently.";
+> = "Displaces the current image using the Mask Layer.";
 
 uniform float displacement_x<
   string label = "Displacement X (px)";
+  string tooltip = "Horizontal (X) displacement in pixels, driven by the red channel of the Mask Layer.";
 > = 16.0;
 
 uniform float displacement_y<
   string label = "Displacement Y (px)";
+  string tooltip = "Vertical (Y) displacement in pixels, driven by the green channel of the Mask Layer.";
 > = 16.0;
 
 uniform int displacement_curve<
   string label = "Displacement Curve";
+  string tooltip = "How displacement values between -1 and 1 are mapped.";
   string widget_type = "select";
   int    option_0_value = 1;
   string option_0_label = "Linear";
@@ -25,13 +28,15 @@ uniform int displacement_curve<
 uniform string blur_info<
   string label = "Blur";
   string widget_type = "info";
-> = "Imitates how light disperses through displacement. It can recreate refractions like effects. Blur size affects how much light disperses, quality is the number of samples, directions of those samples (around a circle). You can choose the starting angle (use directions 1 or 2 to have highly directional refractions).";
+> = "Imitates how light disperses through displacement. It can recreate refraction-like effects.";
 
 uniform float blur_size<
     string label = "Blur Size (px)";
+    string tooltip = "How much the light disperses, in pixels.";
 > = 8.0; // BLUR SIZE (Radius)
 uniform float blur_quality<
   string label = "Blur Quality (4.0)";
+  string tooltip = "Number of samples in each direction.";
   string widget_type = "slider";
   float minimum = 1.0;
   float maximum = 16;
@@ -39,6 +44,7 @@ uniform float blur_quality<
 > = 4.0; // BLUR QUALITY (Default 4.0 - More is better but slower)
 uniform float blur_directions<
   string label = "Blur Directions (16.0)";
+  string tooltip = "Number of sample directions around a circle. Use 1 or 2 for highly directional refractions.";
   string widget_type = "slider";
   float minimum = 1.0;
   float maximum = 24;
@@ -46,6 +52,7 @@ uniform float blur_directions<
 > = 16.0; // BLUR DIRECTIONS (number of rays in sampling)
 uniform float blur_angle<
     string label = "Blur Angle (degrees)";
+    string tooltip = "Starting angle of the sample directions. Combine with 1 or 2 directions for highly directional refractions.";
     string widget_type = "slider";
     float minimum = 0;
     float maximum = 360;
@@ -55,10 +62,11 @@ uniform float blur_angle<
 uniform string chromatic_aberration_info<
   string label = "Chromatic Aberration";
   string widget_type = "info";
-> = "Imitates how colors diverge when light refracts. Value is between -1 and 1 as a multiplier of the displacement amount.";
+> = "Imitates how colors diverge when light refracts.";
 
 uniform float chromatic_aberration<
   string label = "Chromatic Aberration (0.0)";
+  string tooltip = "Multiplier of the displacement amount, between -1 and 1.";
   string widget_type = "slider";
   float minimum = -1.0;
   float maximum = 1.0;
@@ -68,7 +76,7 @@ uniform float chromatic_aberration<
 uniform string colorize_info<
   string label = "Color";
   string widget_type = "info";
-> = "Imitates how light change color (tinted glass for instance)";
+> = "Imitates how light changes color (tinted glass, for instance).";
 
 uniform float4 colorize_color<
   string label = "Colorize";
@@ -77,19 +85,23 @@ uniform float4 colorize_color<
 uniform string flags_info<
   string label = "Additional Channels";
   string widget_type = "info";
-> = "You can affect Blue channel (Height / Z) to displacement strength, colorization or blur radius, and Alpha to displacement (can fix glitches on edges).";
+> = "Use the blue (height / Z) and alpha channels of the displacement map to modulate the effect.";
 
 uniform bool blue_affects_strength<
     string label = "Blue channel affects displacement";
+    string tooltip = "Scales the displacement strength by the blue channel (height / Z).";
 > = false;
 uniform bool blue_affects_colorize<
     string label = "Blue channel affects colorize";
+    string tooltip = "Scales the colorization by the blue channel (height / Z).";
 > = false;
 uniform bool blue_affects_blur<
     string label = "Blue channel affects blur";
+    string tooltip = "Scales the blur radius by the blue channel (height / Z).";
 > = false;
 uniform bool alpha_affects_strength<
     string label = "Alpha channel affects displacement";
+    string tooltip = "Scales the displacement by the alpha channel. Can fix glitches on edges.";
 > = false;
 uniform bool apply_alpha<
     string label = "Apply alpha";
@@ -97,6 +109,7 @@ uniform bool apply_alpha<
 
 uniform texture2d mask_layer <
   string label = "Mask Layer";
+  string tooltip = "Image whose red and green channels drive the displacement. Mid-gray, rgb(0.5, 0.5, 0.5), means no displacement.";
 >;
 
 float4 mainImage(VertData v_in) : TARGET
@@ -130,7 +143,7 @@ float4 mainImage(VertData v_in) : TARGET
 
   float4 base_rgba;
 
-  if(chromatic_aberration) {
+  if(chromatic_aberration != 0.0) {
     float4 base_r = image.Sample(textureSampler, v_in.uv + displace_uv - chromatic_aberration * displace_uv);
     float4 base_g = image.Sample(textureSampler, v_in.uv + displace_uv);
     float4 base_b = image.Sample(textureSampler, v_in.uv + displace_uv + chromatic_aberration * displace_uv);
@@ -156,7 +169,7 @@ float4 mainImage(VertData v_in) : TARGET
           size *= displace.b;
         }
 
-        if (chromatic_aberration) {
+        if (chromatic_aberration != 0.0) {
           float4 sc_r = image.Sample(textureSampler, v_in.uv + displace_uv - chromatic_aberration*displace_uv + float2(cos(d),sin(d)) * size * i / uv_size);
           float4 sc_g = image.Sample(textureSampler, v_in.uv + displace_uv + float2(cos(d),sin(d)) * size * i / uv_size);
           float4 sc_b = image.Sample(textureSampler, v_in.uv + displace_uv + chromatic_aberration*displace_uv + float2(cos(d),sin(d)) * size * i / uv_size);

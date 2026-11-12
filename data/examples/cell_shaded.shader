@@ -7,6 +7,7 @@ uniform int Angle_Steps<
     int minimum = 1;
     int maximum = 20;
     int step = 1;
+    string tooltip = "Number of angle steps, limited to 1 - 20. Edit cell_shaded.shader to remove the limit at your own risk.";
 > = 5;
 uniform int Radius_Steps<
     string label = "Radius Steps";
@@ -14,6 +15,7 @@ uniform int Radius_Steps<
     int minimum = 0;
     int maximum = 20;
     int step = 1;
+    string tooltip = "Number of radius steps, limited to 0 - 20. Edit cell_shaded.shader to remove the limit at your own risk.";
 > = 9; 
 uniform float ampFactor<
     string label = "amp Factor";
@@ -22,9 +24,6 @@ uniform float ampFactor<
     float maximum = 100.0;
     float step = 0.01;
 > = 2.0;
-uniform string notes<
-    string widget_type = "info";
-> = "Steps limited in range from 0 to 20. Edit cell_shaded.shader to remove limits at your own risk.";
 
 float4 mainImage(VertData v_in) : TARGET
 {
@@ -42,21 +41,16 @@ float4 mainImage(VertData v_in) : TARGET
 	float4 origColor = c0;
 	float4 accumulatedColor = float4(0,0,0,0);
 
-	for (int radiusStep = 0; radiusStep < radiusSteps; radiusStep++) {
-		float radius = minRadius + radiusStep * radiusDelta;
+	// Angles outside, radii inside: each direction's cos/sin is worked out once.
+	for (float angle=0; angle <(2*PI); angle += angleDelta) {
+		float2 direction = float2(cos(angle), sin(angle));
 
-		for (float angle=0; angle <(2*PI); angle += angleDelta) {
-			float2 currentCoord;
-
-			float xDiff = radius * cos(angle);
-			float yDiff = radius * sin(angle);
-			
-			currentCoord = v_in.uv + float2(xDiff, yDiff);
-			float4 currentColor = image.Sample(textureSampler, currentCoord);
+		for (int radiusStep = 0; radiusStep < radiusSteps; radiusStep++) {
+			float radius = minRadius + radiusStep * radiusDelta;
+			float4 currentColor = image.Sample(textureSampler, v_in.uv + radius * direction);
 			float4 colorDiff = abs(c0 - currentColor);
 			float currentFraction = (radiusSteps + 1 - radiusStep) / (radiusSteps + 1);
 			accumulatedColor +=  currentFraction * colorDiff / totalSteps;
-			
 		}
 	}
 	accumulatedColor *= ampFactor;

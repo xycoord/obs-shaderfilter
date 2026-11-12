@@ -23,16 +23,15 @@ uniform float blend<
 > = 1.0;
 uniform float copies<
     string label = "Copies";
+    string tooltip = "Number of copies to tile. Use a perfect square such as 4, 9 or 16.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 100.0;
     float step = 0.1;
 > = 4.0;
-uniform string notes<
-    string widget_type = "info";
-> = 'copies, use a number that has a square root. Blend adjusts the ratio of source and texture';
 uniform float alpha_percentage<
     string label = "alpha percentage";
+    string tooltip = "Adjusts the ratio of source and texture.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 100.0;

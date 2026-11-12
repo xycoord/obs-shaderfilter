@@ -9,6 +9,7 @@ uniform float ColorSigma<
     float minimum = 0.1;
     float maximum = 1.0;
     float step = 0.1;
+    string tooltip = "Color sigma (strength) of the anti-aliasing.";
 > = 1.0;
 
 uniform float SpatialSigma<
@@ -17,11 +18,12 @@ uniform float SpatialSigma<
     float minimum = 0.1;
     float maximum = 1.0;
     float step = 0.1;
+    string tooltip = "Spatial sigma (strength) of the anti-aliasing.";
 > = 1.0;
 
 uniform string notes<
     string widget_type = "info";
-> = "Performs RGSSAA, a form of anti-aliasing. Implementation roughly follows the original with color and spatial sigma (or strengths) parameters. Useful to apply before a sharpen pass (e.g on a webcam feed)."
+> = "Performs RGSSAA, a form of anti-aliasing. Useful to apply before a sharpen pass (e.g. on a webcam feed)."
 
 float Luminance(float3 rgb)
 {

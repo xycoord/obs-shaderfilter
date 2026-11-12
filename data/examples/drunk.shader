@@ -12,6 +12,7 @@ uniform int glow_percent<
 > = 10;
 uniform int blur<
     string label = "Blur";
+    string tooltip = "Distance between the 4 blurred copies of the image (1-4 recommended).";
     string widget_type = "slider";
     int minimum = 0;
     int maximum = 100;
@@ -44,7 +45,7 @@ uniform bool ease;
 uniform bool glitch;
 uniform string notes<
     string widget_type = "info";
-> ="'drunk refers to the bad blur effect of using 4 coordinates to blur. 'blur' - the distance between the 4 copies (recommend 1-4)";
+> ="Drunk refers to the rough blur effect made by blending 4 offset copies of the image.";
 
 
 // Gaussian Blur
