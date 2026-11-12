@@ -22,8 +22,13 @@ jobs:
           path: .tests/libobs/prefix
           key: libobs-33.0.1-${{ hashFiles('tests/setup/build-libobs.sh') }}
 
-      - name: Set up (packages, libobs, harness, reference and current builds)
-        run: sudo -E env "PATH=$PATH" tests/run.sh setup
+      # Only the packages need root: built files must stay the runner's, as
+      # later steps rebuild in .tests and CMake writes version.h into the checkout.
+      - name: Install packages
+        run: sudo -E env "PATH=$PATH" tests/run.sh packages
+
+      - name: Set up (libobs, harness, reference and current builds)
+        run: tests/run.sh setup
 
       - name: Parity (translucent test image)
         run: xvfb-run -a tests/run.sh parity

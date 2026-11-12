@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # One-stop runner for the parity and performance tests (Ubuntu 24.04).
 #
-#   tests/run.sh setup              install packages, build test libobs, harness,
-#                                   reference plugin (REF) and this plugin
+#   tests/run.sh packages           install the packages needed (run as root)
+#   tests/run.sh setup              build test libobs, harness, reference
+#                                   plugin (REF) and this plugin; as root it
+#                                   installs the packages first
 #   tests/run.sh parity [args...]   compare this build with the reference
 #                                   (args go to shadertest.py parity, e.g. --opaque)
 #   tests/run.sh bench  [args...]   time this build (args to shadertest.py bench)
@@ -19,7 +21,7 @@ OBS_TAG=${OBS_TAG:-33.0.1}
 export OBS_PREFIX=$WORK/libobs/prefix
 export HARNESS_BUILD=$WORK/harness-build
 
-setup() {
+packages() {
 	if command -v apt-get >/dev/null && [ "$(id -u)" = 0 ]; then
 		# A fresh CI runner's package lists can be out of date, so the
 		# packages they name are no longer on the mirror.
@@ -32,6 +34,10 @@ setup() {
 			libxcb-xinput-dev libglib2.0-dev libdrm-dev libgbm-dev extra-cmake-modules \
 			libxkbcommon-dev nlohmann-json3-dev libpci-dev
 	fi
+}
+
+setup() {
+	packages
 	mkdir -p "$WORK"
 	[ -f "$OBS_PREFIX/lib/libobs.so" ] || "$REPO/tests/setup/build-libobs.sh" "$WORK/libobs" "$OBS_TAG"
 	cmake -S "$REPO/tests/harness" -B "$HARNESS_BUILD" -DCMAKE_PREFIX_PATH="$OBS_PREFIX" -DCMAKE_BUILD_TYPE=Release
@@ -52,6 +58,7 @@ build_new() {
 cmd=${1:-}
 shift || true
 case "$cmd" in
+packages) packages ;;
 setup) setup ;;
 parity)
 	build_new
@@ -69,7 +76,7 @@ bench-ref)
 		--data "$WORK/ref-src/data" --out "$WORK/bench-ref" "$@"
 	;;
 *)
-	sed -n '2,13p' "$0"
+	sed -n '2,15p' "$0"
 	exit 2
 	;;
 esac
