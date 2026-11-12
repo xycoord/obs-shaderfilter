@@ -1,17 +1,19 @@
 uniform string displacement_info<
   string label = "Displacement";
   string widget_type = "info";
-> = "Displaces the Background Layer with the current image. Red channel is affected to X (horizontal) displacement and Green channel to Y (vertical). rgb(.5, .5, .5) is no displacement.";
+> = "Displaces the Background Layer using the current image as a displacement map. Mid-gray rgb(.5, .5, .5) means no displacement.";
 
 uniform float displacement_x<
   string label = "Displacement X (px)";
+  string tooltip = "Maximum horizontal displacement in pixels. The red channel of the current image drives the horizontal shift.";
 > = 16.0;
 
 uniform float displacement_y<
   string label = "Displacement Y (px)";
+  string tooltip = "Maximum vertical displacement in pixels. The green channel of the current image drives the vertical shift.";
 > = 16.0;
 
-uniform texture2d background_layer <string label = "Background Layer";>;
+uniform texture2d background_layer <string label = "Background Layer"; string tooltip = "The source that gets displaced by the current image.";>;
 
 float4 mainImage(VertData v_in) : TARGET
 {

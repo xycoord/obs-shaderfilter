@@ -17,14 +17,12 @@ uniform int shadow_offset_y<
 > = 5;
 uniform int shadow_blur_size<
     string label = "Shadow blur size";
+    string tooltip = "How soft the shadow edge is. Limited to a maximum of 15 to keep the GPU load manageable.";
     string widget_type = "slider";
     int minimum = 0;
     int maximum = 15;
     int step = 1;
 > = 3;
-uniform string notes<
-    string widget_type = "info";
-> = "blur size is limited to a max of 15 to ensure GPU";
 
 uniform float4 shadow_color;
 

@@ -12,6 +12,7 @@ uniform float2 uv_size;
 
 uniform float Doodle_Scale_Percent<
     string label = "Doodle Scale Percent";
+    string tooltip = "How far the doodle skews the image.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 100.0;
@@ -19,14 +20,12 @@ uniform float Doodle_Scale_Percent<
 > = 2.5;
 uniform float Snap_Percent<
     string label = "Snap Percent";
+    string tooltip = "Controls the number of doodles per second.";
     string widget_type = "slider";
     float minimum = 1.0;
     float maximum = 100.0;
     float step = 0.1;
 > = 7.5;
-uniform string Notes<
-    string widget_type = "info";
-> = "Doodle skews the image by the Scale Percent, Snap Percent controls the number of doodles per second.";
 
 sampler_state textureSampler {
 	Filter    = Linear;
