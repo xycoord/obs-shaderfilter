@@ -12,6 +12,9 @@ env:
 jobs:
   macos:
     name: macOS
+    # Built on pushes to master only: macOS runners are scarce and often
+    # leave PR jobs queued until GitHub cancels them.
+    if: github.event_name != 'pull_request'
     runs-on: macos-latest
     strategy:
       fail-fast: false
