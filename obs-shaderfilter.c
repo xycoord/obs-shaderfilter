@@ -295,6 +295,11 @@ struct shader_filter_data {
 	/* Until this time, a properties rebuild is a refresh of an open panel
 	 * after the shader changed (so browsing tools stay as they were). */
 	uint64_t props_refresh_until;
+	/* The person opened the browsing tools on this filter (this session);
+	 * browse_shown is what the panel was last built with, so a change can be
+	 * told apart from libobs re-running callbacks when it builds the panel. */
+	bool browse_kept;
+	bool browse_shown;
 	struct dstr last_path;
 	bool last_from_file;
 	bool transition;
@@ -1128,6 +1133,7 @@ struct library_item {
 	char *stem;
 	char *category;
 	char *name;
+	bool space; /* draws outside the image: offer "Add Space Around the Image" up front */
 };
 typedef DARRAY(struct library_item) library_t;
 
@@ -1151,6 +1157,8 @@ static char *trimmed(const char *s, size_t len)
 		len--;
 	return bstrdup_n(s, len);
 }
+
+static bool contains_ci(const char *haystack, const char *needle);
 
 static void library_load(const char *dir, library_t *lib)
 {
@@ -1181,7 +1189,14 @@ static void library_load(const char *dir, library_t *lib)
 		struct library_item it;
 		it.stem = trimmed(line, eq - line);
 		it.category = trimmed(val, bar ? (size_t)(bar - val) : strlen(val));
-		it.name = bar ? trimmed(bar + 1, strlen(bar + 1)) : bstrdup("");
+		const char *bar2 = bar ? strchr(bar + 1, '|') : NULL;
+		it.name = bar ? trimmed(bar + 1, bar2 ? (size_t)(bar2 - bar - 1) : strlen(bar + 1)) : bstrdup("");
+		it.space = false;
+		if (bar2) {
+			char *flags = trimmed(bar2 + 1, strlen(bar2 + 1));
+			it.space = contains_ci(flags, "space");
+			bfree(flags);
+		}
 		da_push_back(*lib, &it);
 	}
 	strlist_free(lines);
@@ -1613,10 +1628,16 @@ static size_t fill_shader_list(obs_property_t *pick, obs_data_t *settings, bool 
 	const bool has_file = from_file && file && *file;
 	const bool has_code = obs_data_has_user_value(settings, "shader_text");
 
-	obs_property_list_add_string(pick, obs_module_text("ShaderFilter.ChooseShader"), PICK_NONE);
-	obs_property_list_add_string(pick, obs_module_text("ShaderFilter.OtherFile"), PICK_OTHER);
-	if (has_code)
+	const bool code_in_use = !from_file && has_code;
+	size_t top = 0;
+	if (!has_file && !code_in_use) {
+		obs_property_list_add_string(pick, obs_module_text("ShaderFilter.ChooseShader"), PICK_NONE);
+		top++;
+	}
+	if (has_code) {
 		obs_property_list_add_string(pick, obs_module_text("ShaderFilter.InlineCode"), PICK_INLINE);
+		top++;
+	}
 
 	char *lib = library_dir(settings);
 	shader_list_t list;
@@ -1650,10 +1671,20 @@ static size_t fill_shader_list(obs_property_t *pick, obs_data_t *settings, bool 
 		char *name = shader_display_name(file);
 		struct dstr label = {0};
 		dstr_printf(&label, os_file_exists(file) ? "%s" : obs_module_text("ShaderFilter.Missing"), name);
-		obs_property_list_insert_string(pick, has_code ? 3 : 2, label.array, file);
+		obs_property_list_insert_string(pick, top, label.array, file);
 		dstr_free(&label);
 		bfree(name);
 	}
+	/* Files elsewhere, last. */
+	if (any_category) {
+		struct dstr h = {0};
+		dstr_printf(&h, obs_module_text("ShaderFilter.Heading"), obs_module_text("ShaderFilter.OwnFiles"));
+		size_t idx = obs_property_list_add_string(pick, h.array, PICK_HEADING);
+		obs_property_list_item_disable(pick, idx, true);
+		dstr_free(&h);
+	}
+	obs_property_list_add_string(pick, obs_module_text("ShaderFilter.OtherFile"), PICK_OTHER);
+
 	struct dstr help = {0};
 	if (has_file)
 		dstr_printf(&help, obs_module_text("ShaderFilter.ShaderHelpFile"), file);
@@ -1708,6 +1739,11 @@ static bool browse_shaders_changed(obs_properties_t *props, obs_property_t *p, o
 {
 	UNUSED_PARAMETER(p);
 	bool show = obs_data_get_bool(settings, "browse_shaders");
+	struct shader_filter_data *bf = obs_properties_get_param(props);
+	if (bf && show != bf->browse_shown) {
+		bf->browse_kept = show;
+		bf->browse_shown = show;
+	}
 	const char *keys[] = {"shader_category", "shader_search", "next_shader", "previous_shader"};
 	for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
 		obs_property_t *q = obs_properties_get(props, keys[i]);
@@ -1845,6 +1881,35 @@ static bool show_expand_changed(obs_properties_t *props, obs_property_t *p, obs_
 	for (size_t i = 0; i < 4; i++)
 		obs_property_set_visible(obs_properties_get(props, keys[i]), show);
 	return true;
+}
+
+static bool show_advanced_changed(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
+{
+	UNUSED_PARAMETER(p);
+	obs_property_set_visible(obs_properties_get(props, "advanced"), obs_data_get_bool(settings, "show_advanced"));
+	return true;
+}
+
+/* Whether the library marks this shader as drawing outside the image. */
+static bool shader_wants_space(const char *path)
+{
+	struct dstr dir = {0};
+	dstr_copy(&dir, path);
+	char *slash = strrchr(dir.array, '/');
+	char *bslash = strrchr(dir.array, '\\');
+	if (bslash > slash)
+		slash = bslash;
+	bool space = false;
+	if (slash) {
+		dstr_resize(&dir, slash - dir.array);
+		library_t lib;
+		library_load(dir.array, &lib);
+		const struct library_item *it = library_find(&lib, path);
+		space = it && it->space;
+		library_free(&lib);
+	}
+	dstr_free(&dir);
+	return space;
 }
 
 static bool shader_filter_text_changed(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
@@ -3323,16 +3388,18 @@ static obs_properties_t *shader_filter_properties(void *data)
 		obs_properties_add_text(props, "hint_choose", obs_module_text("ShaderFilter.HintChoose"), OBS_TEXT_INFO);
 
 	/* The browsing tools show on a filter with no shader yet. Once a filter
-	 * has a shader they start hidden each time its settings are opened, and
-	 * stay as the person leaves them while trying shaders. */
+	 * has a shader they start hidden each time its settings are opened,
+	 * unless the person opened them on this filter themselves. */
 	const bool refreshing = filter && os_gettime_ns() < filter->props_refresh_until;
 	if (has_file || inline_code) {
-		if (!refreshing)
+		if (!refreshing && !(filter && filter->browse_kept))
 			obs_data_set_bool(settings, "browse_shaders", false);
 	} else if (!obs_data_has_user_value(settings, "browse_shaders")) {
 		obs_data_set_bool(settings, "browse_shaders", true);
 	}
 	const bool browsing = obs_data_get_bool(settings, "browse_shaders");
+	if (filter)
+		filter->browse_shown = browsing;
 	obs_property_t *browse = obs_properties_add_bool(props, "browse_shaders", obs_module_text("ShaderFilter.Browse"));
 	obs_property_set_long_description(browse, obs_module_text("ShaderFilter.BrowseHelp"));
 	obs_property_set_modified_callback(browse, browse_shaders_changed);
@@ -3381,11 +3448,29 @@ static obs_properties_t *shader_filter_properties(void *data)
 		obs_property_t *error = obs_properties_add_text(props, "error_line", error_message, OBS_TEXT_INFO);
 		obs_property_text_set_info_type(error, OBS_TEXT_INFO_ERROR);
 		const char *where = obs_data_get_string(settings, "error_where");
-		if (where && *where)
-			obs_properties_add_text(props, "error_where_text", where, OBS_TEXT_INFO);
+		if (where && *where) {
+			obs_property_t *w = obs_properties_add_text(props, "error_where_text", where, OBS_TEXT_INFO);
+			obs_property_text_set_info_word_wrap(w, false);
+		}
 		if (has_file)
 			obs_properties_add_button2(props, "reload_after_error", obs_module_text("ShaderFilter.ReloadEffect"),
 						   shader_filter_reload_effect_clicked, data);
+		if (has_messages) {
+			obs_property_t *show = obs_properties_add_bool(props, "show_compiler_messages",
+								       obs_module_text("ShaderFilter.ShowCompilerMessages"));
+			obs_property_set_modified_callback(show, show_compiler_messages_changed);
+			const bool visible = obs_data_get_bool(settings, "show_compiler_messages");
+			if (errs && *errs) {
+				obs_property_t *e = obs_properties_add_text(props, "error_details_text", errs, OBS_TEXT_INFO);
+				obs_property_text_set_info_type(e, OBS_TEXT_INFO_ERROR);
+				obs_property_set_visible(e, visible);
+			}
+			if (warns && *warns) {
+				obs_property_t *w = obs_properties_add_text(props, "warning_details_text", warns, OBS_TEXT_INFO);
+				obs_property_text_set_info_type(w, OBS_TEXT_INFO_WARNING);
+				obs_property_set_visible(w, visible);
+			}
+		}
 	}
 	if (inline_code)
 		obs_properties_add_text(props, "inline_note", obs_module_text("ShaderFilter.InlineNote"), OBS_TEXT_INFO);
@@ -3661,7 +3746,9 @@ static obs_properties_t *shader_filter_properties(void *data)
 
 	/* ---- rarely needed ---- */
 	obs_properties_t *adv = obs_properties_create();
+	const bool space_up_front = has_file && shader_wants_space(file);
 	if (!transition && (has_file || inline_code)) {
+		obs_properties_t *space_in = space_up_front ? props : adv;
 		const char *keys[] = {"expand_left", "expand_right", "expand_top", "expand_bottom"};
 		const char *labels[] = {"ShaderFilter.ExpandLeft", "ShaderFilter.ExpandRight", "ShaderFilter.ExpandTop",
 					"ShaderFilter.ExpandBottom"};
@@ -3670,12 +3757,12 @@ static obs_properties_t *shader_filter_properties(void *data)
 			any = any || obs_data_get_int(settings, keys[i]) != 0;
 		if (any)
 			obs_data_set_bool(settings, "show_expand", true);
-		obs_property_t *show = obs_properties_add_bool(adv, "show_expand", obs_module_text("ShaderFilter.ShowExpand"));
+		obs_property_t *show = obs_properties_add_bool(space_in, "show_expand", obs_module_text("ShaderFilter.ShowExpand"));
 		obs_property_set_long_description(show, obs_module_text("ShaderFilter.ShowExpandHelp"));
 		obs_property_set_modified_callback(show, show_expand_changed);
 		const bool visible = obs_data_get_bool(settings, "show_expand");
 		for (size_t i = 0; i < 4; i++) {
-			obs_property_t *e = obs_properties_add_int(adv, keys[i], obs_module_text(labels[i]), 0, 9999, 1);
+			obs_property_t *e = obs_properties_add_int(space_in, keys[i], obs_module_text(labels[i]), 0, 9999, 1);
 			obs_property_int_set_suffix(e, " px");
 			obs_property_set_visible(e, visible);
 		}
@@ -3695,22 +3782,6 @@ static obs_properties_t *shader_filter_properties(void *data)
 								    shader_filter_reload_effect_clicked, data);
 		obs_property_set_long_description(reload, obs_module_text("ShaderFilter.ReloadHelp"));
 	}
-	if (error_message && *error_message && has_messages) {
-		obs_property_t *show = obs_properties_add_bool(adv, "show_compiler_messages",
-							       obs_module_text("ShaderFilter.ShowCompilerMessages"));
-		obs_property_set_modified_callback(show, show_compiler_messages_changed);
-		const bool visible = obs_data_get_bool(settings, "show_compiler_messages");
-		if (errs && *errs) {
-			obs_property_t *e = obs_properties_add_text(adv, "error_details_text", errs, OBS_TEXT_INFO);
-			obs_property_text_set_info_type(e, OBS_TEXT_INFO_ERROR);
-			obs_property_set_visible(e, visible);
-		}
-		if (warns && *warns) {
-			obs_property_t *w = obs_properties_add_text(adv, "warning_details_text", warns, OBS_TEXT_INFO);
-			obs_property_text_set_info_type(w, OBS_TEXT_INFO_WARNING);
-			obs_property_set_visible(w, visible);
-		}
-	}
 	if (inline_code) {
 		obs_property_t *show = obs_properties_add_bool(adv, "show_code", obs_module_text("ShaderFilter.ShowCode"));
 		obs_property_set_modified_callback(show, show_code_changed);
@@ -3726,10 +3797,21 @@ static obs_properties_t *shader_filter_properties(void *data)
 								   shader_filter_reload_effect_clicked, data);
 		obs_property_set_visible(apply, visible);
 	}
-	if (obs_properties_first(adv))
-		obs_properties_add_group(props, "advanced", obs_module_text("ShaderFilter.Advanced"), OBS_GROUP_NORMAL, adv);
-	else
+	if (obs_properties_first(adv)) {
+		/* Shown on request; open already if something in it is in use. */
+		bool in_use = obs_data_get_bool(settings, "show_code");
+		if (!space_up_front)
+			in_use = in_use || obs_data_get_bool(settings, "show_expand");
+		if (in_use)
+			obs_data_set_bool(settings, "show_advanced", true);
+		obs_property_t *show = obs_properties_add_bool(props, "show_advanced", obs_module_text("ShaderFilter.ShowAdvanced"));
+		obs_property_set_modified_callback(show, show_advanced_changed);
+		obs_property_t *group = obs_properties_add_group(props, "advanced", obs_module_text("ShaderFilter.Advanced"),
+								 OBS_GROUP_NORMAL, adv);
+		obs_property_set_visible(group, obs_data_get_bool(settings, "show_advanced"));
+	} else {
 		obs_properties_destroy(adv);
+	}
 
 	obs_properties_add_text(
 		props, "plugin_info",

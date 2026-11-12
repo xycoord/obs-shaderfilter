@@ -43,6 +43,13 @@ def shots():
         # A shader that fails to compile (on OpenGL).
         {"name": "5_error", "filters": [{"settings": {}}], "ui": pick(0, "hard_blink.shader"), "select": 0,
          "panel": True},
+        # Trying shaders: coming back to a filter that has a shader, opening the
+        # browsing tools and narrowing the list to one category.
+        {"name": "7_browsing", "filters": [{"settings": {}}],
+         "ui": pick(0, "glow.shader") + [{"filter": 0, "wait_ms": 1200},
+                                         {"filter": 0, "property": "browse_shaders", "value": True},
+                                         {"filter": 0, "property": "shader_category", "value": "Blur & Glow"}],
+         "select": 0, "panel": True, "open_combo": 0},
         # A filter saved by an older version with code typed into it.
         {"name": "6_legacy_inline_code", "filters": [{"settings": {"shader_text": INLINE}}], "select": 0,
          "panel": True},

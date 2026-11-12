@@ -105,6 +105,8 @@ static void update_cb(void *obj, obs_data_t *, obs_data_t *settings)
 static void apply_ui_value(obs_source_t *filter, obs_data_t *item)
 {
 	const char *prop_name = obs_data_get_string(item, "property");
+	/* As in OBS: the panel is built first, then the person changes a control. */
+	obs_properties_t *props = obs_source_properties(filter);
 	obs_data_t *settings = obs_source_get_settings(filter);
 	obs_data_item_t *v = obs_data_item_byname(item, "value");
 	switch (obs_data_item_gettype(v)) {
@@ -124,7 +126,6 @@ static void apply_ui_value(obs_source_t *filter, obs_data_t *item)
 		break;
 	}
 	obs_data_item_release(&v);
-	obs_properties_t *props = obs_source_properties(filter);
 	obs_property_t *p = obs_properties_get(props, prop_name);
 	if (p)
 		obs_property_modified(p, settings);
@@ -237,6 +238,12 @@ int main(int argc, char **argv)
 		for (size_t k = 0; k < obs_data_array_count(ui); k++) {
 			OBSDataAutoRelease item = obs_data_array_item(ui, k);
 			size_t idx = (size_t)obs_data_get_int(item, "filter");
+			if (obs_data_has_user_value(item, "wait_ms")) {
+				/* time passing, e.g. closing the window and coming back */
+				QThread::msleep((unsigned long)obs_data_get_int(item, "wait_ms"));
+				env_tick(0.05f);
+				continue;
+			}
 			if (idx < filters.size()) {
 				apply_ui_value(filters[idx], item);
 				for (int t = 0; t < 3; t++)
@@ -325,6 +332,19 @@ int main(int argc, char **argv)
 		window.show();
 		for (int k = 0; k < 5; k++)
 			app.processEvents();
+		if (getenv("UISHOT_RELAYOUT")) {
+			window.resize(window.width() + 1, window.height());
+			app.processEvents();
+			window.resize(window.width() - 1, window.height());
+			for (int k = 0; k < 5; k++)
+				app.processEvents();
+		}
+		if (getenv("UISHOT_DEBUG") && view)
+			for (QLabel *l : view->findChildren<QLabel *>())
+				if (l->isVisible())
+					fprintf(stderr, "LABEL y=%d h=%d w=%d hfw=%d wrap=%d align=%x '%s'\n", l->mapTo(view, QPoint(0, 0)).y(),
+						l->height(), l->width(), l->heightForWidth(l->width()), l->wordWrap(),
+						(unsigned)l->alignment(), l->text().left(40).toUtf8().constData());
 		window.grab().save(QString("%1/%2.png").arg(out, shot_name));
 
 		if (view && obs_data_get_bool(shot, "panel")) {
