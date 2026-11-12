@@ -1920,6 +1920,25 @@ static bool show_advanced_changed(obs_properties_t *props, obs_property_t *p, ob
 	return true;
 }
 
+/* "Show Full Compiler Output" and the output itself, hidden until ticked. */
+static void add_compiler_messages(obs_properties_t *props, obs_data_t *settings, const char *errs, const char *warns)
+{
+	obs_property_t *show = obs_properties_add_bool(props, "show_compiler_messages",
+						       obs_module_text("ShaderFilter.ShowCompilerMessages"));
+	obs_property_set_modified_callback(show, show_compiler_messages_changed);
+	const bool visible = obs_data_get_bool(settings, "show_compiler_messages");
+	if (errs && *errs) {
+		obs_property_t *e = obs_properties_add_text(props, "error_details_text", errs, OBS_TEXT_INFO);
+		obs_property_text_set_info_type(e, OBS_TEXT_INFO_ERROR);
+		obs_property_set_visible(e, visible);
+	}
+	if (warns && *warns) {
+		obs_property_t *w = obs_properties_add_text(props, "warning_details_text", warns, OBS_TEXT_INFO);
+		obs_property_text_set_info_type(w, OBS_TEXT_INFO_WARNING);
+		obs_property_set_visible(w, visible);
+	}
+}
+
 /* Whether a shader file is one of those shipped with the plugin. */
 static bool is_bundled_shader(const char *path)
 {
@@ -3424,17 +3443,21 @@ static obs_properties_t *shader_filter_properties(void *data)
 
 	const char *error_message = obs_data_get_string(settings, "error_message");
 	if (!has_file && !inline_code && !(error_message && *error_message))
-		obs_properties_add_text(props, "hint_choose", obs_module_text("ShaderFilter.HintChoose"), OBS_TEXT_INFO);
+		obs_property_text_set_info_word_wrap(
+			obs_properties_add_text(props, "hint_choose", obs_module_text("ShaderFilter.HintChoose"), OBS_TEXT_INFO),
+			false);
 
-	/* What's wrong (or special) about the shader, right under it. */
+	/* What's wrong (or special) about the shader, right under it. A bundled
+	 * shader isn't the person's to fix: no path, no Reload, and its compiler
+	 * output is under Advanced. */
+	const bool bundled = has_file && is_bundled_shader(file);
 	const char *errs = obs_data_get_string(settings, "error_details");
 	const char *warns = obs_data_get_string(settings, "warning_details");
 	const bool has_messages = (errs && *errs) || (warns && *warns);
 	if (error_message && *error_message) {
 		obs_property_t *error = obs_properties_add_text(props, "error_line", error_message, OBS_TEXT_INFO);
 		obs_property_text_set_info_type(error, OBS_TEXT_INFO_ERROR);
-		/* A bundled shader isn't the person's to fix: no path, no Reload. */
-		const bool bundled = has_file && is_bundled_shader(file);
+		obs_property_text_set_info_word_wrap(error, false);
 		const char *where = obs_data_get_string(settings, "error_where");
 		if (!bundled && where && *where) {
 			obs_property_t *w = obs_properties_add_text(props, "error_where_text", where, OBS_TEXT_INFO);
@@ -3443,22 +3466,8 @@ static obs_properties_t *shader_filter_properties(void *data)
 		if (has_file && !bundled)
 			obs_properties_add_button2(props, "reload_after_error", obs_module_text("ShaderFilter.ReloadEffect"),
 						   shader_filter_reload_effect_clicked, data);
-		if (has_messages) {
-			obs_property_t *show = obs_properties_add_bool(props, "show_compiler_messages",
-								       obs_module_text("ShaderFilter.ShowCompilerMessages"));
-			obs_property_set_modified_callback(show, show_compiler_messages_changed);
-			const bool visible = obs_data_get_bool(settings, "show_compiler_messages");
-			if (errs && *errs) {
-				obs_property_t *e = obs_properties_add_text(props, "error_details_text", errs, OBS_TEXT_INFO);
-				obs_property_text_set_info_type(e, OBS_TEXT_INFO_ERROR);
-				obs_property_set_visible(e, visible);
-			}
-			if (warns && *warns) {
-				obs_property_t *w = obs_properties_add_text(props, "warning_details_text", warns, OBS_TEXT_INFO);
-				obs_property_text_set_info_type(w, OBS_TEXT_INFO_WARNING);
-				obs_property_set_visible(w, visible);
-			}
-		}
+		if (has_messages && !bundled)
+			add_compiler_messages(props, settings, errs, warns);
 	}
 	if (inline_code)
 	{
@@ -3500,6 +3509,7 @@ static obs_properties_t *shader_filter_properties(void *data)
 		for (size_t i = 0; i < categories.num; i++)
 			obs_property_list_add_string(cat, categories.array[i], categories.array[i]);
 		obs_property_set_modified_callback(cat, shader_search_changed);
+		obs_property_set_long_description(cat, obs_module_text("ShaderFilter.CategoryHelp"));
 		obs_property_set_visible(cat, browsing);
 	} else if (*obs_data_get_string(settings, "shader_category")) {
 		obs_data_set_string(settings, "shader_category", "");
@@ -3836,6 +3846,8 @@ static obs_properties_t *shader_filter_properties(void *data)
 								    shader_filter_reload_effect_clicked, data);
 		obs_property_set_long_description(reload, obs_module_text("ShaderFilter.ReloadHelp"));
 	}
+	if (bundled && error_message && *error_message && has_messages)
+		add_compiler_messages(adv, settings, errs, warns);
 	if (inline_code) {
 		obs_property_t *show = obs_properties_add_bool(adv, "show_code", obs_module_text("ShaderFilter.ShowCode"));
 		obs_property_set_modified_callback(show, show_code_changed);

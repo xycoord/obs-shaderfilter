@@ -77,20 +77,28 @@ necessary files should look like this:
 
 ## Usage
 
-The filter can be added to any source through the "Filters" option when right-clicking on a source. The name
-of the filter is "User-defined shader." 
+Add the filter to any source through "Filters" when right-clicking it; it is called "Shader".
 
-Shaders can either be entered directly in a text box in the filter properties, or loaded from a file. To change 
-between the two modes, use the "Load shader text from file" toggle. If you are entering your shader text directly,
-note that you will need to use the "Reload effect" button to apply your changes. This can also be used to reload an external file if changes have been made. 
-OBS shaders are written in OBS version of HLSL.
+- **Shader** lists the shaders that come with the plugin, grouped by category, plus "Other file…" for a
+  shader file anywhere else. `.shader` and `.effect` files are both listed and handled automatically.
+  Choosing one applies it straight away and names the filter after it ("Glow", "Glow 2"…), so a stack of
+  shader filters can be told apart; a name you typed yourself is never changed. A filter whose shader fails
+  shows "⚠" before its name until it works again.
+- **Browse Shaders** shows Category and Search, to narrow the list, and Next/Previous Shader, to try the
+  shaders one after another while watching the preview.
+- The shader's parameters follow, in a "*Shader* Settings" group.
+- **Show Advanced Options** holds the rest: "Add Space Around the Image" (extra pixels on each side, for
+  effects such as shadows that draw outside the source; shown next to the settings of shaders that need it),
+  "Reload Shader File" for after editing the file in a text editor, and, for filters saved by older versions
+  with their shader code typed in, that code. Such filters keep working.
 
-The option is provided to render extra pixels on each side of the source. This is useful for effects like shadows
-that need to render outside the bounds of the original source. 
+The shader list for a folder can be given categories and display names with a `library.ini` next to the
+shaders; see [data/examples/library.ini](data/examples/library.ini).
 
-Normally, all that's required for OBS purposes is a pixel shader, so the plugin will wrap your shader text with a 
-standard template to add a basic vertex shader and other boilerplate. If you wish to customize the vertex shader
-or other parts of the effect for some reason, you can check the "Use Effect File (.effect)" option. 
+Normally all that's required for OBS purposes is a pixel shader (a `.shader` file), and the plugin wraps it
+with a standard template that adds a basic vertex shader and other boilerplate. A full `.effect` file lets
+you customise the vertex shader or other parts of the effect; only `.shader` files can be merged with
+neighbouring shader filters (see Performance). OBS shaders are written in OBS's version of HLSL.
 
 Any parameters you add to your shader (defined as `uniform` variables) will be detected by the plugin and exposed
 in the properties window to have their values set. Currently, only `int`, `float`, `bool`, `string`, `texture2d`, and `float4`
@@ -136,9 +144,9 @@ uniform string notes<
 You set default values as a normal assignment ```uniform string notes = 'my note';```, except for `float4` 
 which requires bracket \{\} notation like ```uniform float4 mycolor = { 0.75, 0.75, 0.75, 1.0};``` 
 
-Note that if your shader has syntax errors and fails to compile, OBS does not provide any error messages; you will
-simply see your source render nothing at all. In many cases the output of the effect parser will be written to the
-OBS log file, which you can view with the Help -> Log Files menu in OBS. 
+If your shader fails to compile, the filter passes the image through unchanged and its settings say why, with
+the first compiler message; "Show Full Compiler Output" shows the rest. The parser output is also written to
+the OBS log file (Help -> Log Files).
 
 ### Standard parameters
 
@@ -305,6 +313,9 @@ xvfb-run -a tests/run.sh bench
 ```
 
 See [tests/README.md](tests/README.md) for what is compared and how differences are judged.
+
+`tests/ui/` captures the filter's settings panel, drawn by OBS's own properties widget, in a set of fixed
+scenarios (`tests/ui/shots.py`), for reviewing the UI.
 
 ## Donations
 https://www.paypal.me/exeldro
