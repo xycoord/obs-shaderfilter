@@ -17,10 +17,10 @@ HERE = Path(__file__).resolve().parent
 EX = HERE.parent.parent / "data" / "examples"
 
 
-def pick(i, name):
+def pick(i, name, folder=EX):
     """Choose a shader file for filter i through the UI."""
     return [{"filter": i, "property": "from_file", "value": True},
-            {"filter": i, "property": "shader_file_name", "value": str(EX / name)}]
+            {"filter": i, "property": "shader_file_name", "value": str(folder / name)}]
 
 
 def shots():
@@ -40,8 +40,8 @@ def shots():
         # A full .effect file.
         {"name": "4_effect_file", "filters": [{"settings": {}}], "ui": pick(0, "pulse.effect"), "select": 0,
          "panel": True},
-        # A shader that fails to compile (on OpenGL).
-        {"name": "5_error", "filters": [{"settings": {}}], "ui": pick(0, "hard_blink.shader"), "select": 0,
+        # A shader file of the person's own that fails to compile.
+        {"name": "5_error", "filters": [{"settings": {}}], "ui": pick(0, "broken.shader", HERE), "select": 0,
          "panel": True},
         # Trying shaders: coming back to a filter that has a shader, opening the
         # browsing tools and narrowing the list to one category.

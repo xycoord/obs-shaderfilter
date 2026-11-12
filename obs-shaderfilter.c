@@ -3967,7 +3967,7 @@ static obs_properties_t *shader_filter_properties(void *data)
 	}
 
 	/* ---- what it costs, measured on this computer ---- */
-	if (filter && !transition && (has_file || inline_code)) {
+	if (filter && !transition && (has_file || inline_code) && !(error_message && *error_message)) {
 		struct dstr t = {0};
 		if (filter->gpu_merged) {
 			dstr_copy(&t, obs_module_text("ShaderFilter.GpuMerged"));
