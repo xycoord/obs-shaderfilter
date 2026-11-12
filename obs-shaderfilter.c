@@ -12,6 +12,7 @@
 #include <obs-module.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <util/base.h>
 #include <util/darray.h>
@@ -279,13 +280,17 @@ struct effect_param_data {
 	} step;
 };
 
-/* GPU timer queries for one frame's pass; results are read a few frames
- * later, when the GPU has long finished, so reading never stalls. */
+/* GPU timer queries for the filter's pass. Reading a query waits for the GPU
+ * to finish it (on Direct3D and OpenGL alike), so a query is only read once
+ * GPU_TIMER_AGE frames have passed since it was issued; until then the slot
+ * is skipped and that draw isn't timed. */
 #define GPU_TIMER_SLOTS 6
+#define GPU_TIMER_AGE 4
 struct gpu_timer_slot {
 	gs_timer_t *timer;
 	gs_timer_range_t *range; /* NULL where the driver has none (OpenGL) */
 	bool pending;
+	uint64_t issued_tick;
 };
 
 struct shader_filter_data {
@@ -313,12 +318,16 @@ struct shader_filter_data {
 	/* Measured GPU time of this filter's own pass (graphics thread). */
 	struct gpu_timer_slot gpu_slots[GPU_TIMER_SLOTS];
 	size_t gpu_slot;
+	uint64_t gpu_tick; /* video ticks seen, to age the queries */
 	double gpu_sum_ms;
 	uint32_t gpu_samples;
 	uint64_t gpu_window_start;
 	float gpu_ms;          /* average over the last second; < 0 if not drawn */
-	bool gpu_merged;       /* runs inside the next shader filter's pass */
-	uint32_t gpu_group;    /* filters drawn in this filter's pass, itself included */
+	/* When (in gpu_tick) this filter was last drawn inside the next shader
+	 * filter's pass, or last drew group_n filters in its own; 0 if never. */
+	uint64_t merged_tick;
+	uint64_t group_tick;
+	uint32_t group_n;
 	bool gpu_props_waiting; /* the panel was built before there was a figure */
 	struct dstr last_path;
 	bool last_from_file;
@@ -751,8 +760,8 @@ static void set_error_message(obs_data_t *settings, const char *plain_fmt, const
 		/* "0:41(12): error: msg" / "file(41,12): error X3004: msg" -> "msg"
 		 * (line numbers refer to generated code, not the file). */
 		const char *text = first.array;
-		const char *e = strstr(text, "error");
-		const char *colon = e ? strstr(e, ": ") : NULL;
+		const char *e = strstr(text, ": error");
+		const char *colon = e ? strstr(e + 2, ": ") : NULL;
 		if (colon)
 			text = colon + 2;
 		dstr_catf(&where, ": %s", text);
@@ -787,6 +796,18 @@ static void mark_error_in_name(struct shader_filter_data *filter, obs_data_t *se
 	else if (!failed && strcmp(cur, marked.array) == 0)
 		obs_source_set_name(filter->context, auto_name);
 	dstr_free(&marked);
+}
+
+/* How the filter has been drawn in the last couple of seconds, for its panel. */
+#define DRAWN_RECENTLY_TICKS 120
+static bool drawn_merged(const struct shader_filter_data *filter)
+{
+	return filter->merged_tick && filter->gpu_tick - filter->merged_tick < DRAWN_RECENTLY_TICKS;
+}
+
+static uint32_t drawn_group(const struct shader_filter_data *filter)
+{
+	return filter->group_tick && filter->gpu_tick - filter->group_tick < DRAWN_RECENTLY_TICKS ? filter->group_n : 1;
 }
 
 static char *examples_dir(void);
@@ -1078,7 +1099,6 @@ static void *shader_filter_create(obs_data_t *settings, obs_source_t *source)
 	filter->context = source;
 	filter->reload_effect = true;
 	filter->gpu_ms = -1.0f;
-	filter->gpu_group = 1;
 
 	dstr_init(&filter->last_path);
 	dstr_copy(&filter->last_path, obs_data_get_string(settings, "shader_file_name"));
@@ -1289,6 +1309,32 @@ static char *shader_display_name(const char *path)
 
 typedef DARRAY(struct shader_entry) shader_list_t;
 
+/* Whether two folder paths name the same folder, written either way: libobs
+ * gives the bundled folder with backslashes on Windows, while paths saved
+ * from file dialogs use forward slashes; Windows and macOS ignore case. */
+static bool same_folder(const char *a, const char *b)
+{
+	if (!a || !b)
+		return false;
+	struct dstr x = {0}, y = {0};
+	dstr_copy(&x, a);
+	dstr_copy(&y, b);
+	dstr_replace(&x, "\\", "/");
+	dstr_replace(&y, "\\", "/");
+	while (x.len > 1 && x.array[x.len - 1] == '/')
+		dstr_resize(&x, x.len - 1);
+	while (y.len > 1 && y.array[y.len - 1] == '/')
+		dstr_resize(&y, y.len - 1);
+#if defined(_WIN32) || defined(__APPLE__)
+	const bool same = astrcmpi(x.array, y.array) == 0;
+#else
+	const bool same = strcmp(x.array, y.array) == 0;
+#endif
+	dstr_free(&x);
+	dstr_free(&y);
+	return same;
+}
+
 static char *examples_dir(void)
 {
 	struct dstr d = {0};
@@ -1320,12 +1366,60 @@ static bool path_is_effect(const char *path)
 	return effect;
 }
 
+/* Whether a shader file is a transition. Filling the Shader list asks this of
+ * every file, on every keystroke in Search, so the answer is remembered per
+ * file until the file changes (size or modification time). */
+struct transition_memo {
+	char *path;
+	time_t mtime;
+	int64_t size;
+	bool transition;
+};
+static DARRAY(struct transition_memo) transition_memos;
+static pthread_mutex_t transition_memo_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 static bool file_is_transition(const char *path)
 {
+	struct stat st;
+	const bool known = os_stat(path, &st) == 0;
+	bool t = false, found = false;
+	pthread_mutex_lock(&transition_memo_mutex);
+	for (size_t i = 0; known && i < transition_memos.num && !found; i++) {
+		struct transition_memo *m = &transition_memos.array[i];
+		if (strcmp(m->path, path) != 0)
+			continue;
+		if (m->mtime == st.st_mtime && m->size == (int64_t)st.st_size) {
+			t = m->transition;
+			found = true;
+		} else {
+			bfree(m->path);
+			da_erase(transition_memos, i);
+			break;
+		}
+	}
+	pthread_mutex_unlock(&transition_memo_mutex);
+	if (found)
+		return t;
+
 	char *text = os_quick_read_utf8_file(path);
-	bool t = text && strstr(text, "image_a") && strstr(text, "image_b");
+	t = text && strstr(text, "image_a") && strstr(text, "image_b");
 	bfree(text);
+	if (known) {
+		struct transition_memo m = {bstrdup(path), st.st_mtime, (int64_t)st.st_size, t};
+		pthread_mutex_lock(&transition_memo_mutex);
+		da_push_back(transition_memos, &m);
+		pthread_mutex_unlock(&transition_memo_mutex);
+	}
 	return t;
+}
+
+static void transition_memos_free(void)
+{
+	pthread_mutex_lock(&transition_memo_mutex);
+	for (size_t i = 0; i < transition_memos.num; i++)
+		bfree(transition_memos.array[i].path);
+	da_free(transition_memos);
+	pthread_mutex_unlock(&transition_memo_mutex);
 }
 
 /* Names for bundled files whose file names don't make good titles. */
@@ -1453,13 +1547,17 @@ static bool contains_ci(const char *haystack, const char *needle)
 }
 
 /* The shaders in `dir` for a filter or a transition, by name, in `category`
- * (if any) and matching `search` (if any, against name and category).
- * Starting points (templates, examples) are left out, and an .effect with a
- * .shader of the same name is listed once, as the .shader. */
+ * (if any) and matching `search` (if any, against name and category). An
+ * .effect with a .shader of the same name is listed once, as the .shader. */
 static void list_shaders(const char *dir, bool transitions, const char *search, const char *category,
 			 shader_list_t *out)
 {
 	da_init(*out);
+	/* Templates and examples in the bundled folder are starting points, not
+	 * shaders to use; in the person's own folders everything is listed. */
+	char *bundled_dir = examples_dir();
+	const bool bundled = same_folder(dir, bundled_dir);
+	bfree(bundled_dir);
 	library_t lib;
 	library_load(dir, &lib);
 	os_dir_t *d = os_opendir(dir);
@@ -1474,7 +1572,7 @@ static void list_shaders(const char *dir, bool transitions, const char *search, 
 		const char *n = ent->d_name;
 		if (!has_ext(n, ".shader") && !has_ext(n, ".effect"))
 			continue;
-		if (contains_ci(n, "template") || contains_ci(n, "example"))
+		if (bundled && (contains_ci(n, "template") || contains_ci(n, "example")))
 			continue;
 		struct dstr path = {0};
 		dstr_printf(&path, "%s/%s", dir, n);
@@ -1656,6 +1754,27 @@ static void choose_shader_file(struct shader_filter_data *filter, obs_data_t *se
 	auto_name_filter(filter, settings, path, false);
 }
 
+/* A greyed heading in the Shader list, which can't be chosen. */
+static void add_list_heading(obs_property_t *pick, const char *title)
+{
+	struct dstr h = {0};
+	dstr_printf(&h, obs_module_text("ShaderFilter.Heading"), title);
+	size_t idx = obs_property_list_add_string(pick, h.array, PICK_HEADING);
+	obs_property_list_item_disable(pick, idx, true);
+	dstr_free(&h);
+}
+
+/* A shader in the Shader list, with its cost rating if it has one. */
+static void add_shader_entry(obs_property_t *pick, const struct shader_entry *e)
+{
+	static const char *cost_fmt[] = {"%s", "ShaderFilter.CostMedium", "ShaderFilter.CostHeavy",
+					 "ShaderFilter.CostVeryHeavy"};
+	struct dstr label = {0};
+	dstr_printf(&label, e->cost > 0 && e->cost <= 3 ? obs_module_text(cost_fmt[e->cost]) : "%s", e->label);
+	obs_property_list_add_string(pick, label.array, e->path);
+	dstr_free(&label);
+}
+
 /* Fill the "Shader" list for the current settings; returns how many shaders
  * it lists (not counting the fixed entries and headings) and sets *pos to the
  * current shader's place among them (1-based; 0 if not among them). */
@@ -1679,11 +1798,20 @@ static size_t fill_shader_list(obs_property_t *pick, obs_data_t *settings, bool 
 		top++;
 	}
 
-	char *lib = library_dir(settings);
-	shader_list_t list;
+	/* The bundled library always, by category; then, when the shader comes
+	 * from a folder of the person's own, that folder's shaders. */
+	char *bundled = examples_dir();
+	char *own = library_dir(settings);
+	const bool own_folder = bundled && own && !same_folder(own, bundled);
 	const bool narrow = obs_data_get_bool(settings, "browse_shaders");
-	list_shaders(lib, transition, narrow ? obs_data_get_string(settings, "shader_search") : "",
-		     narrow ? obs_data_get_string(settings, "shader_category") : "", &list);
+	const char *search = narrow ? obs_data_get_string(settings, "shader_search") : "";
+	const char *category = narrow ? obs_data_get_string(settings, "shader_category") : "";
+	shader_list_t list, mine;
+	list_shaders(bundled, transition, search, category, &list);
+	da_init(mine);
+	if (own_folder)
+		list_shaders(own, transition, search, category, &mine);
+
 	bool listed = false;
 	bool any_category = false;
 	for (size_t i = 0; i < list.num; i++)
@@ -1692,25 +1820,27 @@ static size_t fill_shader_list(obs_property_t *pick, obs_data_t *settings, bool 
 	for (size_t i = 0; i < list.num; i++) {
 		const char *c = list.array[i].category;
 		if (any_category && (!last_category || astrcmpi(c, last_category) != 0)) {
-			/* a heading for each category, which can't be chosen */
-			struct dstr h = {0};
-			dstr_printf(&h, obs_module_text("ShaderFilter.Heading"),
-				    *c ? c : obs_module_text("ShaderFilter.Uncategorised"));
-			size_t idx = obs_property_list_add_string(pick, h.array, PICK_HEADING);
-			obs_property_list_item_disable(pick, idx, true);
-			dstr_free(&h);
+			add_list_heading(pick, *c ? c : obs_module_text("ShaderFilter.Uncategorised"));
 			last_category = c;
 		}
-		static const char *cost_fmt[] = {"%s", "ShaderFilter.CostMedium", "ShaderFilter.CostHeavy",
-						 "ShaderFilter.CostVeryHeavy"};
-		const int cost = list.array[i].cost;
-		struct dstr label = {0};
-		dstr_printf(&label, cost > 0 && cost <= 3 ? obs_module_text(cost_fmt[cost]) : "%s", list.array[i].label);
-		obs_property_list_add_string(pick, label.array, list.array[i].path);
-		dstr_free(&label);
+		add_shader_entry(pick, &list.array[i]);
 		if (has_file && strcmp(list.array[i].path, file) == 0) {
 			listed = true;
 			*pos = i + 1;
+		}
+	}
+	if (mine.num) {
+		const char *folder = strrchr(own, '/');
+		const char *folder2 = strrchr(own, '\\');
+		if (folder2 > folder)
+			folder = folder2;
+		add_list_heading(pick, folder ? folder + 1 : own);
+		for (size_t i = 0; i < mine.num; i++) {
+			add_shader_entry(pick, &mine.array[i]);
+			if (has_file && strcmp(mine.array[i].path, file) == 0) {
+				listed = true;
+				*pos = list.num + i + 1;
+			}
 		}
 	}
 	if (has_file && !listed) {
@@ -1723,29 +1853,26 @@ static size_t fill_shader_list(obs_property_t *pick, obs_data_t *settings, bool 
 		bfree(name);
 	}
 	/* Files elsewhere, last. */
-	if (any_category) {
-		struct dstr h = {0};
-		dstr_printf(&h, obs_module_text("ShaderFilter.Heading"), obs_module_text("ShaderFilter.OwnFiles"));
-		size_t idx = obs_property_list_add_string(pick, h.array, PICK_HEADING);
-		obs_property_list_item_disable(pick, idx, true);
-		dstr_free(&h);
-	}
+	if (any_category)
+		add_list_heading(pick, obs_module_text("ShaderFilter.OwnFiles"));
 	obs_property_list_add_string(pick, obs_module_text("ShaderFilter.OtherFile"), PICK_OTHER);
 
 	struct dstr help = {0};
 	if (has_file)
 		dstr_printf(&help, obs_module_text("ShaderFilter.ShaderHelpFile"), file);
 	else
-		dstr_printf(&help, obs_module_text("ShaderFilter.ShaderHelpFolder"), lib);
+		dstr_printf(&help, obs_module_text("ShaderFilter.ShaderHelpFolder"), bundled);
 	if (any_category) {
 		dstr_cat(&help, "\n\n");
 		dstr_cat(&help, obs_module_text("ShaderFilter.CostHelp"));
 	}
 	obs_property_set_long_description(pick, help.array);
 	dstr_free(&help);
-	size_t n = list.num;
+	size_t n = list.num + mine.num;
 	free_shader_list(&list);
-	bfree(lib);
+	free_shader_list(&mine);
+	bfree(bundled);
+	bfree(own);
 	return n;
 }
 
@@ -2019,14 +2146,16 @@ static bool preset_bool(const char *v)
 /* Whether the filter's current values are the preset's (so the list shows it). */
 static bool preset_matches(struct shader_filter_data *filter, obs_data_t *settings, const struct shader_preset *preset)
 {
+	size_t known = 0;
 	for (obs_data_item_t *it = obs_data_first(preset->values); it; obs_data_item_next(&it)) {
 		const char *key = obs_data_item_get_name(it);
 		const char *v = obs_data_item_get_string(it);
 		struct effect_param_data *param = find_param(filter, key);
-		bool same = true;
 		if (!param)
-			same = true;
-		else if (param->type == GS_SHADER_PARAM_FLOAT)
+			continue;
+		known++;
+		bool same = true;
+		if (param->type == GS_SHADER_PARAM_FLOAT)
 			same = fabs(obs_data_get_double(settings, key) - atof(v)) < 1e-4;
 		else if (param->type == GS_SHADER_PARAM_INT)
 			same = obs_data_get_int(settings, key) == (long long)floor(atof(v) + 0.5);
@@ -2037,7 +2166,7 @@ static bool preset_matches(struct shader_filter_data *filter, obs_data_t *settin
 			return false;
 		}
 	}
-	return true;
+	return known > 0;
 }
 
 static void preset_apply(struct shader_filter_data *filter, obs_data_t *settings, const struct shader_preset *preset)
@@ -2091,9 +2220,22 @@ static bool shader_preset_changed(obs_properties_t *props, obs_property_t *p, ob
 /* Whether a shader file is one of those shipped with the plugin. */
 static bool is_bundled_shader(const char *path)
 {
-	char *bundled = examples_dir();
-	bool yes = path && bundled && strncmp(path, bundled, strlen(bundled)) == 0;
-	bfree(bundled);
+	if (!path || !*path)
+		return false;
+	struct dstr dir = {0};
+	dstr_copy(&dir, path);
+	char *slash = strrchr(dir.array, '/');
+	char *bslash = strrchr(dir.array, '\\');
+	if (bslash > slash)
+		slash = bslash;
+	bool yes = false;
+	if (slash) {
+		dstr_resize(&dir, slash - dir.array);
+		char *bundled = examples_dir();
+		yes = same_folder(dir.array, bundled);
+		bfree(bundled);
+	}
+	dstr_free(&dir);
 	return yes;
 }
 
@@ -3602,12 +3744,9 @@ static obs_properties_t *shader_filter_properties(void *data)
 	if (error_message && *error_message) {
 		obs_property_t *error = obs_properties_add_text(props, "error_line", error_message, OBS_TEXT_INFO);
 		obs_property_text_set_info_type(error, OBS_TEXT_INFO_ERROR);
-		obs_property_text_set_info_word_wrap(error, false);
 		const char *where = obs_data_get_string(settings, "error_where");
-		if (!bundled && where && *where) {
-			obs_property_t *w = obs_properties_add_text(props, "error_where_text", where, OBS_TEXT_INFO);
-			obs_property_text_set_info_word_wrap(w, false);
-		}
+		if (!bundled && where && *where)
+			obs_properties_add_text(props, "error_where_text", where, OBS_TEXT_INFO);
 		if (has_file && !bundled)
 			obs_properties_add_button2(props, "reload_after_error", obs_module_text("ShaderFilter.ReloadEffect"),
 						   shader_filter_reload_effect_clicked, data);
@@ -3618,7 +3757,6 @@ static obs_properties_t *shader_filter_properties(void *data)
 	{
 		obs_property_t *note = obs_properties_add_text(props, "inline_note", obs_module_text("ShaderFilter.InlineNote"),
 							       OBS_TEXT_INFO);
-		obs_property_text_set_info_word_wrap(note, false);
 		/* the rest of the story is on the Shader list's help icon */
 		obs_property_set_long_description(pick, obs_module_text("ShaderFilter.InlineNoteHelp"));
 	}
@@ -3644,7 +3782,10 @@ static obs_properties_t *shader_filter_properties(void *data)
 
 	category_list_t categories;
 	da_init(categories);
-	library_categories(lib, &categories);
+	/* Categories come from the bundled library, which is always listed. */
+	char *bundled_lib = examples_dir();
+	library_categories(bundled_lib, &categories);
+	bfree(bundled_lib);
 	if (categories.num) {
 		obs_property_t *cat = obs_properties_add_list(props, "shader_category", obs_module_text("ShaderFilter.Category"),
 							      OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
@@ -3969,7 +4110,7 @@ static obs_properties_t *shader_filter_properties(void *data)
 	/* ---- what it costs, measured on this computer ---- */
 	if (filter && !transition && (has_file || inline_code) && !(error_message && *error_message)) {
 		struct dstr t = {0};
-		if (filter->gpu_merged) {
+		if (drawn_merged(filter)) {
 			dstr_copy(&t, obs_module_text("ShaderFilter.GpuMerged"));
 		} else if (filter->gpu_ms >= 0.0f) {
 			struct obs_video_info ovi;
@@ -3981,9 +4122,10 @@ static obs_properties_t *shader_filter_properties(void *data)
 				fps = (int)((double)ovi.fps_num / ovi.fps_den + 0.5);
 			}
 			const double pct = filter->gpu_ms / frame_ms * 100.0;
-			if (filter->gpu_group > 1)
+			const uint32_t group = drawn_group(filter);
+			if (group > 1)
 				dstr_printf(&t, obs_module_text("ShaderFilter.GpuTimeGroup"), filter->gpu_ms, pct, fps,
-					    (int)filter->gpu_group - 1);
+					    (int)group - 1);
 			else
 				dstr_printf(&t, obs_module_text("ShaderFilter.GpuTime"), filter->gpu_ms, pct, fps);
 		} else {
@@ -4366,9 +4508,11 @@ static void prepare_derived(struct shader_filter_data *filter);
 
 static void gpu_publish(struct shader_filter_data *filter);
 
+
 static void shader_filter_tick(void *data, float seconds)
 {
 	struct shader_filter_data *filter = data;
+	filter->gpu_tick++;
 	gpu_publish(filter);
 	obs_source_t *target = filter->transition ? filter->context : obs_filter_get_target(filter->context);
 	if (!target)
@@ -4913,19 +5057,18 @@ static const char *out_form_technique(enum out_form form)
 	return form == OUT_LINKED ? "DrawLinked" : form == OUT_PREMUL ? "DrawPremul" : "Draw";
 }
 
-/* Read a finished query into the running average; false if not ready yet. */
-static bool gpu_timer_collect(struct shader_filter_data *filter, struct gpu_timer_slot *slot)
+/* Read a query old enough to be finished into the running average. */
+static void gpu_timer_collect(struct shader_filter_data *filter, struct gpu_timer_slot *slot)
 {
 	bool disjoint = false;
 	uint64_t frequency = 0, ticks = 0;
-	if (!gs_timer_range_get_data(slot->range, &disjoint, &frequency) || !gs_timer_get_data(slot->timer, &ticks))
-		return false;
 	slot->pending = false;
+	if (!gs_timer_range_get_data(slot->range, &disjoint, &frequency) || !gs_timer_get_data(slot->timer, &ticks))
+		return;
 	if (!disjoint && frequency) {
 		filter->gpu_sum_ms += (double)ticks * 1000.0 / (double)frequency;
 		filter->gpu_samples++;
 	}
-	return true;
 }
 
 static struct gpu_timer_slot *gpu_timer_begin(struct shader_filter_data *filter)
@@ -4935,8 +5078,13 @@ static struct gpu_timer_slot *gpu_timer_begin(struct shader_filter_data *filter)
 		slot->timer = gs_timer_create();
 		slot->range = gs_timer_range_create();
 	}
-	if (!slot->timer || (slot->pending && !gpu_timer_collect(filter, slot)))
+	if (!slot->timer)
 		return NULL;
+	if (slot->pending) {
+		if (filter->gpu_tick - slot->issued_tick < GPU_TIMER_AGE)
+			return NULL;
+		gpu_timer_collect(filter, slot);
+	}
 	gs_timer_range_begin(slot->range);
 	gs_timer_begin(slot->timer);
 	return slot;
@@ -4949,6 +5097,7 @@ static void gpu_timer_end(struct shader_filter_data *filter, struct gpu_timer_sl
 	gs_timer_end(slot->timer);
 	gs_timer_range_end(slot->range);
 	slot->pending = true;
+	slot->issued_tick = filter->gpu_tick;
 	filter->gpu_slot = (filter->gpu_slot + 1) % GPU_TIMER_SLOTS;
 }
 
@@ -5351,6 +5500,10 @@ static void render_derived(struct shader_filter_data **stages, size_t n, struct 
 			}
 		}
 		draw_shader(last, de->effect, input, form);
+		last->group_n = (uint32_t)n;
+		last->group_tick = last->gpu_tick;
+		for (size_t i = 0; i + 1 < n; i++)
+			stages[i]->merged_tick = stages[i]->gpu_tick;
 	}
 	obs_source_release(input_ref);
 
@@ -5381,10 +5534,8 @@ enum downstream_use {
 	DOWN_FUSED,  /* one compiles us into its own pass */
 };
 
-static enum downstream_use downstream_use(struct shader_filter_data *filter);
-
 /* Once a second (on the graphics thread): the average GPU time of the
- * filter's own pass, and how it is drawn, for its settings panel. */
+ * filter's own pass, for its settings panel. */
 static void gpu_publish(struct shader_filter_data *filter)
 {
 	const uint64_t now = os_gettime_ns();
@@ -5399,28 +5550,9 @@ static void gpu_publish(struct shader_filter_data *filter)
 	filter->gpu_sum_ms = 0.0;
 	filter->gpu_samples = 0;
 
-	filter->gpu_merged = false;
-	filter->gpu_group = 1;
-	if (!filter->transition) {
-		filter->gpu_merged = downstream_use(filter) == DOWN_FUSED;
-		if (filter->shader_body) {
-			struct shader_filter_data *stages[SF_MAX_FUSED];
-			obs_source_t *refs[SF_MAX_FUSED];
-			stages[0] = filter;
-			refs[0] = NULL;
-			size_t n = collect_fusion_group(filter, stages, refs, true);
-			if (n >= 2) {
-				struct derived_effect *de = find_derived(filter, stages, n);
-				if (de && !de->failed)
-					filter->gpu_group = (uint32_t)n;
-			}
-			release_refs(refs, n);
-		}
-	}
-
 	/* A panel built before there was a figure is rebuilt once to show it
 	 * (as a refresh, so the browsing tools stay as they are). */
-	if (filter->gpu_props_waiting && (filter->gpu_ms >= 0.0f || filter->gpu_merged)) {
+	if (filter->gpu_props_waiting && (filter->gpu_ms >= 0.0f || drawn_merged(filter))) {
 		filter->gpu_props_waiting = false;
 		filter->props_refresh_until = now + 1000000000ULL;
 		obs_source_update_properties(filter->context);
@@ -5760,7 +5892,6 @@ static void *shader_transition_create(obs_data_t *settings, obs_source_t *source
 	filter->context = source;
 	filter->reload_effect = true;
 	filter->gpu_ms = -1.0f;
-	filter->gpu_group = 1;
 	filter->transition = true;
 
 	dstr_init(&filter->last_path);
@@ -5942,7 +6073,10 @@ bool obs_module_load(void)
 	return true;
 }
 
-void obs_module_unload(void) {}
+void obs_module_unload(void)
+{
+	transition_memos_free();
+}
 
 void obs_module_post_load()
 {
