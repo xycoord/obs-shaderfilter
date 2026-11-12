@@ -323,8 +323,10 @@ struct shader_filter_data {
 	uint32_t gpu_samples;
 	uint64_t gpu_window_start;
 	float gpu_ms;          /* average over the last second; < 0 if not drawn */
-	bool gpu_merged;       /* runs inside the next shader filter's pass */
-	uint32_t gpu_group;    /* filters drawn in this filter's pass, itself included */
+	bool gpu_merged;       /* last frame: drawn inside the next shader filter's pass */
+	uint32_t gpu_group;    /* last frame: filters drawn in this filter's pass, itself included */
+	bool frame_merged;     /* the same, for the frame being drawn */
+	uint32_t frame_group;
 	bool gpu_props_waiting; /* the panel was built before there was a figure */
 	struct dstr last_path;
 	bool last_from_file;
@@ -1295,6 +1297,32 @@ static char *shader_display_name(const char *path)
 
 typedef DARRAY(struct shader_entry) shader_list_t;
 
+/* Whether two folder paths name the same folder, written either way: libobs
+ * gives the bundled folder with backslashes on Windows, while paths saved
+ * from file dialogs use forward slashes; Windows and macOS ignore case. */
+static bool same_folder(const char *a, const char *b)
+{
+	if (!a || !b)
+		return false;
+	struct dstr x = {0}, y = {0};
+	dstr_copy(&x, a);
+	dstr_copy(&y, b);
+	dstr_replace(&x, "\\", "/");
+	dstr_replace(&y, "\\", "/");
+	while (x.len > 1 && x.array[x.len - 1] == '/')
+		dstr_resize(&x, x.len - 1);
+	while (y.len > 1 && y.array[y.len - 1] == '/')
+		dstr_resize(&y, y.len - 1);
+#if defined(_WIN32) || defined(__APPLE__)
+	const bool same = astrcmpi(x.array, y.array) == 0;
+#else
+	const bool same = strcmp(x.array, y.array) == 0;
+#endif
+	dstr_free(&x);
+	dstr_free(&y);
+	return same;
+}
+
 static char *examples_dir(void)
 {
 	struct dstr d = {0};
@@ -1516,7 +1544,7 @@ static void list_shaders(const char *dir, bool transitions, const char *search, 
 	/* Templates and examples in the bundled folder are starting points, not
 	 * shaders to use; in the person's own folders everything is listed. */
 	char *bundled_dir = examples_dir();
-	const bool bundled = bundled_dir && strcmp(dir, bundled_dir) == 0;
+	const bool bundled = same_folder(dir, bundled_dir);
 	bfree(bundled_dir);
 	library_t lib;
 	library_load(dir, &lib);
@@ -1714,9 +1742,6 @@ static void choose_shader_file(struct shader_filter_data *filter, obs_data_t *se
 	auto_name_filter(filter, settings, path, false);
 }
 
-/* Fill the "Shader" list for the current settings; returns how many shaders
- * it lists (not counting the fixed entries and headings) and sets *pos to the
- * current shader's place among them (1-based; 0 if not among them). */
 /* A greyed heading in the Shader list, which can't be chosen. */
 static void add_list_heading(obs_property_t *pick, const char *title)
 {
@@ -1738,6 +1763,9 @@ static void add_shader_entry(obs_property_t *pick, const struct shader_entry *e)
 	dstr_free(&label);
 }
 
+/* Fill the "Shader" list for the current settings; returns how many shaders
+ * it lists (not counting the fixed entries and headings) and sets *pos to the
+ * current shader's place among them (1-based; 0 if not among them). */
 static size_t fill_shader_list(obs_property_t *pick, obs_data_t *settings, bool transition, size_t *pos)
 {
 	*pos = 0;
@@ -1762,7 +1790,7 @@ static size_t fill_shader_list(obs_property_t *pick, obs_data_t *settings, bool 
 	 * from a folder of the person's own, that folder's shaders. */
 	char *bundled = examples_dir();
 	char *own = library_dir(settings);
-	const bool own_folder = bundled && own && strcmp(own, bundled) != 0;
+	const bool own_folder = bundled && own && !same_folder(own, bundled);
 	const bool narrow = obs_data_get_bool(settings, "browse_shaders");
 	const char *search = narrow ? obs_data_get_string(settings, "shader_search") : "";
 	const char *category = narrow ? obs_data_get_string(settings, "shader_category") : "";
@@ -2111,12 +2139,11 @@ static bool preset_matches(struct shader_filter_data *filter, obs_data_t *settin
 		const char *key = obs_data_item_get_name(it);
 		const char *v = obs_data_item_get_string(it);
 		struct effect_param_data *param = find_param(filter, key);
-		bool same = true;
-		if (param)
-			known++;
 		if (!param)
-			same = true;
-		else if (param->type == GS_SHADER_PARAM_FLOAT)
+			continue;
+		known++;
+		bool same = true;
+		if (param->type == GS_SHADER_PARAM_FLOAT)
 			same = fabs(obs_data_get_double(settings, key) - atof(v)) < 1e-4;
 		else if (param->type == GS_SHADER_PARAM_INT)
 			same = obs_data_get_int(settings, key) == (long long)floor(atof(v) + 0.5);
@@ -2181,9 +2208,22 @@ static bool shader_preset_changed(obs_properties_t *props, obs_property_t *p, ob
 /* Whether a shader file is one of those shipped with the plugin. */
 static bool is_bundled_shader(const char *path)
 {
-	char *bundled = examples_dir();
-	bool yes = path && bundled && strncmp(path, bundled, strlen(bundled)) == 0;
-	bfree(bundled);
+	if (!path || !*path)
+		return false;
+	struct dstr dir = {0};
+	dstr_copy(&dir, path);
+	char *slash = strrchr(dir.array, '/');
+	char *bslash = strrchr(dir.array, '\\');
+	if (bslash > slash)
+		slash = bslash;
+	bool yes = false;
+	if (slash) {
+		dstr_resize(&dir, slash - dir.array);
+		char *bundled = examples_dir();
+		yes = same_folder(dir.array, bundled);
+		bfree(bundled);
+	}
+	dstr_free(&dir);
 	return yes;
 }
 
@@ -4530,6 +4570,12 @@ static void shader_filter_tick(void *data, float seconds)
 	filter->input_rendered = false;
 	filter->output_form = 0;
 
+	/* How the last frame drew this filter, for its settings panel. */
+	filter->gpu_merged = filter->frame_merged;
+	filter->gpu_group = filter->frame_group ? filter->frame_group : 1;
+	filter->frame_merged = false;
+	filter->frame_group = 0;
+
 	if (gs_image_file_tick_func && gs_image_file_update_texture_func) {
 		uint64_t frame_time = obs_get_video_frame_time();
 		if (filter->last_frame_time) {
@@ -5446,6 +5492,9 @@ static void render_derived(struct shader_filter_data **stages, size_t n, struct 
 			}
 		}
 		draw_shader(last, de->effect, input, form);
+		last->frame_group = (uint32_t)n;
+		for (size_t i = 0; i + 1 < n; i++)
+			stages[i]->frame_merged = true;
 	}
 	obs_source_release(input_ref);
 
@@ -5552,8 +5601,6 @@ static void prepare_derived(struct shader_filter_data *filter)
 {
 	if (filter->fresh_ticks > 0)
 		filter->fresh_ticks--;
-	filter->gpu_merged = false;
-	filter->gpu_group = 1;
 	if (!filter->shader_body || !filter->effect)
 		return;
 
@@ -5561,15 +5608,6 @@ static void prepare_derived(struct shader_filter_data *filter)
 	struct shader_filter_data *stages[SF_MAX_FUSED];
 	obs_source_t *refs[SF_MAX_FUSED];
 	size_t n = collect_fusion_group(filter, stages, refs, false);
-
-	/* For the panel: whether this filter is drawn in another's pass, or how
-	 * many are drawn in its own. */
-	filter->gpu_merged = use == DOWN_FUSED;
-	if (n >= 2) {
-		struct derived_effect *de = find_derived(filter, stages, n);
-		if (de && !de->failed)
-			filter->gpu_group = (uint32_t)n;
-	}
 
 	bool allowed = false;
 	for (size_t i = 0; i < n && !allowed; i++)
