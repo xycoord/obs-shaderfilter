@@ -547,13 +547,16 @@ def cmd_parity(args) -> int:
 
 
 def bench_cases(suite: str, chain_mode: str) -> list[dict]:
-    if suite == "each":
+    if suite == "each" or suite.startswith("each:"):
+        only = suite.partition(":")[2].split(",") if ":" in suite else []
         # Every bundled filter shader on its own, plus a pass-through baseline.
         names = sorted(p.name for p in EXAMPLES.iterdir()
                        if p.suffix in (".shader", ".effect") and not is_transition(p.name)
                        and "template" not in p.name.lower() and "example" not in p.name.lower())
         cases = [{"name": "_baseline", "source": "main", "filters": [], "steps": [{"dt": 0.05}]}]
         for n in names:
+            if only and not any(o and o in n for o in only):
+                continue
             cases.append({"name": case_name(n), "source": "main", "filters": [filt(n)], "steps": [{"dt": 0.05}]})
         return cases
     names = list(BENCH) if suite == "all" else [suite]
@@ -628,7 +631,7 @@ def main() -> int:
     pb = sub.add_parser("bench")
     pb.add_argument("--plugin", required=True)
     pb.add_argument("--data", required=True)
-    pb.add_argument("--suite", default="all", help='a chain name, "all", or "each" (every shader alone)')
+    pb.add_argument("--suite", default="all", help='a chain name, "all", "each" (every shader alone) or "each:name1,name2"')
     pb.add_argument("--chain-mode", default="separate", choices=["separate", "multi"])
     pb.add_argument("--frames", type=int, default=120)
     pb.add_argument("--repeats", type=int, default=3)
