@@ -30,6 +30,12 @@ Anything that can't be reproduced exactly keeps the old path for that link: full
 a `.shader` containing its own `technique`, `previous_output` or `#define USE_PM_ALPHA 1` upstream, and
 HDR colour spaces. Set the environment variable `SHADERFILTER_NO_FUSION=1` to turn merging off.
 
+Each filter's own effect is compiled exactly as before; the linked and merged versions are separate effects,
+so if one of them fails to compile the filters simply render the old way (the OBS log says so). They are
+compiled when a scene collection loads or a shader is edited, or while the source isn't showing, never
+while rendering a frame: toggling a filter during a show doesn't cause a stall; until the new arrangement's
+effect has been prepared, the filters render linked or the old way.
+
 Measured on a software GPU at 1080p. These are relative, not absolute, numbers; a real GPU should gain at
 least as much, since the passes removed are memory-bandwidth-bound copies:
 
