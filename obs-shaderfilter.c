@@ -133,13 +133,58 @@ float4 mainImage(VertData v_in) : TARGET\n\
 }\n\
 ";
 
+/* "DrawLinked" is used when this filter's output is handed straight to the next
+ * shader filter on the same source instead of going through libobs. It
+ * reproduces, in this pass, what the boundary between two filters does to the
+ * pixels: the output is stored in 8 bits, linearised and premultiplied by
+ * render_output.effect into an 8-bit sRGB texture, then un-premultiplied by
+ * DrawAlphaDivide into another 8-bit sRGB texture. Notably, colour is zeroed
+ * where alpha is zero, and translucent colour is quantised in premultiplied
+ * form. */
 static const char *effect_template_end = "\n\
+float _sf_q8(float x)\n\
+{\n\
+	float v = saturate(x) * 255.0 + 0.5;\n\
+	return (v - frac(v)) / 255.0;\n\
+}\n\
+\n\
+float _sf_enc(float l)\n\
+{\n\
+	return (l <= 0.0031308) ? (12.92 * l) : (1.055 * pow(l, 1.0 / 2.4) - 0.055);\n\
+}\n\
+\n\
+float4 _sf_boundary(float4 r)\n\
+{\n\
+	float a = _sf_q8(r.a);\n\
+	if (a <= 0.0)\n\
+		return float4(0.0, 0.0, 0.0, 0.0);\n\
+	float3 v = float3(_sf_q8(r.r), _sf_q8(r.g), _sf_q8(r.b));\n\
+	float3 pm = srgb_nonlinear_to_linear(v) * a;\n\
+	float3 s = float3(_sf_q8(_sf_enc(pm.r)), _sf_q8(_sf_enc(pm.g)), _sf_q8(_sf_enc(pm.b)));\n\
+	float3 lin = srgb_nonlinear_to_linear(s) / a;\n\
+	return float4(_sf_enc(lin.r), _sf_enc(lin.g), _sf_enc(lin.b), a);\n\
+}\n\
+\n\
+float4 _sf_linked(VertData v_in) : TARGET\n\
+{\n\
+	return _sf_boundary(mainImage(v_in));\n\
+}\n\
+\n\
 technique Draw\n\
 {\n\
 	pass\n\
 	{\n\
 		vertex_shader = mainTransform(v_in);\n\
 		pixel_shader = mainImage(v_in);\n\
+	}\n\
+}\n\
+\n\
+technique DrawLinked\n\
+{\n\
+	pass\n\
+	{\n\
+		vertex_shader = mainTransform(v_in);\n\
+		pixel_shader = _sf_linked(v_in);\n\
 	}\n\
 }\n";
 
@@ -214,6 +259,9 @@ struct shader_filter_data {
 	bool use_pm_alpha;
 	bool output_rendered;
 	bool input_rendered;
+	/* output_texrender holds the "DrawLinked" form (boundary applied) rather
+	 * than the raw shader output. */
+	bool output_linked;
 
 	float shader_start_time;
 	float shader_show_time;
@@ -2890,6 +2938,7 @@ static void shader_filter_tick(void *data, float seconds)
 
 	filter->output_rendered = false;
 	filter->input_rendered = false;
+	filter->output_linked = false;
 
 	if (gs_image_file_tick_func && gs_image_file_update_texture_func) {
 		uint64_t frame_time = obs_get_video_frame_time();
@@ -3223,9 +3272,9 @@ static enum gs_color_space shader_filter_get_color_space(void *data, size_t coun
 	return obs_source_get_color_space(target, OBS_COUNTOF(potential_spaces), potential_spaces);
 }
 
-static void render_shader(struct shader_filter_data *filter, float f, obs_source_t *filter_to)
+static void render_shader(struct shader_filter_data *filter, gs_texture_t *texture, float f, obs_source_t *filter_to,
+			  bool linked_out)
 {
-	gs_texture_t *texture = gs_texrender_get_texture(filter->input_texrender);
 	if (!texture) {
 		return;
 	}
@@ -3252,13 +3301,15 @@ static void render_shader(struct shader_filter_data *filter, float f, obs_source
 	if (f > 0.0f) {
 		if (filter_to) {
 			struct shader_filter_data *filter2 = obs_obj_get_data(filter_to);
-			for (size_t i = 0; i < filter->stored_param_list.num; i++) {
+			if (strcmp(obs_source_get_id(filter_to), obs_source_get_id(filter->context)) != 0)
+				filter2 = NULL;
+			for (size_t i = 0; filter2 && i < filter->stored_param_list.num; i++) {
 				struct effect_param_data *param = (filter->stored_param_list.array + i);
 				if (!param->param)
 					continue;
 
-				for (size_t j = 0; j < filter->stored_param_list.num; j++) {
-					struct effect_param_data *param2 = (filter2->stored_param_list.array + i);
+				for (size_t j = 0; j < filter2->stored_param_list.num; j++) {
+					struct effect_param_data *param2 = (filter2->stored_param_list.array + j);
 					if (!param2->param)
 						continue;
 					if (param->type != param2->type)
@@ -3356,7 +3407,8 @@ static void render_shader(struct shader_filter_data *filter, float f, obs_source
 
 	if (gs_texrender_begin(filter->output_texrender, filter->total_width, filter->total_height)) {
 		gs_ortho(0.0f, (float)filter->total_width, 0.0f, (float)filter->total_height, -100.0f, 100.0f);
-		while (gs_effect_loop(filter->effect, "Draw")) {
+		const char *technique = (linked_out && filter->use_template) ? "DrawLinked" : "Draw";
+		while (gs_effect_loop(filter->effect, technique)) {
 			if (filter->use_template) {
 				gs_draw_sprite(texture, 0, filter->total_width, filter->total_height);
 			} else {
@@ -3377,6 +3429,126 @@ static void render_shader(struct shader_filter_data *filter, float f, obs_source
 	gs_blend_state_pop();
 }
 
+/* ------------------------------------------------------------------------
+ * Linked rendering of consecutive shader filters.
+ *
+ * Normally every filter makes libobs render its upstream into a texture, then
+ * copies that (un-premultiplying alpha), runs its shader, and draws the result
+ * into the downstream's texture: three full-screen passes per filter.
+ *
+ * When the filter directly upstream (skipping disabled filters) is another
+ * shader filter, this filter instead asks it for its shader output texture and
+ * samples that as `image`. The upstream renders with its "DrawLinked"
+ * technique, which applies in-shader what the skipped passes would have done
+ * to the pixels. Only the first filter of such a run captures its input
+ * through libobs, and only the last one draws into the caller's target, so a
+ * run of N filters costs N + 3 passes instead of 3N + 1.
+ *
+ * Anything a link cannot reproduce exactly falls back to the normal path for
+ * that link: full .effect files upstream (no DrawLinked), previous_output
+ * upstream (it must keep the raw output), previous_image or expansion
+ * downstream (they need their own input copy / resample), USE_PM_ALPHA on
+ * either side, and non-SDR colour spaces.
+ * ------------------------------------------------------------------------ */
+
+static const char *shader_filter_id = "shader_filter";
+
+static struct shader_filter_data *linked_upstream(struct shader_filter_data *filter)
+{
+	if (filter->transition || filter->use_pm_alpha || filter->param_previous_image)
+		return NULL;
+	if (filter->expand_left || filter->expand_right || filter->expand_top || filter->expand_bottom)
+		return NULL;
+
+	obs_source_t *target = obs_filter_get_target(filter->context);
+	while (target && obs_source_get_type(target) == OBS_SOURCE_TYPE_FILTER && !obs_source_enabled(target))
+		target = obs_filter_get_target(target);
+	if (!target || obs_source_get_type(target) != OBS_SOURCE_TYPE_FILTER)
+		return NULL;
+	if (strcmp(obs_source_get_id(target), shader_filter_id) != 0)
+		return NULL;
+
+	struct shader_filter_data *up = obs_obj_get_data(target);
+	if (!up || !up->effect || up->rendering || !up->use_template || up->use_pm_alpha || up->param_previous_output)
+		return NULL;
+	if (up->total_width != filter->total_width || up->total_height != filter->total_height || !up->total_width ||
+	    !up->total_height)
+		return NULL;
+	if (shader_filter_get_color_space(filter, 0, NULL) != GS_CS_SRGB)
+		return NULL;
+	return up;
+}
+
+/* Render this filter's shader output into output_texrender for the current
+ * frame (or reuse it). linked_out selects the DrawLinked form for a downstream
+ * shader filter. Returns false when the filter can't render. */
+static bool shader_filter_produce(struct shader_filter_data *filter, bool linked_out)
+{
+	float f = 0.0f;
+	obs_source_t *filter_to = NULL;
+	if (move_get_transition_filter)
+		f = move_get_transition_filter(filter->context, &filter_to);
+
+	if (f == 0.0f && filter->output_rendered && filter->output_linked == linked_out)
+		return true;
+
+	if (filter->effect == NULL || filter->rendering)
+		return false;
+
+	filter->rendering = true;
+
+	gs_texture_t *input = NULL;
+	struct shader_filter_data *up = linked_upstream(filter);
+	if (up && shader_filter_produce(up, true)) {
+		input = gs_texrender_get_texture(up->output_texrender);
+	} else {
+		get_input_source(filter);
+		input = gs_texrender_get_texture(filter->input_texrender);
+	}
+
+	render_shader(filter, input, f, filter_to, linked_out);
+	if (f == 0.0f) {
+		filter->output_rendered = true;
+		filter->output_linked = linked_out;
+	}
+	filter->rendering = false;
+	return true;
+}
+
+/* Draw output_texrender into the current target exactly as
+ * obs_source_process_filter_end() would, without making libobs render this
+ * filter's upstream (which a linked filter never needs). */
+static void draw_output_direct(struct shader_filter_data *filter)
+{
+	gs_texture_t *texture = gs_texrender_get_texture(filter->output_texrender);
+	if (!texture || !filter->total_width || !filter->total_height)
+		return;
+
+	gs_effect_t *effect = filter->output_effect;
+	gs_eparam_t *param = filter->param_output_image;
+	bool srgb_param = false;
+	if (!effect || !param) {
+		effect = obs_get_base_effect(OBS_EFFECT_DEFAULT);
+		param = gs_effect_get_param_by_name(effect, "image");
+		srgb_param = true;
+	}
+
+	const bool previous_linear = gs_set_linear_srgb(true);
+	const bool previous_fb = gs_framebuffer_srgb_enabled();
+	gs_enable_framebuffer_srgb(true);
+
+	if (srgb_param)
+		gs_effect_set_texture_srgb(param, texture);
+	else
+		gs_effect_set_texture(param, texture);
+
+	while (gs_effect_loop(effect, "Draw"))
+		gs_draw_sprite(texture, 0, filter->total_width, filter->total_height);
+
+	gs_enable_framebuffer_srgb(previous_fb);
+	gs_set_linear_srgb(previous_linear);
+}
+
 static void shader_filter_render(void *data, gs_effect_t *effect)
 {
 	UNUSED_PARAMETER(effect);
@@ -3388,24 +3560,23 @@ static void shader_filter_render(void *data, gs_effect_t *effect)
 	if (move_get_transition_filter)
 		f = move_get_transition_filter(filter->context, &filter_to);
 
-	if (f == 0.0f && filter->output_rendered) {
+	if (!(f == 0.0f && filter->output_rendered && !filter->output_linked)) {
+		if (filter->effect == NULL || filter->rendering) {
+			obs_source_skip_video_filter(filter->context);
+			return;
+		}
+		if (!shader_filter_produce(filter, false)) {
+			obs_source_skip_video_filter(filter->context);
+			return;
+		}
+	}
+
+	/* If this frame's input came through libobs, draw through libobs as
+	 * before; otherwise libobs never rendered our upstream, so draw directly. */
+	if (filter->input_rendered)
 		draw_output(filter);
-		return;
-	}
-
-	if (filter->effect == NULL || filter->rendering) {
-		obs_source_skip_video_filter(filter->context);
-		return;
-	}
-
-	get_input_source(filter);
-
-	filter->rendering = true;
-	render_shader(filter, f, filter_to);
-	draw_output(filter);
-	if (f == 0.0f)
-		filter->output_rendered = true;
-	filter->rendering = false;
+	else
+		draw_output_direct(filter);
 }
 
 static uint32_t shader_filter_getwidth(void *data)
