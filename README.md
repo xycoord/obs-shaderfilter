@@ -314,7 +314,8 @@ shaders and live changes to the filter stack in a headless OBS, with this build 
 and compares the frames; it also times filter chains. On Ubuntu 24.04:
 
 ```
-tests/run.sh setup              # once: packages, a test build of libobs 33, both plugin builds
+sudo tests/run.sh packages      # once: the packages needed
+tests/run.sh setup              # once: a test build of libobs 33, both plugin builds
 xvfb-run -a tests/run.sh parity
 xvfb-run -a tests/run.sh parity --opaque
 xvfb-run -a tests/run.sh bench
