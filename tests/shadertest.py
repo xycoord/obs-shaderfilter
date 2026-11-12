@@ -223,11 +223,11 @@ def parity_cases(suite: str) -> list[dict]:
                    filt("Invert.shader"), filt("vignetting.shader"), filt("glow.shader")]
     cap = {"dt": 0.05, "capture": True}
     cases.append({"name": "x_live_toggle", "source": "main", "filters": fused_chain,
-                  "steps": [{"dt": 0.05}, cap, dict(cap, enable=[2, False]), cap, dict(cap, enable=[2, True]),
-                            dict(cap, enable=[0, False]), dict(cap, enable=[4, False]), cap]})
+                  "steps": [{"dt": 0.05}, cap, dict(cap, enable={"index": 2, "enabled": False}), cap, dict(cap, enable={"index": 2, "enabled": True}),
+                            dict(cap, enable={"index": 0, "enabled": False}), dict(cap, enable={"index": 4, "enabled": False}), cap]})
     cases.append({"name": "x_live_reorder", "source": "main", "filters": fused_chain,
-                  "steps": [{"dt": 0.05}, cap, dict(cap, move=[1, "down"]), cap, dict(cap, move=[4, "top"]),
-                            dict(cap, move=[0, "bottom"]), cap]})
+                  "steps": [{"dt": 0.05}, cap, dict(cap, move={"index": 1, "to": "down"}), cap, dict(cap, move={"index": 4, "to": "top"}),
+                            dict(cap, move={"index": 0, "to": "bottom"}), cap]})
     cases.append({"name": "x_live_edit", "source": "main", "filters": fused_chain,
                   "steps": [{"dt": 0.05}, cap,
                             dict(cap, set={"index": 3, "settings": {"opacity": 0.3, "innerRadius": 0.1}}),

@@ -204,8 +204,8 @@ static int cmp_double(const void *a, const void *b)
 typedef DARRAY(obs_source_t *) source_array_t;
 
 /* Mid-run changes to the filter stack, applied before a step's tick:
- *   "enable": [index, bool]       enable/disable a filter
- *   "move":   [index, "up"|"down"|"top"|"bottom"]
+ *   "enable": {"index": i, "enabled": bool}             enable/disable a filter
+ *   "move":   {"index": i, "to": "up"|"down"|"top"|"bottom"}
  *   "set":    {"index": i, "settings": {...}}   obs_source_update
  *   "remove": index
  * Indices refer to the case's "filters" list. */
@@ -214,30 +214,26 @@ static void apply_actions(obs_data_t *st, obs_source_t *target, void *filters_pt
 	source_array_t *filters = filters_ptr;
 	if (!target)
 		return;
-	obs_data_array_t *a;
-	if ((a = obs_data_get_array(st, "enable")) != NULL) {
-		obs_data_t *i0 = obs_data_array_item(a, 0), *i1 = obs_data_array_item(a, 1);
-		size_t idx = (size_t)obs_data_get_int(i0, "value");
-		bool en = obs_data_get_bool(i1, "value");
-		if (idx < filters->num)
-			obs_source_set_enabled(filters->array[idx], en);
-		obs_data_release(i0);
-		obs_data_release(i1);
-		obs_data_array_release(a);
+	/* (Objects, not [index, value] arrays: OBS's JSON loader drops array
+	 * entries that aren't objects.) */
+	obs_data_t *en = obs_data_get_obj(st, "enable");
+	if (en) {
+		size_t idx = (size_t)obs_data_get_int(en, "index");
+		if (idx < filters->num && filters->array[idx])
+			obs_source_set_enabled(filters->array[idx], obs_data_get_bool(en, "enabled"));
+		obs_data_release(en);
 	}
-	if ((a = obs_data_get_array(st, "move")) != NULL) {
-		obs_data_t *i0 = obs_data_array_item(a, 0), *i1 = obs_data_array_item(a, 1);
-		size_t idx = (size_t)obs_data_get_int(i0, "value");
-		const char *dir = obs_data_get_string(i1, "value");
+	obs_data_t *mv = obs_data_get_obj(st, "move");
+	if (mv) {
+		size_t idx = (size_t)obs_data_get_int(mv, "index");
+		const char *dir = obs_data_get_string(mv, "to");
 		enum obs_order_movement m = !strcmp(dir, "up")       ? OBS_ORDER_MOVE_UP
 					    : !strcmp(dir, "down")   ? OBS_ORDER_MOVE_DOWN
 					    : !strcmp(dir, "top")    ? OBS_ORDER_MOVE_TOP
 								     : OBS_ORDER_MOVE_BOTTOM;
-		if (idx < filters->num)
+		if (idx < filters->num && filters->array[idx])
 			obs_source_filter_set_order(target, filters->array[idx], m);
-		obs_data_release(i0);
-		obs_data_release(i1);
-		obs_data_array_release(a);
+		obs_data_release(mv);
 	}
 	obs_data_t *set = obs_data_get_obj(st, "set");
 	if (set) {
