@@ -12,6 +12,9 @@ env:
 jobs:
   macos:
     name: macOS
+    # Built on pushes to master only: macOS runners are scarce and often
+    # leave PR jobs queued until GitHub cancels them.
+    if: github.event_name != 'pull_request'
     runs-on: macos-latest
     strategy:
       fail-fast: false
@@ -49,7 +52,9 @@ jobs:
           print '::group::Clean Homebrew Environment'
           typeset -a to_remove=()
 
-          for formula (speexdsp curl php) {
+          # Homebrew's git links Homebrew's curl, so removing curl alone leaves
+          # git unable to clone; remove git too and use the system's.
+          for formula (speexdsp curl php git) {
             if [[ -d ${HOMEBREW_PREFIX}/opt/${formula} ]] to_remove+=(${formula})
           }
 

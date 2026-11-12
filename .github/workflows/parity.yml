@@ -1,0 +1,54 @@
+name: parity and performance tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  parity:
+    name: Parity with release 2.6.1 (headless OBS 33, llvmpipe)
+    runs-on: ubuntu-24.04
+    env:
+      WORK: ${{ github.workspace }}/.tests
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Cache test libobs
+        uses: actions/cache@v6
+        with:
+          path: .tests/libobs/prefix
+          key: libobs-33.0.1-${{ hashFiles('tests/setup/build-libobs.sh') }}
+
+      # Only the packages need root: built files must stay the runner's, as
+      # later steps rebuild in .tests and CMake writes version.h into the checkout.
+      - name: Install packages
+        run: sudo -E env "PATH=$PATH" tests/run.sh packages
+
+      - name: Set up (libobs, harness, reference and current builds)
+        run: tests/run.sh setup
+
+      - name: Parity (translucent test image)
+        run: xvfb-run -a tests/run.sh parity
+
+      - name: Parity (opaque test image, rounding-level differences only)
+        run: xvfb-run -a tests/run.sh parity --opaque
+
+      - name: Benchmark
+        run: |
+          xvfb-run -a tests/run.sh bench --frames 30 --repeats 1
+          xvfb-run -a tests/run.sh bench-ref --frames 30 --repeats 1
+
+      - name: Upload report and diff montages
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: parity-report
+          path: |
+            .tests/parity/report.json
+            .tests/parity/diffs
+            .tests/bench/bench.json
+            .tests/bench-ref/bench.json
+          if-no-files-found: ignore

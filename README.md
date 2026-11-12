@@ -9,6 +9,44 @@ that can be implemented strictly in shader code.
 Please note that this plugin may expose a reasonable number of bugs in OBS, as it uses the shader parser and 
 the property system in somewhat unusual ways.
 
+## Performance
+
+Several shader filters stacked on one source render much faster than they used to, with no change to
+your scenes or shaders:
+
+* **Consecutive shader filters hand their output straight to each other.** Previously every filter made
+  OBS render its input into a texture, copied it, ran its shader, and copied the result into the next
+  filter's texture: three full-screen passes per filter. Now a run of N shader filters costs N + 2 passes.
+  The first filter also lets a plain source (image, text, colour…) draw itself straight into its input.
+* **Filters that only read the pixel they are drawing are merged into the filter before them.** Colour
+  grading, invert, opacity, gamma, hue, vignette and many more only ever call
+  `image.Sample(textureSampler, v_in.uv)`; such a filter is compiled together with the one upstream of it
+  into a single shader, so a run of them costs one pass.
+* Output is the same as before: the plugin reproduces, inside the shaders, exactly what the removed passes
+  did to the pixels (8-bit storage, premultiplying and un-premultiplying alpha in linear light), so even
+  translucent pixels match to within a rounding step.
+
+Anything that can't be reproduced exactly keeps the old path for that link: full `.effect` files upstream,
+a `.shader` containing its own `technique`, `previous_output` or `#define USE_PM_ALPHA 1` upstream, and
+HDR colour spaces. Set the environment variable `SHADERFILTER_NO_FUSION=1` to turn merging off.
+
+Each filter's own effect is compiled exactly as before; the linked and merged versions are separate effects,
+so if one of them fails to compile the filters simply render the old way (the OBS log says so). Compiling
+stalls OBS's graphics thread, so they are only compiled when that happens anyway: when a scene collection
+loads, a filter is added, a shader is edited or "Reload effect" is pressed. Toggling, reordering or removing
+filters during a show never causes a stall; until the new arrangement's effect has been prepared (at the
+next of those moments), the filters render linked or the old way.
+
+Measured on a software GPU at 1080p. These are relative, not absolute, numbers; a real GPU should gain at
+least as much, since the passes removed are memory-bandwidth-bound copies:
+
+| Filters on one source | before | after | full-screen draws |
+|---|---|---|---|
+| 5 colour filters (grade, invert, opacity, gamma, luminance) | 123 ms | 36 ms | 17 → 4 |
+| 5 effects (hue, chromatic aberration, VHS, glow, vignette) | 167 ms | 99 ms | 17 → 7 |
+| the same with glow expanded by 16 px | 170 ms | 97 ms | 17 → 7 |
+| 1 filter | 29 ms | 23 ms | 5 → 4 |
+
 ## Installation
 
 The binary package mirrors the structure of the OBS Studio installation directory, so you should be able to
@@ -39,20 +77,36 @@ necessary files should look like this:
 
 ## Usage
 
-The filter can be added to any source through the "Filters" option when right-clicking on a source. The name
-of the filter is "User-defined shader." 
+Add the filter to any source through "Filters" when right-clicking it; it is called "Shader".
 
-Shaders can either be entered directly in a text box in the filter properties, or loaded from a file. To change 
-between the two modes, use the "Load shader text from file" toggle. If you are entering your shader text directly,
-note that you will need to use the "Reload effect" button to apply your changes. This can also be used to reload an external file if changes have been made. 
-OBS shaders are written in OBS version of HLSL.
+- **Shader** lists the shaders that come with the plugin, grouped by category, plus "Other file…" for a
+  shader file anywhere else. `.shader` and `.effect` files are both listed and handled automatically.
+  Choosing one applies it straight away and names the filter after it ("Glow", "Glow 2"…), so a stack of
+  shader filters can be told apart; a name you typed yourself is never changed. A filter whose shader fails
+  shows "⚠" before its name until it works again.
+- After choosing a shader, **↑/↓ on the Shader list** applies the next or previous one, so you can step
+  through shaders while watching the preview. **Browse Shaders** shows Category and Search, to narrow the
+  list (and so what ↑/↓ steps through), with the shader's place in it ("Shader 8 of 11 in Blur & Glow").
+- The shader's parameters follow, in a "*Shader* Settings" group. Shaders with a `<name>.presets.ini`
+  next to them start the group with a **Preset** list: choosing a preset sets the
+  sliders, which you can then adjust.
+- **How much it costs:** the Shader list marks shaders that take noticeably more GPU time than a simple
+  color filter (Medium, Heavy, Very Heavy), and a chosen shader's settings show the GPU time it actually
+  takes on this computer, per frame and as a share of a frame.
+- **Show Advanced Options** holds the rest: "Add Space Around the Image" (extra pixels on each side, for
+  effects such as shadows that draw outside the source; shown next to the settings of shaders that need it),
+  "Reload Shader File" for after editing the file in a text editor, and, for filters saved by older versions
+  with their shader code typed in, that code. Such filters keep working.
 
-The option is provided to render extra pixels on each side of the source. This is useful for effects like shadows
-that need to render outside the bounds of the original source. 
+The shader list for a folder can be given categories, display names and cost ratings with a `library.ini`
+next to the shaders; see [data/examples/library.ini](data/examples/library.ini). Presets go in a
+`<shader name>.presets.ini` beside the shader: one `[section]` per preset with `parameter = value` lines
+(`;` starts a comment).
 
-Normally, all that's required for OBS purposes is a pixel shader, so the plugin will wrap your shader text with a 
-standard template to add a basic vertex shader and other boilerplate. If you wish to customize the vertex shader
-or other parts of the effect for some reason, you can check the "Use Effect File (.effect)" option. 
+Normally all that's required for OBS purposes is a pixel shader (a `.shader` file), and the plugin wraps it
+with a standard template that adds a basic vertex shader and other boilerplate. A full `.effect` file lets
+you customise the vertex shader or other parts of the effect; only `.shader` files can be merged with
+neighbouring shader filters (see Performance). OBS shaders are written in OBS's version of HLSL.
 
 Any parameters you add to your shader (defined as `uniform` variables) will be detected by the plugin and exposed
 in the properties window to have their values set. Currently, only `int`, `float`, `bool`, `string`, `texture2d`, and `float4`
@@ -98,9 +152,9 @@ uniform string notes<
 You set default values as a normal assignment ```uniform string notes = 'my note';```, except for `float4` 
 which requires bracket \{\} notation like ```uniform float4 mycolor = { 0.75, 0.75, 0.75, 1.0};``` 
 
-Note that if your shader has syntax errors and fails to compile, OBS does not provide any error messages; you will
-simply see your source render nothing at all. In many cases the output of the effect parser will be written to the
-OBS log file, which you can view with the Help -> Log Files menu in OBS. 
+If your shader fails to compile, the filter passes the image through unchanged and its settings say why, with
+the first compiler message; "Show Full Compiler Output" shows the rest. The parser output is also written to
+the OBS log file (Help -> Log Files).
 
 ### Standard parameters
 
@@ -252,6 +306,25 @@ and the OBS Studio libraries and headers.
 1. Stand-alone build (Linux only)
     - Verify that you have package with development files for OBS
     - Check out this repository and run `cmake -S . -B build -DBUILD_OUT_OF_TREE=On && cmake --build build`
+
+## Testing
+
+`tests/` renders every example shader, chains of them, transitions, expansion, texture sources, temporal
+shaders and live changes to the filter stack in a headless OBS, with this build and with release 2.6.1,
+and compares the frames; it also times filter chains. On Ubuntu 24.04:
+
+```
+sudo tests/run.sh packages      # once: the packages needed
+tests/run.sh setup              # once: a test build of libobs 33, both plugin builds
+xvfb-run -a tests/run.sh parity
+xvfb-run -a tests/run.sh parity --opaque
+xvfb-run -a tests/run.sh bench
+```
+
+See [tests/README.md](tests/README.md) for what is compared and how differences are judged.
+
+`tests/ui/` captures the filter's settings panel, drawn by OBS's own properties widget, in a set of fixed
+scenarios (`tests/ui/shots.py`), for reviewing the UI.
 
 ## Donations
 https://www.paypal.me/exeldro

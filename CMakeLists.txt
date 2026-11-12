@@ -19,6 +19,8 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/version.h.in ${CMAKE_CURRENT_SOURCE_D
 
 target_sources(${PROJECT_NAME} PRIVATE
 	obs-shaderfilter.c
+	shader-fusion.c
+	shader-fusion.h
 	version.h)
 	
 if(BUILD_OUT_OF_TREE)
@@ -50,6 +52,14 @@ endif()
 
 target_link_libraries(${PROJECT_NAME}
 		OBS::libobs)
+
+# pthreads, for the plugin's own locks, is a separate library on Windows.
+if(WIN32)
+	if(NOT TARGET OBS::w32-pthreads)
+		find_package(w32-pthreads REQUIRED)
+	endif()
+	target_link_libraries(${PROJECT_NAME} OBS::w32-pthreads)
+endif()
 
 if(BUILD_OUT_OF_TREE)
     if(NOT LIB_OUT_DIR)
