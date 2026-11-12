@@ -51,6 +51,7 @@ AMPLIFIERS = {
     # into the alpha-0 pixels (real GPUs snap to 1/256 texel and don't).
     "x_chain_expand": "llvmpipe alpha-0 bleed at expansion border",
     "x_bisect_inv_glow": "llvmpipe alpha-0 bleed at expansion border",
+    "x_live_edit": "llvmpipe alpha-0 bleed at expansion border (frame with expansion added)",
 }
 
 
@@ -216,6 +217,26 @@ def parity_cases(suite: str) -> list[dict]:
                   "filters": [filt("Invert.shader", expand_left=16, expand_top=8), filt("glow.shader")], "steps": STEPS})
     cases.append({"name": "x_bisect_inv_inv", "source": "main",
                   "filters": [filt("Invert.shader", expand_left=16, expand_top=8), filt("Invert.shader")], "steps": STEPS})
+    # The filter stack changing while it runs: links, fused effects and
+    # caches must follow.
+    fused_chain = [filt("hue-rotaton.shader", Speed=30.0), filt("color_grade_filter.shader"),
+                   filt("Invert.shader"), filt("vignetting.shader"), filt("glow.shader")]
+    cap = {"dt": 0.05, "capture": True}
+    cases.append({"name": "x_live_toggle", "source": "main", "filters": fused_chain,
+                  "steps": [{"dt": 0.05}, cap, dict(cap, enable=[2, False]), cap, dict(cap, enable=[2, True]),
+                            dict(cap, enable=[0, False]), dict(cap, enable=[4, False]), cap]})
+    cases.append({"name": "x_live_reorder", "source": "main", "filters": fused_chain,
+                  "steps": [{"dt": 0.05}, cap, dict(cap, move=[1, "down"]), cap, dict(cap, move=[4, "top"]),
+                            dict(cap, move=[0, "bottom"]), cap]})
+    cases.append({"name": "x_live_edit", "source": "main", "filters": fused_chain,
+                  "steps": [{"dt": 0.05}, cap,
+                            dict(cap, set={"index": 3, "settings": {"opacity": 0.3, "innerRadius": 0.1}}),
+                            dict(cap, set={"index": 2, "settings": shader_file("Luminance.shader")}),
+                            dict(cap, set={"index": 1, "settings": {"expand_left": 10, "expand_top": 6}}),
+                            dict(cap, set={"index": 1, "settings": {"expand_left": 0, "expand_top": 0}}), cap]})
+    cases.append({"name": "x_live_remove", "source": "main", "filters": fused_chain,
+                  "steps": [{"dt": 0.05}, cap, dict(cap, remove=2), cap, dict(cap, remove=0), dict(cap, remove=4), cap]})
+
     # Fusion sweep: every shader as the upstream of a pointwise filter, and
     # every pointwise shader downstream of an animated one, so that the
     # identifier renaming in shader-fusion.c meets every example.

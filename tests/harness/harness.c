@@ -201,6 +201,63 @@ static int cmp_double(const void *a, const void *b)
 	return x < y ? -1 : x > y;
 }
 
+typedef DARRAY(obs_source_t *) source_array_t;
+
+/* Mid-run changes to the filter stack, applied before a step's tick:
+ *   "enable": [index, bool]       enable/disable a filter
+ *   "move":   [index, "up"|"down"|"top"|"bottom"]
+ *   "set":    {"index": i, "settings": {...}}   obs_source_update
+ *   "remove": index
+ * Indices refer to the case's "filters" list. */
+static void apply_actions(obs_data_t *st, obs_source_t *target, void *filters_ptr)
+{
+	source_array_t *filters = filters_ptr;
+	if (!target)
+		return;
+	obs_data_array_t *a;
+	if ((a = obs_data_get_array(st, "enable")) != NULL) {
+		obs_data_t *i0 = obs_data_array_item(a, 0), *i1 = obs_data_array_item(a, 1);
+		size_t idx = (size_t)obs_data_get_int(i0, "value");
+		bool en = obs_data_get_bool(i1, "value");
+		if (idx < filters->num)
+			obs_source_set_enabled(filters->array[idx], en);
+		obs_data_release(i0);
+		obs_data_release(i1);
+		obs_data_array_release(a);
+	}
+	if ((a = obs_data_get_array(st, "move")) != NULL) {
+		obs_data_t *i0 = obs_data_array_item(a, 0), *i1 = obs_data_array_item(a, 1);
+		size_t idx = (size_t)obs_data_get_int(i0, "value");
+		const char *dir = obs_data_get_string(i1, "value");
+		enum obs_order_movement m = !strcmp(dir, "up")       ? OBS_ORDER_MOVE_UP
+					    : !strcmp(dir, "down")   ? OBS_ORDER_MOVE_DOWN
+					    : !strcmp(dir, "top")    ? OBS_ORDER_MOVE_TOP
+								     : OBS_ORDER_MOVE_BOTTOM;
+		if (idx < filters->num)
+			obs_source_filter_set_order(target, filters->array[idx], m);
+		obs_data_release(i0);
+		obs_data_release(i1);
+		obs_data_array_release(a);
+	}
+	obs_data_t *set = obs_data_get_obj(st, "set");
+	if (set) {
+		size_t idx = (size_t)obs_data_get_int(set, "index");
+		obs_data_t *fs = obs_data_get_obj(set, "settings");
+		if (idx < filters->num)
+			obs_source_update(filters->array[idx], fs);
+		obs_data_release(fs);
+		obs_data_release(set);
+	}
+	if (obs_data_has_user_value(st, "remove")) {
+		size_t idx = (size_t)obs_data_get_int(st, "remove");
+		if (idx < filters->num && filters->array[idx]) {
+			obs_source_filter_remove(target, filters->array[idx]);
+			obs_source_release(filters->array[idx]);
+			filters->array[idx] = NULL;
+		}
+	}
+}
+
 static void run_case(obs_data_t *c, obs_data_t *bench)
 {
 	const char *name = obs_data_get_string(c, "name");
@@ -265,6 +322,7 @@ static void run_case(obs_data_t *c, obs_data_t *bench)
 	size_t nsteps = obs_data_array_count(steps);
 	for (size_t i = 0; i < nsteps; i++) {
 		obs_data_t *st = obs_data_array_item(steps, i);
+		apply_actions(st, target, &filters);
 		if (trans_spec && obs_data_has_user_value(st, "t"))
 			obs_transition_set_manual_time(root, (float)obs_data_get_double(st, "t"));
 		tick_all((float)obs_data_get_double(st, "dt"));
@@ -283,7 +341,8 @@ static void run_case(obs_data_t *c, obs_data_t *bench)
 		append_error(&errors, root);
 	} else {
 		for (size_t i = 0; i < filters.num; i++)
-			append_error(&errors, filters.array[i]);
+			if (filters.array[i])
+				append_error(&errors, filters.array[i]);
 	}
 
 	struct dstr timing = {0};
@@ -328,6 +387,8 @@ static void run_case(obs_data_t *c, obs_data_t *bench)
 	obs_set_output_source(0, NULL);
 	if (target) {
 		for (size_t i = 0; i < filters.num; i++) {
+			if (!filters.array[i])
+				continue;
 			obs_source_filter_remove(target, filters.array[i]);
 			obs_source_release(filters.array[i]);
 		}
