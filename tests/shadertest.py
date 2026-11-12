@@ -297,6 +297,8 @@ BENCH = {
     "chain5_light": ["color_grade_filter.shader", "Invert.shader", "opacity.shader", "gamma_correction.shader",
                      "Luminance.shader"],
     "single": ["hue-rotaton.shader"],
+    # A pointwise shader after another: merged into one pass.
+    "grain": ["hue-rotaton.shader", "film_grain.shader"],
     "none": [],
     # Glow with room to spread, mid-chain: a link into an expanded filter.
     "chain5_expand": ["hue-rotaton.shader", "chromatic-aberration.shader",
