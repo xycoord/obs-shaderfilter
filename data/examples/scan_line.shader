@@ -30,6 +30,7 @@ uniform bool boost = true;
 //Increases the minimum value of the sin wave
 uniform float floor<
     string label = "Floor";
+    string tooltip = "Sets the minimum opacity of the scan lines.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 100.0;
@@ -43,9 +44,6 @@ uniform float period<
     float maximum = 1000.0;
     float step = 1.0;
 > = 10.0;
-uniform string notes<
-    string widget_type = "info";
-> = "floor affects the minimum opacity of the scan line";
 float4 mainImage(VertData v_in) : TARGET
 {
 	//3.141592653589793238462643383279502884197169399375105820974944592307816406286208998628034825342117067982148086513282306647093844609550582231725359408128481 							3.141592653589793238462643383279502884197169399375105820974944592307816406286 

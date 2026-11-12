@@ -17,14 +17,18 @@ uniform int alpha_percentage<
     int maximum = 100;
     int step = 1;
 > = 90;
-uniform bool Lens_Flair = false;
+uniform bool Lens_Flair<
+    string tooltip = "Brightens the scene from the bottom right.";
+> = false;
 uniform bool Animate_Lens_Flair = false;
-uniform bool Apply_To_Alpha_Layer = false;
+uniform bool Apply_To_Alpha_Layer<
+    string tooltip = "Adds the gradient colors to the background.";
+> = false;
 uniform bool Apply_To_Specific_Color;
 uniform float4 Color_To_Replace;
 uniform string notes<
     string widget_type = "info";
-> = "This gradient is very basic from the top left corner. Red on horizontal, Green vertical, Blue Diagonal. Apply To Alpha Layer will add the gradient colors to the background. Lens Flair will brighten the scene from the bottom right. There is also a lot of unused code to play with in the shader file, delimted by /* ... */";
+> = "A basic gradient from the top-left corner: red horizontal, green vertical, blue diagonal. The shader file also has unused code to play with, marked by /* ... */.";
 
 float4 mainImage(VertData v_in) : TARGET
 {

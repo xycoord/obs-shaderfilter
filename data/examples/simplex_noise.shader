@@ -8,6 +8,7 @@
 
 uniform float Snap_Percent<
     string label = "Snap Percent";
+    string tooltip = "Controls how many times per second the noise updates. Default is 7.5.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 100.0;
@@ -15,6 +16,7 @@ uniform float Snap_Percent<
 > = 7.5;
 uniform float Speed_Percent<
     string label = "Speed Percent";
+    string tooltip = "Animation speed of the noise. Default is 2.5.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 100.0;
@@ -22,25 +24,28 @@ uniform float Speed_Percent<
 > = 2.5;
 uniform float Resolution<
     string label = "Resolution";
+    string tooltip = "Amount of detail in the noise. Default is 16.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 100.0;
     float step = 0.01;
 > = 16.0;
-uniform bool Fractal = false;
-uniform bool Use_Alpha_Layer = false;
+uniform bool Fractal<
+    string tooltip = "Uses a different (fractal) noise algorithm.";
+> = false;
+uniform bool Use_Alpha_Layer<
+    string tooltip = "Applies the effect using the image alpha layer.";
+> = false;
 uniform float4 Fore_Color = {0.95,0.95,0.95, 1.0};
 uniform float4 Back_Color = {0.75, 0.75, 0.75, 1.0};
 uniform float Alpha_Percent<
     string label = "Alpha Percent";
+    string tooltip = "Opacity of the effect. Default is 100.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 100.0;
     float step = 0.01;
 > = 100.0;
-uniform string Notes<
-    string widget_type = "info";
-> = "Alpha Percentage applies to the shader, Use_Alpha_Layer applies effect with the image alpha layer, Resolution is the amount of detail of noise created.Fractal is a different algorithm. Snap Percent affects how many updates per second. Default values: 7.5%, 2.5%, 16.0, 100%";
 
 float dot(float3 a, float3 b){
     return a.r*b.r+a.g*b.g+a.b*b.b;

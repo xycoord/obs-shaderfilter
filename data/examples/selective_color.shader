@@ -4,6 +4,7 @@
 //Converted to OpenGL by Q-mii February 25, 2020
 uniform float cutoff_Red<
     string label = "cutoff Red";
+    string tooltip = "How red a pixel must be to keep its color. Higher keeps less color: 0 keeps all, 1 keeps none (default 0.4).";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 1.0;
@@ -11,6 +12,7 @@ uniform float cutoff_Red<
 > = 0.40;
 uniform float cutoff_Green<
     string label = "cutoff Green";
+    string tooltip = "How green a pixel must be to keep its color. Higher keeps less color: 0 keeps all, 1 keeps none (default 0.025).";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 1.0;
@@ -18,6 +20,7 @@ uniform float cutoff_Green<
 > = 0.025;
 uniform float cutoff_Blue<
     string label = "cutoff Blue";
+    string tooltip = "How blue a pixel must be to keep its color. Higher keeps less color: 0 keeps all, 1 keeps none (default 0.25).";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 1.0;
@@ -25,6 +28,7 @@ uniform float cutoff_Blue<
 > = 0.25;
 uniform float cutoff_Yellow<
     string label = "cutoff Yellow";
+    string tooltip = "How yellow a pixel must be to keep its color. Higher keeps less color: 0 keeps all, 1 keeps none (default 0.25).";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 1.0;
@@ -32,19 +36,25 @@ uniform float cutoff_Yellow<
 > = 0.25;
 uniform float acceptance_Amplifier<
     string label = "acceptance Amplifier";
+    string tooltip = "Boosts how fully matching colors are kept. Default is 5.0.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 20.0;
     float step = 0.001;
 > = 5.0;
 
-uniform bool show_Red = true;
-uniform bool show_Green = true;
-uniform bool show_Blue = true;
-uniform bool show_Yellow = true;
-uniform string notes<
-    string widget_type = "info";
-> = "defaults: .4,.03,.25,.25, 5.0, true,true, true, true. cuttoff higher = less color, 0 = all 1 = none.";
+uniform bool show_Red<
+    string tooltip = "Keep red areas in color (on by default).";
+> = true;
+uniform bool show_Green<
+    string tooltip = "Keep green areas in color (on by default).";
+> = true;
+uniform bool show_Blue<
+    string tooltip = "Keep blue areas in color (on by default).";
+> = true;
+uniform bool show_Yellow<
+    string tooltip = "Keep yellow areas in color (on by default).";
+> = true;
 uniform int background_type<
   string label = "background type";
   string widget_type = "select";

@@ -20,20 +20,31 @@ uniform int gradient_percent<
 > = 20;
 uniform int delay_percent<
     string label = "delay percent";
+    string tooltip = "Adds a delay between shines. Adjust the speed to compensate.";
     string widget_type = "slider";
     int minimum = 0;
     int maximum = 100;
     int step = 1;
 > = 50;
 uniform bool Apply_To_Alpha_Layer = false;
-uniform bool ease = false;
-uniform bool hide = false;
-uniform bool reverse = false;
-uniform bool One_Direction = true;
-uniform bool glitch = false;
+uniform bool ease<
+    string tooltip = "Makes the animation pause for a moment at the start and end.";
+> = false;
+uniform bool hide<
+    string tooltip = "Makes the image disappear.";
+> = false;
+uniform bool reverse<
+    string tooltip = "Reverses the shine. Handy for quickly testing settings.";
+> = false;
+uniform bool One_Direction<
+    string tooltip = "Only shows the shine while it travels in one direction.";
+> = true;
+uniform bool glitch<
+    string tooltip = "Adds random, glitchy timing to the shine.";
+> = false;
 uniform string notes<
     string widget_type = "info";
-> = "Use Luma Wipes ( data/obs-plugins/obs-transitions/luma_wipes ) 'ease' makes the animation pause at the begin and end for a moment, 'hide' will make the image disappear, 'glitch' is random and amazing, 'reverse' quickly allows you to test settings, 'One Direction' only shows the shine as it travels in one direction, 'delay percentage' adds a delay between shines (requires adjustment to speed: https://www.desmos.com/calculator/wkgbndweyt )";
+> = "Use Luma Wipes (data/obs-plugins/obs-transitions/luma_wipes) as the texture. Delay and speed timing: https://www.desmos.com/calculator/wkgbndweyt";
 
 uniform float start_adjust;
 uniform float stop_adjust;

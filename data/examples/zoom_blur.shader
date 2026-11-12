@@ -5,6 +5,7 @@
 //Converted to OpenGL by Q-mii & Exeldro February 18, 2022
 uniform int samples <
     string label = "Samples";
+    string tooltip = "Number of blur samples. Keep it low to save power.";
     string widget_type = "slider";
     int minimum = 0;
     int maximum = 100;
@@ -19,6 +20,7 @@ uniform float magnitude<
 > = 0.5;
 uniform int speed_percent <
     string label = "Speed percent";
+    string tooltip = "Values above 0 animate the zoom.";
     string widget_type = "slider";
     int minimum = 0;
     int maximum = 100;
@@ -26,9 +28,6 @@ uniform int speed_percent <
 > = 0;
 uniform bool ease;
 uniform bool glitch;
-uniform string notes<
-    string widget_type = "info";
-> = "Speed Percent above zero will animate the zoom. Keep samples low to save power";
 
 float EaseInOutCircTimer(float t,float b,float c,float d){
 	t /= d/2;

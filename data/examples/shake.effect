@@ -16,6 +16,7 @@ uniform float local_time;
 
 uniform float random_scale<
     string label = "random scale";
+    string tooltip = "Keep it low (0.2-1) for small, jerky movements. Raise it for bigger, less frequent jumps.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 10.0;
@@ -44,10 +45,6 @@ uniform float max_growth_pixels<
     float step = 0.001;
 > = 2.0;
 uniform bool randomize_movement = false;
-
-uniform string notes<
-    string widget_type = "info";
-> ='keep the random_scale low for small (0.2-1) for small jerky movements and larger for less often big jumps';
 
 sampler_state textureSampler {
 	Filter    = Linear;
