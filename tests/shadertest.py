@@ -547,6 +547,15 @@ def cmd_parity(args) -> int:
 
 
 def bench_cases(suite: str, chain_mode: str) -> list[dict]:
+    if suite == "each":
+        # Every bundled filter shader on its own, plus a pass-through baseline.
+        names = sorted(p.name for p in EXAMPLES.iterdir()
+                       if p.suffix in (".shader", ".effect") and not is_transition(p.name)
+                       and "template" not in p.name.lower() and "example" not in p.name.lower())
+        cases = [{"name": "_baseline", "source": "main", "filters": [], "steps": [{"dt": 0.05}]}]
+        for n in names:
+            cases.append({"name": case_name(n), "source": "main", "filters": [filt(n)], "steps": [{"dt": 0.05}]})
+        return cases
     names = list(BENCH) if suite == "all" else [suite]
     cases = []
     for n in names:
@@ -592,7 +601,7 @@ def cmd_bench(args) -> int:
             gl = ""
             if v["draws_per_frame"] is not None:
                 gl = f"   draws {v['draws_per_frame']:6.2f}  Mpix {v['mpix_per_frame']:7.2f}"
-            print(f"{k:16} median {v['median_ms']:8.3f} ms{gl}   runs {' '.join(f'{x:.3f}' for x in v['runs'])}")
+            print(f"{k:40} median {v['median_ms']:8.3f} ms{gl}   runs {' '.join(f'{x:.3f}' for x in v['runs'])}")
         return 0
     finally:
         if xvfb:
@@ -619,7 +628,7 @@ def main() -> int:
     pb = sub.add_parser("bench")
     pb.add_argument("--plugin", required=True)
     pb.add_argument("--data", required=True)
-    pb.add_argument("--suite", default="all")
+    pb.add_argument("--suite", default="all", help='a chain name, "all", or "each" (every shader alone)')
     pb.add_argument("--chain-mode", default="separate", choices=["separate", "multi"])
     pb.add_argument("--frames", type=int, default=120)
     pb.add_argument("--repeats", type=int, default=3)
