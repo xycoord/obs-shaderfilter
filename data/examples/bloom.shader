@@ -7,6 +7,7 @@ uniform int Angle_Steps<
     int minimum = 1;
     int maximum = 20;
     int step = 1;
+    string tooltip = "Number of angle steps, limited to 1 - 20. Edit bloom.shader to remove the limit at your own risk.";
 > = 5; //<range 1 - 20>
 uniform int Radius_Steps<
     string label = "Radius Steps";
@@ -14,6 +15,7 @@ uniform int Radius_Steps<
     int minimum = 0;
     int maximum = 20;
     int step = 1;
+    string tooltip = "Number of radius steps, limited to 0 - 20. Edit bloom.shader to remove the limit at your own risk.";
 > = 9; //<range 0 - 20>
 uniform float ampFactor<
     string label = "amp Factor";
@@ -22,9 +24,6 @@ uniform float ampFactor<
     float maximum = 10.0;
     float step = 0.01;
 > = 2.0;
-uniform string notes<
-    string widget_type = "info";
-> = "Steps limited in range from 0 to 20. Edit bloom.shader to remove limits at your own risk.";
 
 float4 mainImage(VertData v_in) : TARGET
 {
@@ -42,21 +41,20 @@ float4 mainImage(VertData v_in) : TARGET
 	float angleDelta = (2.0 * PI) / float(angleSteps);
 	float radiusDelta = (maxRadius - minRadius) / float(radiusSteps);
 
-	for (int radiusStep = 0; radiusStep < radiusSteps; radiusStep++) {
-		float radius = minRadius + float(radiusStep) * radiusDelta;
+	// The first ring has radius 0: every angle reads the centre pixel, c0.
+	float4 centreTerm = radiusSteps > 0 ? c0 / float(totalSteps) : float4(0,0,0,0);
 
-		for (float angle=0.0; angle <(2.0*PI); angle += angleDelta) {
-			float2 currentCoord;
+	// Angles outside, radii inside: each direction's cos/sin is worked out once.
+	for (float angle=0.0; angle <(2.0*PI); angle += angleDelta) {
+		float2 direction = float2(cos(angle), sin(angle));
+		accumulatedColor += centreTerm;
 
-			float xDiff = radius * cos(angle);
-			float yDiff = radius * sin(angle);
-			
-			currentCoord = v_in.uv + float2(xDiff, yDiff);
-			float4 currentColor =image.Sample(textureSampler, currentCoord);
+		for (int radiusStep = 1; radiusStep < radiusSteps; radiusStep++) {
+			float radius = minRadius + float(radiusStep) * radiusDelta;
+			float4 currentColor = image.Sample(textureSampler, v_in.uv + radius * direction);
 			float currentFraction = float(radiusSteps+1 - radiusStep) / float(radiusSteps + 1);
 
 			accumulatedColor +=   currentFraction * currentColor / float(totalSteps);
-			
 		}
 	}
 

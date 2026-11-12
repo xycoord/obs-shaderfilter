@@ -3,6 +3,7 @@
 //Converted to OpenGL by Exeldro February 21, 2022
 uniform int minimum_alpha_percent<
     string label = "minimum alpha percent";
+    string tooltip = "Pixels less opaque than this are removed. The default is 50%; lower it to reveal more pixels.";
     string widget_type = "slider";
     int minimum = 0;
     int maximum = 100;
@@ -10,7 +11,7 @@ uniform int minimum_alpha_percent<
 > = 50;
 uniform string notes<
     string widget_type = "info";
-> = "Removes partial pixels, excellent for cleaning greenscreen. Default Minimum Alpha Percent is 50%, lowering will reveal more pixels";
+> = "Removes partially transparent pixels. Excellent for cleaning up a green screen key.";
 
 float4 mainImage(VertData v_in) : TARGET
 {

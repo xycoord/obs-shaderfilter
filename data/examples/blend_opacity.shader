@@ -16,6 +16,7 @@ uniform float Opacity_Start_Percent<
     float minimum = 0.0;
     float maximum = 100.0;
     float step = 1.0;
+    string tooltip = "Opacity at the start of the blend. Swap the Start and End values to reverse the effect.";
 > = 0.0;
 uniform float Opacity_End_Percent<
     string label = "Opacity End Percent";
@@ -23,6 +24,7 @@ uniform float Opacity_End_Percent<
     float minimum = 0.0;
     float maximum = 100.0;
     float step = 1.0;
+    string tooltip = "Opacity at the end of the blend. Swap the Start and End values to reverse the effect.";
 > = 100.0;
 uniform float Spread<
     string label = "Spread";
@@ -30,6 +32,7 @@ uniform float Spread<
     float minimum = 0.25;
     float maximum = 10.0;
     float step = 0.01;
+    string tooltip = "Width of the opacity blend, limited to 0.25 - 10. Edit the shader to change the limit at your own risk.";
 > = 0.5;
 uniform float Speed<
     string label = "Speed";
@@ -39,9 +42,6 @@ uniform float Speed<
     float step = 0.01;
 > = 0.0;
 uniform bool Apply_To_Alpha_Layer = true;
-uniform string Notes<
-    string widget_type = "info";
-> = "Spread is wideness of opacity blend and is limited between .25 and 10. Edit at your own risk. Invert Start and End to Reverse effect.";
 
 float4 mainImage(VertData v_in) : TARGET
 {

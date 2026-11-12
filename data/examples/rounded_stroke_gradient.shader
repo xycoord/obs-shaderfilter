@@ -16,6 +16,7 @@ uniform int border_thickness<
 > = 0;
 uniform int minimum_alpha_percent<
     string label = "Minimum alpha percent";
+    string tooltip = "Pixels below this opacity are not outlined. Default is 50; lower it to reveal more.";
     string widget_type = "slider";
     int minimum = 0;
     int maximum = 100;
@@ -47,7 +48,7 @@ uniform int center_height<
 > = 50;
 uniform string notes<
     string widget_type = "info";
-> = "Outlines the opaque areas with a rounded border. Default Minimum Alpha Percent is 50%, lowering will reveal more";
+> = "Outlines the opaque areas with a rounded border.";
 
 // float3 hsv2rgb(float3 c)
 // {

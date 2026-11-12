@@ -93,19 +93,16 @@ float pnoise(float2 P, float2 rep)
 	return 2.3 * n_xy;
 }
 
-uniform texture2d Burn_Gradient = "burngradient.png";
-uniform float Speed = 0.33;
-uniform float Gradient_Adjust = 0.85;
-uniform float Dissolve_Value = 1.43;
-uniform bool Animated;
+uniform texture2d Burn_Gradient< string tooltip = "Gradient image used to color the burn. Use burngradient.png."; > = "burngradient.png";
+uniform float Speed< string tooltip = "General speed of the effect. Negative numbers reverse it."; > = 0.33;
+uniform float Gradient_Adjust< string tooltip = "Width of the burn gradient."; > = 0.85;
+uniform float Dissolve_Value< string tooltip = "How much of the image the burn dissolves. This is the most important setting."; > = 1.43;
+uniform bool Animated< string tooltip = "Animates the burn effect."; >;
 uniform bool Apply_to_Channel;
-uniform bool Apply_Smoke = true;
+uniform bool Apply_Smoke< string tooltip = "Adds scrolling smoke."; > = true;
 uniform float Smoke_Horizonal_Speed = 0.3;
 uniform float Smoke_Vertical_Speed = 0.17;
 uniform int Iterations = 4;
-uniform string Notes<
-    string widget_type = "info";
-> = "Animate refers to the burn effect. Speed is general and is reversed with negative numbers. Gradient Adjust is the width of the burn gradient. Use the burngradient.png. Dissolve Value is important. Apply Smoke adds the scrolling smoke.";
 
 float4 mainImage(VertData v_in) : TARGET
 {

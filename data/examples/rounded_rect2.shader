@@ -28,7 +28,7 @@ uniform float border_alpha_end<
     float step = 0.01;
 > = 0.0;
 uniform float alpha_cut_off<
-    string label = "Aplha cut off";
+    string label = "Alpha cut off";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 1.0;

@@ -1,18 +1,15 @@
 //Converted to OpenGL by Exeldro February 22, 2022
-uniform float4 color;
+uniform float4 color< string tooltip = "Color multiplied with the original image to tint it. White means no tint."; >;
 uniform float level<
     string label = "Level";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 10.0;
     float step = 0.01;
+    string tooltip = "Transparency amount, where 1.0 is the base luminance. Recommended range is 0 to 10.";
 > = 1.0;
-uniform bool invertImageColor;
-uniform bool invertAlphaChannel;
-
-uniform string notes<
-    string widget_type = "info";
-> = "'color' - the color to add to the original image. Multiplies the color against the original color giving it a tint. White represents no tint. 'invertImageColor' - - inverts the color of the screen, great for testing and fine tuning. 'level' - transparency amount modifier where 1.0 = base luminance  (recommend 0.00 - 10.00). 'invertAlphaChannel' - flip what is transparent from darks (default) to lights";
+uniform bool invertImageColor< string tooltip = "Inverts the colors of the image. Great for testing and fine tuning."; >;
+uniform bool invertAlphaChannel< string tooltip = "Flips which areas become transparent, from darks (default) to lights."; >;
 
 float4 InvertColor(float4 rgba_in)
 {	

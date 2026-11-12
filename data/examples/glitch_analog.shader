@@ -58,7 +58,7 @@ uniform int pulse_speed_percent<
     int step = 1;
 > = 0;
 uniform int alpha_percent<
-    string label = "Aplha percent";
+    string label = "Alpha percent";
     string widget_type = "slider";
     int minimum = 0;
     int maximum = 100;

@@ -11,6 +11,7 @@ uniform int Alpha_Percent<
 > = 100;
 uniform float Quantity<
     string label = "Quantity";
+    string tooltip = "Number of hexagon tiles. With Equilateral on, around 12.33 works well; otherwise use a perfect square.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 100.0;
@@ -36,6 +37,7 @@ uniform int Speed_Percent<
 uniform bool Glitch;
 uniform float Distort_X<
     string label = "Distort X";
+    string tooltip = "Horizontal distortion of the hexagons. 1 is normal.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 10.0;
@@ -43,6 +45,7 @@ uniform float Distort_X<
 > = 1.0;
 uniform float Distort_Y<
     string label = "Distort Y";
+    string tooltip = "Vertical distortion of the hexagons. 1 is normal.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 10.0;
@@ -56,15 +59,12 @@ uniform float Offset_X<
     float step = 0.001;
 > = 0.0;
 uniform float Offset_Y<
-    string label = "Offset X";
+    string label = "Offset Y";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 1.0;
     float step = 0.001;
 > = 0.0;
-uniform string notes<
-    string widget_type = "info";
->= "Tiles:equilateral: around 12.33,nonequilateral: square rootable number. Distort of 1 is normal.";
 
 float mod(float x, float y)
 {

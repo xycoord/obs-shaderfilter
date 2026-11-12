@@ -3,6 +3,7 @@
 
 uniform float Red<
     string label = "Red";
+    string tooltip = "Gamma for the red channel. Use equal Red, Green and Blue values for general gamma correction.";
     string widget_type = "slider";
     float minimum = 0.1;
     float maximum = 10.0;
@@ -10,6 +11,7 @@ uniform float Red<
 > = 2.2;
 uniform float Green<
     string label = "Green";
+    string tooltip = "Gamma for the green channel. Use equal Red, Green and Blue values for general gamma correction.";
     string widget_type = "slider";
     float minimum = 0.1;
     float maximum = 10.0;
@@ -17,14 +19,12 @@ uniform float Green<
 > = 2.2;
 uniform float Blue<
     string label = "Blue";
+    string tooltip = "Gamma for the blue channel. Use equal Red, Green and Blue values for general gamma correction.";
     string widget_type = "slider";
     float minimum = 0.1;
     float maximum = 10.0;
     float step = 0.01;
 > = 2.2;
-uniform string notes<
-    string widget_type = "info";
-> = "Modify Colors to correct for gamma, use equal values for general correction."
 
 float4 mainImage(VertData v_in) : TARGET
 {  

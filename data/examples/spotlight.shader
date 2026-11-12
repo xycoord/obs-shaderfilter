@@ -1,6 +1,7 @@
 // Spotlight By Charles Fettinger (https://github.com/Oncorporation)  4/2019
 uniform float Speed_Percent<
     string label = "Speed Percent";
+    string tooltip = "How fast the spotlight moves. Set to 0 for a stationary spotlight.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 100.0;
@@ -8,6 +9,7 @@ uniform float Speed_Percent<
 > = 100.0; 
 uniform float Focus_Percent<
     string label = "Focus Percent";
+    string tooltip = "How tightly the light is focused.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 100.0;
@@ -29,9 +31,6 @@ uniform float Vertical_Offset<
     float maximum = 1.0;
     float step = 0.001;
 > = -0.5;
-uniform string Notes<
-    string widget_type = "info";
-> = "use negative Focus Percent to create a shade effect, speed zero is a stationary spotlight";
 
 float4 mainImage(VertData v_in) : TARGET
 {

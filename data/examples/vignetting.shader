@@ -1,6 +1,7 @@
 //Converted to OpenGL by Q-mii & Exeldro February 21, 2022
 uniform	float innerRadius<
     string label = "inner radius";
+    string tooltip = "The area inside this radius is always fully shown.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 5.0;
@@ -8,6 +9,7 @@ uniform	float innerRadius<
 > = 0.9;
 uniform	float outerRadius<
     string label = "outer radius";
+    string tooltip = "Where the falloff ends. The image fades out between the inner and outer radius.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 5.0;
@@ -20,9 +22,6 @@ uniform	float opacity<
     float maximum = 1.0;
     float step = 0.001;
 > = 0.8;
-uniform string notes<
-    string widget_type = "info";
-> = "inner radius will always be shown, outer radius is the falloff";
 
 float4 mainImage(VertData v_in) : TARGET
 {

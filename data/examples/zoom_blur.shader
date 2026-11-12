@@ -5,6 +5,7 @@
 //Converted to OpenGL by Q-mii & Exeldro February 18, 2022
 uniform int samples <
     string label = "Samples";
+    string tooltip = "Number of blur samples. Keep it low to save power.";
     string widget_type = "slider";
     int minimum = 0;
     int maximum = 100;
@@ -19,6 +20,7 @@ uniform float magnitude<
 > = 0.5;
 uniform int speed_percent <
     string label = "Speed percent";
+    string tooltip = "Values above 0 animate the zoom.";
     string widget_type = "slider";
     int minimum = 0;
     int maximum = 100;
@@ -26,9 +28,6 @@ uniform int speed_percent <
 > = 0;
 uniform bool ease;
 uniform bool glitch;
-uniform string notes<
-    string widget_type = "info";
-> = "Speed Percent above zero will animate the zoom. Keep samples low to save power";
 
 float EaseInOutCircTimer(float t,float b,float c,float d){
 	t /= d/2;
@@ -77,6 +76,8 @@ float4 mainImage(VertData v_in) : TARGET
 	accumulatedColor = currentColor;
 
 	accumulatedColor = c0/sample_speed;
+	float cos_angle = cos(angle);
+	float sin_angle = sin(angle);
 	for(int i = 1; i< sample_speed; i++) {
 		float currentRadius ;
 		// Distance to center dependent
@@ -85,8 +86,8 @@ float4 mainImage(VertData v_in) : TARGET
 		// Continuous;
 		// currentRadius = max(0,radius - (0.0004 * i));
 
-		currentCoord.x = (currentRadius * cos(angle)+1.0)/2.0;
-		currentCoord.y = -1* ((currentRadius * sin(angle)-1.0)/2.0);
+		currentCoord.x = (currentRadius * cos_angle+1.0)/2.0;
+		currentCoord.y = -1* ((currentRadius * sin_angle-1.0)/2.0);
 
 		float4 currentColor = image.Sample(textureSampler, currentCoord);
 		accumulatedColor += currentColor/sample_speed;

@@ -4,6 +4,7 @@
 //Converted to OpenGL by Exeldro February 15, 2022
 uniform float Target_Width<
     string label = "Target Width";
+    string tooltip = "Horizontal resolution of the pixelated image. Adjust it to suit your screen dimensions.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 2000.0;
@@ -11,14 +12,12 @@ uniform float Target_Width<
 > = 320.0;
 uniform float Target_Height<
     string label = "Target Height";
+    string tooltip = "Vertical resolution of the pixelated image. Adjust it to suit your screen dimensions.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 2000.0;
     float step = 0.1;
 > = 180.0;
-uniform string notes<
-    string widget_type = "info";
-> = "adjust width and height to your screen dimension";
 
 float4 mainImage(VertData v_in) : TARGET
 {

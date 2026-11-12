@@ -38,7 +38,7 @@ uniform float colorOffsetIntensity<
     float step = 0.1;
 > = 1.3;
 uniform float Alpha_Percentage<
-    string label = "Aplha percentage (100.0)";
+    string label = "Alpha percentage (100.0)";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 100.0;

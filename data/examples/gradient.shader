@@ -34,12 +34,15 @@ uniform int alpha_percent<
 > = 90;
 uniform int pulse_speed<
     string label = "Pulse speed";
+    string tooltip = "Values greater than 0 animate the gradient.";
     string widget_type = "slider";
     int minimum = 0;
     int maximum = 100;
     int step = 1;
 > = 0;
-uniform bool ease;
+uniform bool ease<
+    string tooltip = "Applies easing to the animation. The easing may seem too fast.";
+>;
 uniform bool rotate_colors;
 uniform bool Apply_To_Alpha_Layer = true;
 uniform bool Apply_To_Specific_Color;
@@ -48,6 +51,7 @@ uniform bool horizontal;
 uniform bool vertical;
 uniform int gradient_center_width_percentage<
     string label = "gradient center width percentage";
+    string tooltip = "Horizontal position of the gradient center, as a percentage of the width.";
     string widget_type = "slider";
     int minimum = 0;
     int maximum = 100;
@@ -55,14 +59,12 @@ uniform int gradient_center_width_percentage<
 > = 50;
 uniform int gradient_center_height_percentage<
     string label = "gradient center height percentage";
+    string tooltip = "Vertical position of the gradient center, as a percentage of the height.";
     string widget_type = "slider";
     int minimum = 0;
     int maximum = 100;
     int step = 1;
 > = 50;
-uniform string notes<
-    string widget_type = "info";
-> = "gradient center items will change the center location. Pulse Speed greater than 0 will animate. Easing seem to be too fast.";
 
 float EaseInOutCircTimer(float t, float b, float c, float d) {
 	t /= d / 2;

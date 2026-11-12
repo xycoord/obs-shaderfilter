@@ -3,6 +3,7 @@
 
 uniform float Alpha_Percent<
     string label = "Alpha Percent";
+    string tooltip = "Opacity of the frosted glass overlay.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 100.0;
@@ -10,6 +11,7 @@ uniform float Alpha_Percent<
 > = 100.0;
 uniform float Amount<
     string label = "Amount";
+    string tooltip = "Strength of the frosted glass distortion. Use together with Scale to change the look.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 1.0;
@@ -17,6 +19,7 @@ uniform float Amount<
 > = 0.03;
 uniform float Scale<
     string label = "Scale";
+    string tooltip = "Scale of the frosted glass pattern. Use together with Amount to change the look.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 10.0;
@@ -26,15 +29,13 @@ uniform bool Animate;
 uniform bool Horizontal_Border;
 uniform float Border_Offset<
     string label = "Border Offset";
+    string tooltip = "Moves the border between the frosted and clear areas.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 2.0;
     float step = 0.01;
 > = 1.1;
 uniform float4 Border_Color = {.8,.5,1.0,1.0};
-uniform string notes<
-    string widget_type = "info";
-> = "Change shader with Scale and Amount, move Border with Border Offset. Alpha is Opacity of overlay.";
 
 float rand(float2 co)
 {
