@@ -49,7 +49,9 @@ jobs:
           print '::group::Clean Homebrew Environment'
           typeset -a to_remove=()
 
-          for formula (speexdsp curl php) {
+          # Homebrew's git links Homebrew's curl, so removing curl alone leaves
+          # git unable to clone; remove git too and use the system's.
+          for formula (speexdsp curl php git) {
             if [[ -d ${HOMEBREW_PREFIX}/opt/${formula} ]] to_remove+=(${formula})
           }
 
