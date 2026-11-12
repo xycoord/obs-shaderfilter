@@ -37,10 +37,9 @@ float4 mainImage(VertData v_in) : TARGET
     float time = floor(elapsed_time * SPEED * 60.0);    
 	float2 uv = v_in.uv;
     
-    //copy orig
-    float4 outCol = image.Sample(textureSampler, uv);
-    
-    //randomly offset slices horizontally
+    //randomly offset slices horizontally: the last slice this pixel is in
+    //decides where it is read from, so find that first and read once
+    float2 uvSlice = uv;
     float maxOffset = AMT/2.0;
     for (float i = 0.0; i < 10.0 * AMT; i += 1.0) {
         float sliceY = random2d(float2(time , 2345.0 + float(i)));
@@ -49,9 +48,10 @@ float4 mainImage(VertData v_in) : TARGET
         float2 uvOff = uv;
         uvOff.x += hOffset;
         if (insideRange(uv.y, sliceY, frac(sliceY+sliceH)) == 1.0 ){
-        	outCol = image.Sample(textureSampler, uvOff);
+        	uvSlice = uvOff;
         }
     }
+    float4 outCol = image.Sample(textureSampler, uvSlice);
     
     //do slight offset on one entire channel
     float maxColOffset = AMT/6.0;

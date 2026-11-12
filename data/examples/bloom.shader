@@ -41,11 +41,15 @@ float4 mainImage(VertData v_in) : TARGET
 	float angleDelta = (2.0 * PI) / float(angleSteps);
 	float radiusDelta = (maxRadius - minRadius) / float(radiusSteps);
 
+	// The first ring has radius 0: every angle reads the centre pixel, c0.
+	float4 centreTerm = radiusSteps > 0 ? c0 / float(totalSteps) : float4(0,0,0,0);
+
 	// Angles outside, radii inside: each direction's cos/sin is worked out once.
 	for (float angle=0.0; angle <(2.0*PI); angle += angleDelta) {
 		float2 direction = float2(cos(angle), sin(angle));
+		accumulatedColor += centreTerm;
 
-		for (int radiusStep = 0; radiusStep < radiusSteps; radiusStep++) {
+		for (int radiusStep = 1; radiusStep < radiusSteps; radiusStep++) {
 			float radius = minRadius + float(radiusStep) * radiusDelta;
 			float4 currentColor = image.Sample(textureSampler, v_in.uv + radius * direction);
 			float currentFraction = float(radiusSteps+1 - radiusStep) / float(radiusSteps + 1);

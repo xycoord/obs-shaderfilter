@@ -22,7 +22,7 @@ float4 mainImage(VertData v_in) : TARGET
 {
     float4 color = image.Sample(textureSampler, v_in.uv);
     float m = timeon + timeoff;
-    float t = elapsed_time % m;
+    float t = fmod(elapsed_time, m);
     if (t < timeon) {
         return color;
     } else {

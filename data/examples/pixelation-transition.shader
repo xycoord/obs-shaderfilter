@@ -35,6 +35,8 @@ float4 mainImage(VertData v_in) : TARGET
 	//1..0..1
 	float scale = abs(transition_time - 0.5) * 2.0;
 	scale = pow(scale, power);
+	// Halfway through, scale is 0: one pixel the size of the image, not a division by zero.
+	scale = max(scale, 1.0 / max(uv_size.x, uv_size.y));
 
 	float2 uv = v_in.uv;
 	uv -= float2(center_x, center_y);
@@ -44,7 +46,7 @@ float4 mainImage(VertData v_in) : TARGET
 	uv /= scale;
 	uv /= uv_size;
 	uv += float2(center_x, center_y);
-	uv = clamp(uv, 1.0/uv_size, 1.0);
+	uv = clamp(uv, 1.0/uv_size, float2(1.0, 1.0));
 	float4 rgba = image.Sample(textureSampler, uv);
 	if(convert_linear)
         rgba.rgb = srgb_nonlinear_to_linear(rgba.rgb);

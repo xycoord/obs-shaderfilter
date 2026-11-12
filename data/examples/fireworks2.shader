@@ -77,7 +77,7 @@ float4 drawParticles(float2 pos, float3 particolor, float time, float2 cpos, flo
         float fade=(i/128.0)*time;
         float2 particpos = cpos + time*pp*d;
         pp = mul(rr,pp);
-        col.rgb = mix(particolor/fade, col, smoothstep(0.0, 0.0001, distance2(particpos, pos)));
+        col.rgb = mix(particolor/fade, col.rgb, smoothstep(0.0, 0.0001, distance2(particpos, pos)));
     }
     col.rgb*=smoothstep(0.0,1.0,(timelength-time)/timelength);
 	col.a = col.r+col.g+col.b;

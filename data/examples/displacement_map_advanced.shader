@@ -143,7 +143,7 @@ float4 mainImage(VertData v_in) : TARGET
 
   float4 base_rgba;
 
-  if(chromatic_aberration) {
+  if(chromatic_aberration != 0.0) {
     float4 base_r = image.Sample(textureSampler, v_in.uv + displace_uv - chromatic_aberration * displace_uv);
     float4 base_g = image.Sample(textureSampler, v_in.uv + displace_uv);
     float4 base_b = image.Sample(textureSampler, v_in.uv + displace_uv + chromatic_aberration * displace_uv);
@@ -169,7 +169,7 @@ float4 mainImage(VertData v_in) : TARGET
           size *= displace.b;
         }
 
-        if (chromatic_aberration) {
+        if (chromatic_aberration != 0.0) {
           float4 sc_r = image.Sample(textureSampler, v_in.uv + displace_uv - chromatic_aberration*displace_uv + float2(cos(d),sin(d)) * size * i / uv_size);
           float4 sc_g = image.Sample(textureSampler, v_in.uv + displace_uv + float2(cos(d),sin(d)) * size * i / uv_size);
           float4 sc_b = image.Sample(textureSampler, v_in.uv + displace_uv + chromatic_aberration*displace_uv + float2(cos(d),sin(d)) * size * i / uv_size);

@@ -95,5 +95,5 @@ float4 mainImage(VertData v_in) : TARGET
 
 	float3 light = CookTorrance(lightDir, normal, roughness)*float3(1,1,1)*lightStrength*Light_Color;
 
-	return float4(c0 + light,c0.a);
+	return float4(c0.rgb + light,c0.a);
 }

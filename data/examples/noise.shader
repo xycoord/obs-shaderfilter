@@ -38,7 +38,8 @@ float4 mainImage(VertData v_in) : TARGET
   float4 x;
 
   if (monochromatic) {
-    x = rand(float2(v_in.uv.x, v_in.uv.y) * scale + time + scale);
+    float r = rand(float2(v_in.uv.x, v_in.uv.y) * scale + time + scale);
+    x = float4(r, r, r, r);
   } else {
     x = float4(
       rand(float2(v_in.uv.x, v_in.uv.y) * scale + time + 1 * scale),
@@ -50,7 +51,8 @@ float4 mainImage(VertData v_in) : TARGET
 
   float4 rgba = image.Sample(textureSampler, v_in.uv);
 
-  float3 output = lerp(rgba, x, noiseLevel);
+  // ("output" is a reserved word in OpenGL's shading language.)
+  float3 mixed = lerp(rgba.rgb, x.rgb, noiseLevel);
 
-  return float4(output.r, output.g, output.b, rgba.a);
+  return float4(mixed.r, mixed.g, mixed.b, rgba.a);
 }
