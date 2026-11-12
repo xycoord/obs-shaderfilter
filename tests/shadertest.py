@@ -473,7 +473,13 @@ def cmd_parity(args) -> int:
         for d in (ref_out, new_out):
             shutil.rmtree(d, ignore_errors=True)
         t0 = time.time()
-        ref = run_sharded(args, args.ref, args.ref_data, base, cases, ref_out, args.jobs)
+        ref_cases = cases
+        if args.ref_examples:
+            # The reference renders the shader files in another folder (e.g. the
+            # originals, to check an optimised shader against them).
+            ref_cases = json.loads(json.dumps(cases).replace(json.dumps(str(EXAMPLES))[1:-1],
+                                                              json.dumps(str(Path(args.ref_examples).resolve()))[1:-1]))
+        ref = run_sharded(args, args.ref, args.ref_data, base, ref_cases, ref_out, args.jobs)
         new_spec_cases = cases
         if args.new_cases_transform:
             new_spec_cases = json.loads(Path(args.new_cases_transform).read_text())
@@ -623,6 +629,7 @@ def main() -> int:
     pp.add_argument("--new-data", required=True)
     pp.add_argument("--suite", default="all", choices=["all", "quick", "fusion"])
     pp.add_argument("--filter", default="")
+    pp.add_argument("--ref-examples", default="", help="render the reference with the shader files in this folder")
     pp.add_argument("--out", default=tempfile.gettempdir() + "/shadertest-parity")
     pp.add_argument("--jobs", type=int, default=4)
     pp.add_argument("--verbose", action="store_true")
