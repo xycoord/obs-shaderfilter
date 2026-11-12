@@ -2980,6 +2980,8 @@ static void shader_filter_update(void *data, obs_data_t *settings)
 	}
 }
 
+static void prewarm_fusion(struct shader_filter_data *filter);
+
 static void shader_filter_tick(void *data, float seconds)
 {
 	struct shader_filter_data *filter = data;
@@ -3079,6 +3081,9 @@ static void shader_filter_tick(void *data, float seconds)
 		}
 		filter->last_frame_time = frame_time;
 	}
+
+	if (!filter->transition)
+		prewarm_fusion(filter);
 }
 
 gs_texrender_t *create_or_reset_texrender(gs_texrender_t *render, const enum gs_color_format format)
@@ -3596,8 +3601,13 @@ enum link_kind {
 			   (expansion stretches it; previous_image keeps the copy) */
 };
 
-static struct shader_filter_data *linked_upstream(struct shader_filter_data *filter, enum link_kind *kind)
+/* On success *ref holds a reference to the upstream filter, as libobs holds
+ * one on a source while rendering it, so it can't be destroyed (on libobs'
+ * destruction thread) while we use its data; release it after drawing. */
+static struct shader_filter_data *linked_upstream(struct shader_filter_data *filter, enum link_kind *kind,
+						  obs_source_t **ref)
 {
+	*ref = NULL;
 	if (filter->transition)
 		return NULL;
 	const int ex = filter->expand_left + filter->expand_right;
@@ -3613,22 +3623,36 @@ static struct shader_filter_data *linked_upstream(struct shader_filter_data *fil
 	if (strcmp(obs_source_get_id(target), shader_filter_id) != 0)
 		return NULL;
 
-	struct shader_filter_data *up = obs_obj_get_data(target);
-	if (!up || !up->effect || up->rendering || !up->use_template || up->own_technique || up->use_pm_alpha ||
-	    up->param_previous_output)
+	obs_source_t *held = obs_source_get_ref(target);
+	if (!held)
 		return NULL;
+	struct shader_filter_data *up = obs_obj_get_data(held);
+	bool ok = up && up->effect && !up->rendering && up->use_template && !up->own_technique && !up->use_pm_alpha &&
+		  !up->param_previous_output;
 	/* Our base size is the upstream's output size. */
-	if (up->total_width != filter->total_width - ex || up->total_height != filter->total_height - ey ||
-	    !up->total_width || !up->total_height)
+	ok = ok && up->total_width == filter->total_width - ex && up->total_height == filter->total_height - ey &&
+	     up->total_width && up->total_height;
+	ok = ok && shader_filter_get_color_space(filter, 0, NULL) == GS_CS_SRGB;
+	if (!ok) {
+		obs_source_release(held);
 		return NULL;
-	if (shader_filter_get_color_space(filter, 0, NULL) != GS_CS_SRGB)
-		return NULL;
+	}
+	*ref = held;
 	return up;
+}
+
+static void release_refs(obs_source_t **refs, size_t n)
+{
+	for (size_t i = 0; i < n; i++) {
+		obs_source_release(refs[i]);
+		refs[i] = NULL;
+	}
 }
 
 /* The longest run ending at `last` in which every filter after the first only
  * reads its input at its own pixel, upstream first. */
-static size_t collect_fusion_group(struct shader_filter_data *last, struct shader_filter_data **stages)
+static size_t collect_fusion_group(struct shader_filter_data *last, struct shader_filter_data **stages,
+				   obs_source_t **refs)
 {
 	static int disabled = -1;
 	if (disabled < 0) {
@@ -3636,25 +3660,36 @@ static size_t collect_fusion_group(struct shader_filter_data *last, struct shade
 		disabled = e && *e && *e != '0';
 	}
 	struct shader_filter_data *rev[SF_MAX_FUSED];
+	obs_source_t *rev_refs[SF_MAX_FUSED];
 	size_t n = 0;
 	if (disabled || !last->shader_body)
 		return 0;
 	struct shader_filter_data *cur = last;
+	rev_refs[n] = NULL; /* the caller is rendering `last` and holds it */
 	rev[n++] = cur;
 	while (n < SF_MAX_FUSED && cur->pointwise) {
 		enum link_kind kind;
-		struct shader_filter_data *up = linked_upstream(cur, &kind);
-		if (!up || kind != LINK_DIRECT || !up->shader_body)
+		obs_source_t *ref;
+		struct shader_filter_data *up = linked_upstream(cur, &kind, &ref);
+		if (up && (kind != LINK_DIRECT || !up->shader_body)) {
+			obs_source_release(ref);
+			up = NULL;
+		}
+		if (!up)
 			break;
+		rev_refs[n] = ref;
 		rev[n++] = up;
 		cur = up;
 	}
-	for (size_t i = 0; i < n; i++)
+	for (size_t i = 0; i < n; i++) {
 		stages[i] = rev[n - 1 - i];
+		refs[i] = rev_refs[n - 1 - i];
+	}
 	return n;
 }
 
-static struct fused_effect *get_fused_effect(struct shader_filter_data *last, struct shader_filter_data **stages, size_t n)
+static struct fused_effect *get_fused_effect(struct shader_filter_data *last, struct shader_filter_data **stages, size_t n,
+					     bool ahead)
 {
 	struct fused_effect *fe = last->fused;
 	if (fe && fe->count == n) {
@@ -3736,6 +3771,8 @@ static struct fused_effect *get_fused_effect(struct shader_filter_data *last, st
 		fe->failed = true;
 		return NULL;
 	}
+	blog(LOG_INFO, "[obs-shaderfilter] '%s': combined %zu filters into one pass (%s)",
+	     obs_source_get_name(last->context), n, ahead ? "prepared ahead" : "on first render");
 	return fe;
 }
 
@@ -3777,11 +3814,12 @@ static void copy_linked_input(struct shader_filter_data *filter, gs_texture_t *s
 }
 
 /* This frame's input texture for `filter`: from a linked upstream shader
- * filter where possible, otherwise captured through libobs. */
-static gs_texture_t *acquire_input(struct shader_filter_data *filter)
+ * filter where possible, otherwise captured through libobs. *ref may receive
+ * a reference to the upstream filter, to release once the input is drawn. */
+static gs_texture_t *acquire_input(struct shader_filter_data *filter, obs_source_t **ref)
 {
 	enum link_kind kind;
-	struct shader_filter_data *up = linked_upstream(filter, &kind);
+	struct shader_filter_data *up = linked_upstream(filter, &kind, ref);
 	if (up) {
 		if (kind == LINK_DIRECT && shader_filter_produce(up, OUT_LINKED))
 			return gs_texrender_get_texture(up->output_texrender);
@@ -3792,6 +3830,8 @@ static gs_texture_t *acquire_input(struct shader_filter_data *filter)
 				copy_linked_input(filter, gs_texrender_get_texture(up->output_texrender));
 			return gs_texrender_get_texture(filter->input_texrender);
 		}
+		obs_source_release(*ref);
+		*ref = NULL;
 	}
 	get_input_source(filter);
 	return gs_texrender_get_texture(filter->input_texrender);
@@ -3805,7 +3845,8 @@ static void render_fused(struct shader_filter_data **stages, size_t n, struct fu
 	for (size_t i = 0; i < n; i++)
 		stages[i]->rendering = true;
 
-	gs_texture_t *input = acquire_input(stages[0]);
+	obs_source_t *input_ref = NULL;
+	gs_texture_t *input = acquire_input(stages[0], &input_ref);
 
 	if (input) {
 		prepare_output(last);
@@ -3829,9 +3870,69 @@ static void render_fused(struct shader_filter_data **stages, size_t n, struct fu
 		}
 		draw_shader(last, fe->effect, input, form);
 	}
+	obs_source_release(input_ref);
 
 	for (size_t i = 0; i + 1 < n; i++)
 		stages[i]->rendering = false;
+}
+
+struct downstream_search {
+	obs_source_t *self;
+	obs_source_t *found[32];
+	size_t num;
+};
+
+static void collect_shader_filters(obs_source_t *parent, obs_source_t *child, void *param)
+{
+	UNUSED_PARAMETER(parent);
+	struct downstream_search *ds = param;
+	if (child != ds->self && ds->num < 32 && strcmp(obs_source_get_id(child), shader_filter_id) == 0) {
+		obs_source_t *ref = obs_source_get_ref(child);
+		if (ref)
+			ds->found[ds->num++] = ref;
+	}
+}
+
+/* Does a shader filter downstream fuse this one into its own pass? */
+static bool fused_into_downstream(struct shader_filter_data *filter)
+{
+	obs_source_t *parent = obs_filter_get_parent(filter->context);
+	if (!parent)
+		return false;
+	struct downstream_search ds = {.self = filter->context};
+	obs_source_enum_filters(parent, collect_shader_filters, &ds);
+	bool fused = false;
+	for (size_t i = 0; i < ds.num && !fused; i++) {
+		struct shader_filter_data *down = obs_obj_get_data(ds.found[i]);
+		if (!down || !down->pointwise || !obs_source_enabled(ds.found[i]))
+			continue;
+		enum link_kind kind;
+		obs_source_t *ref;
+		struct shader_filter_data *up = linked_upstream(down, &kind, &ref);
+		fused = up == filter && kind == LINK_DIRECT;
+		obs_source_release(ref);
+	}
+	release_refs(ds.found, ds.num);
+	return fused;
+}
+
+/* Build the fused effect for the run this filter ends, if any, during
+ * video_tick: every source ticks from the moment a scene collection loads,
+ * so effects are compiled then rather than on the first rendered frame of a
+ * scene (a hitch on the live output). */
+static void prewarm_fusion(struct shader_filter_data *filter)
+{
+	if (!filter->shader_body || !filter->effect || !filter->total_width || fused_into_downstream(filter))
+		return;
+	struct shader_filter_data *stages[SF_MAX_FUSED];
+	obs_source_t *refs[SF_MAX_FUSED];
+	size_t n = collect_fusion_group(filter, stages, refs);
+	if (n >= 2) {
+		obs_enter_graphics();
+		get_fused_effect(filter, stages, n, true);
+		obs_leave_graphics();
+	}
+	release_refs(refs, n);
 }
 
 /* Render this filter's shader output into output_texrender for the current
@@ -3853,12 +3954,18 @@ static bool shader_filter_produce(struct shader_filter_data *filter, enum out_fo
 	filter->rendering = true;
 
 	struct shader_filter_data *stages[SF_MAX_FUSED];
-	size_t n = collect_fusion_group(filter, stages);
-	struct fused_effect *fe = n >= 2 ? get_fused_effect(filter, stages, n) : NULL;
-	if (fe)
+	obs_source_t *refs[SF_MAX_FUSED];
+	size_t n = collect_fusion_group(filter, stages, refs);
+	struct fused_effect *fe = n >= 2 ? get_fused_effect(filter, stages, n, false) : NULL;
+	if (fe) {
 		render_fused(stages, n, fe, form);
-	else
-		render_shader(filter, acquire_input(filter), f, filter_to, form);
+	} else {
+		obs_source_t *input_ref = NULL;
+		gs_texture_t *input = acquire_input(filter, &input_ref);
+		render_shader(filter, input, f, filter_to, form);
+		obs_source_release(input_ref);
+	}
+	release_refs(refs, n);
 	if (f == 0.0f) {
 		filter->output_rendered = true;
 		filter->output_form = (int)form;

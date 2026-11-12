@@ -114,12 +114,26 @@ static inline bool tok_same(const struct toks *t, size_t a, size_t b)
 }
 
 /* Is the identifier at idx followed by an assignment (=, op=, ++, --),
- * possibly through member accesses (v_in.uv.x = ...)? */
+ * possibly through member accesses or subscripts (v_in.uv.x = ..., uv[0] += ...)? */
 static bool assigned_at(const struct toks *t, size_t idx)
 {
 	size_t j = idx + 1;
-	while (tok_is(t, j, ".") && tok_ident(t, j + 1))
-		j += 2;
+	for (;;) {
+		if (tok_is(t, j, ".") && tok_ident(t, j + 1)) {
+			j += 2;
+		} else if (tok_is(t, j, "[")) {
+			int depth = 0;
+			for (; j < t->a.num; j++) {
+				if (tok_is(t, j, "["))
+					depth++;
+				else if (tok_is(t, j, "]") && --depth == 0)
+					break;
+			}
+			j++;
+		} else {
+			break;
+		}
+	}
 	if (tok_is(t, j, "=") && !tok_is(t, j + 1, "="))
 		return true;
 	if ((tok_is(t, j, "+") && tok_is(t, j + 1, "+")) || (tok_is(t, j, "-") && tok_is(t, j + 1, "-")))
@@ -189,9 +203,10 @@ static void analyse(const struct toks *t, struct pointwise_info *info)
 		return;
 	info->param = param;
 
-	/* VertData passed by reference anywhere could be modified. */
-	for (size_t i = 0; i + 1 < t->a.num; i++)
-		if ((tok_is(t, i, "out") || tok_is(t, i, "inout")) && tok_is(t, i + 1, "VertData"))
+	/* Anything passed by reference could be modified behind our back (the
+	 * VertData, or a uv alias handed to a helper). */
+	for (size_t i = 0; i < t->a.num; i++)
+		if (tok_is(t, i, "out") || tok_is(t, i, "inout"))
 			return;
 
 	/* Aliases: float2 A = v.uv; never assigned again. */
@@ -438,6 +453,11 @@ char *sf_fusion_build(const char *const *bodies, size_t count, const char *templ
 			if (!pw.ok)
 				ok = false;
 		}
+		/* An upstream stage that can discard would kill the whole fused
+		 * pixel, where on its own it only skipped writing its own output. */
+		for (size_t i = 0; !last && ok && i < t.a.num; i++)
+			if (tok_is(&t, i, "discard") || (tok_is(&t, i, "clip") && tok_is(&t, i + 1, "(")))
+				ok = false;
 		if (ok) {
 			emit_stage(&out, &t, s > 0 ? &pw : NULL, !last, s);
 			if (!last) {
