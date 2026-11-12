@@ -140,7 +140,7 @@ float4 mainImage(VertData v_in) : TARGET\n\
  * render_output.effect into an 8-bit sRGB texture, then un-premultiplied by
  * DrawAlphaDivide into another 8-bit sRGB texture. Notably, colour is zeroed
  * where alpha is zero, and translucent colour is quantised in premultiplied
- * form. */
+ * form. Opaque pixels round-trip unchanged, so they skip the arithmetic. */
 static const char *effect_template_end = "\n\
 float _sf_q8(float x)\n\
 {\n\
@@ -159,6 +159,8 @@ float4 _sf_boundary(float4 r)\n\
 	if (a <= 0.0)\n\
 		return float4(0.0, 0.0, 0.0, 0.0);\n\
 	float3 v = float3(_sf_q8(r.r), _sf_q8(r.g), _sf_q8(r.b));\n\
+	if (a >= 1.0)\n\
+		return float4(v, 1.0);\n\
 	float3 pm = srgb_nonlinear_to_linear(v) * a;\n\
 	float3 s = float3(_sf_q8(_sf_enc(pm.r)), _sf_q8(_sf_enc(pm.g)), _sf_q8(_sf_enc(pm.b)));\n\
 	float3 lin = srgb_nonlinear_to_linear(s) / a;\n\
