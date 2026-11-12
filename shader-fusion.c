@@ -260,9 +260,56 @@ static void analyse(const struct toks *t, struct pointwise_info *info)
 	info->ok = ok && info->samples.num > 0;
 }
 
+/* Does any #define body (with its continuation lines) assign or increment?
+ * The analysis doesn't expand macros, so such a shader could move its uv in a
+ * way it can't see. */
+static bool macro_writes(const char *src)
+{
+	const char *p = src;
+	while (p && *p) {
+		const char *line = p;
+		while (*line == ' ' || *line == '\t')
+			line++;
+		bool define = false;
+		if (*line == '#') {
+			const char *d = line + 1;
+			while (*d == ' ' || *d == '\t')
+				d++;
+			define = strncmp(d, "define", 6) == 0;
+		}
+		const char *end = p;
+		for (;;) {
+			const char *nl = strchr(end, '\n');
+			if (!nl) {
+				end = end + strlen(end);
+				break;
+			}
+			const char *last = nl;
+			while (last > end && (last[-1] == '\r' || last[-1] == ' ' || last[-1] == '\t'))
+				last--;
+			if (define && last > end && last[-1] == '\\') {
+				end = nl + 1;
+				continue;
+			}
+			end = nl;
+			break;
+		}
+		if (define) {
+			for (const char *c = line; c < end; c++) {
+				if (*c == '=' && c[1] != '=' && (c == line || !strchr("=<>!", c[-1])))
+					return true;
+				if ((c[0] == '+' && c[1] == '+') || (c[0] == '-' && c[1] == '-'))
+					return true;
+			}
+		}
+		p = *end ? end + 1 : end;
+	}
+	return false;
+}
+
 bool sf_fusion_is_pointwise(const char *body)
 {
-	if (!body)
+	if (!body || macro_writes(body))
 		return false;
 	struct toks t;
 	tokenize(body, &t);
@@ -345,6 +392,77 @@ static bool is_member_name(const struct toks *t, size_t idx)
 	return false;
 }
 
+/* Is the identifier at idx defined by the stage itself at top level: a
+ * function (`type name(` at brace depth 0) or a uniform (`uniform type name`)?
+ * Such a name is renamed even if it is also a builtin (a `uniform float floor`,
+ * a shader's own `float mod(...)`), so two stages defining it don't clash. */
+static bool is_type_or_keyword(const char *s, size_t len)
+{
+	static const char *prefixes[] = {"float", "int", "uint", "bool", "half", "double", "vec", "ivec", "uvec", "bvec",
+					 "mat", "texture", "sampler"};
+	static const char *words[] = {"void",   "return", "if",      "else",   "for",      "while", "do",
+				      "switch", "case",   "default", "const",  "static",   "uniform", "in",
+				      "out",    "inout",  "struct",  "string", "true",     "false", "technique",
+				      "pass",   "discard", "break",  "continue", "matrix",  "vector"};
+	for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); i++)
+		if (len >= strlen(prefixes[i]) && strncmp(s, prefixes[i], strlen(prefixes[i])) == 0)
+			return true;
+	for (size_t i = 0; i < sizeof(words) / sizeof(words[0]); i++)
+		if (len == strlen(words[i]) && strncmp(s, words[i], len) == 0)
+			return true;
+	return false;
+}
+
+/* Is offset `pos` inside an #if/#ifdef/#ifndef block? */
+static bool in_conditional(const char *src, size_t pos)
+{
+	int depth = 0;
+	const char *p = src;
+	while (p && (size_t)(p - src) < pos) {
+		const char *line = p;
+		while (*line == ' ' || *line == '\t')
+			line++;
+		if (*line == '#') {
+			const char *d = line + 1;
+			while (*d == ' ' || *d == '\t')
+				d++;
+			if (strncmp(d, "if", 2) == 0)
+				depth++;
+			else if (strncmp(d, "endif", 5) == 0)
+				depth--;
+		}
+		p = strchr(p, '\n');
+		if (p)
+			p++;
+	}
+	return depth > 0;
+}
+
+static bool user_defined(const struct toks *t, size_t idx)
+{
+	const struct tok *tk = &t->a.array[idx];
+	if (is_type_or_keyword(t->src + tk->start, tk->len))
+		return false;
+	int depth = 0;
+	for (size_t i = 0; i < t->a.num; i++) {
+		if (tok_is(t, i, "{"))
+			depth++;
+		else if (tok_is(t, i, "}"))
+			depth--;
+		if (depth != 0 || !tok_ident(t, i) || !tok_same(t, i, idx) || i == 0)
+			continue;
+		bool def = (tok_ident(t, i - 1) && tok_is(t, i + 1, "(") &&
+			    is_type_or_keyword(t->src + t->a.array[i - 1].start, t->a.array[i - 1].len) &&
+			    !tok_is(t, i - 1, "return")) ||
+			   (i >= 2 && tok_is(t, i - 2, "uniform") && tok_ident(t, i - 1));
+		/* A definition inside #if (e.g. a `mod` for Direct3D only, under
+		 * #ifndef OPENGL) can't be renamed: its uses aren't conditional. */
+		if (def)
+			return !in_conditional(t->src, t->a.array[i].start);
+	}
+	return false;
+}
+
 static void emit_prefix(struct dstr *out, size_t stage)
 {
 	dstr_catf(out, "_sf%zu_", stage);
@@ -357,10 +475,25 @@ static void emit_stage(struct dstr *out, const struct toks *t, const struct poin
 		       size_t stage)
 {
 	size_t next_sample = 0;
-	char *member_cache = bzalloc(t->a.num ? t->a.num : 1); /* 0 unknown, 1 member, 2 not */
+	char *member_cache = bzalloc(t->a.num ? t->a.num : 1);
+	/* Inside `sampler_state name { ... }` the words are libobs' state names and
+	 * values (Repeat, Point, ...), matched case-insensitively and defaulted
+	 * silently when unknown: never rename them. */
+	size_t sampler_body_end = 0;
 	for (size_t i = 0; i < t->a.num; i++) {
 		const struct tok *tk = &t->a.array[i];
 		dstr_ncat(out, t->src + tk->trivia, tk->start - tk->trivia);
+
+		if (tok_is(t, i, "sampler_state") && tok_ident(t, i + 1) && tok_is(t, i + 2, "{")) {
+			sampler_body_end = match_brace(t, i + 2);
+			if (sampler_body_end == (size_t)-1)
+				sampler_body_end = t->a.num;
+		}
+		if (i > 0 && sampler_body_end && i < sampler_body_end && !tok_is(t, i - 1, "sampler_state") &&
+		    tk->type == TOK_IDENT) {
+			dstr_ncat(out, t->src + tk->start, tk->len);
+			continue;
+		}
 
 		if (pw && next_sample < pw->samples.num && pw->samples.array[next_sample].first == i) {
 			const struct tok *p = &t->a.array[pw->param];
@@ -378,13 +511,15 @@ static void emit_stage(struct dstr *out, const struct toks *t, const struct poin
 			continue;
 		}
 
-		if (rename && tk->type == TOK_IDENT && !(i > 0 && tok_is(t, i - 1, ".")) &&
-		    !is_reserved(t->src + tk->start, tk->len)) {
+		if (rename && tk->type == TOK_IDENT && !(i > 0 && tok_is(t, i - 1, "."))) {
+			/* 0 unknown, 1 keep, 2 rename */
 			if (!member_cache[i]) {
-				bool m = is_member_name(t, i);
+				bool keep = is_member_name(t, i) ||
+					    (is_reserved(t->src + tk->start, tk->len) &&
+					     (strncmp(t->src + tk->start, "_sf", 3) == 0 || !user_defined(t, i)));
 				for (size_t k = i; k < t->a.num; k++)
 					if (t->a.array[k].type == TOK_IDENT && tok_same(t, k, i))
-						member_cache[k] = m ? 1 : 2;
+						member_cache[k] = keep ? 1 : 2;
 			}
 			if (member_cache[i] == 2)
 				emit_prefix(out, stage);
@@ -396,40 +531,40 @@ static void emit_stage(struct dstr *out, const struct toks *t, const struct poin
 }
 
 static const char *fusion_prelude = "\n\
-float _sfx_q8(float x)\n\
+float _sfx_q8(float _sfx_x)\n\
 {\n\
-	float v = saturate(x) * 255.0 + 0.5;\n\
-	return (v - frac(v)) / 255.0;\n\
+	float _sfx_v = saturate(_sfx_x) * 255.0 + 0.5;\n\
+	return (_sfx_v - frac(_sfx_v)) / 255.0;\n\
 }\n\
 \n\
-float _sfx_dec(float u)\n\
+float _sfx_dec(float _sfx_u)\n\
 {\n\
-	return (u <= 0.04045) ? (u / 12.92) : pow((u + 0.055) / 1.055, 2.4);\n\
+	return (_sfx_u <= 0.04045) ? (_sfx_u / 12.92) : pow((_sfx_u + 0.055) / 1.055, 2.4);\n\
 }\n\
 \n\
-float _sfx_enc(float l)\n\
+float _sfx_enc(float _sfx_l)\n\
 {\n\
-	return (l <= 0.0031308) ? (12.92 * l) : (1.055 * pow(l, 1.0 / 2.4) - 0.055);\n\
+	return (_sfx_l <= 0.0031308) ? (12.92 * _sfx_l) : (1.055 * pow(_sfx_l, 1.0 / 2.4) - 0.055);\n\
 }\n\
 \n\
-float4 _sfx_boundary(float4 r)\n\
+float4 _sfx_boundary(float4 _sfx_r)\n\
 {\n\
-	float a = _sfx_q8(r.a);\n\
-	if (a <= 0.0)\n\
+	float _sfx_a = _sfx_q8(_sfx_r.a);\n\
+	if (_sfx_a <= 0.0)\n\
 		return float4(0.0, 0.0, 0.0, 0.0);\n\
-	float3 v = float3(_sfx_q8(r.r), _sfx_q8(r.g), _sfx_q8(r.b));\n\
-	if (a >= 1.0)\n\
-		return float4(v, 1.0);\n\
-	float3 pm = float3(_sfx_dec(v.r), _sfx_dec(v.g), _sfx_dec(v.b)) * a;\n\
-	float3 s = float3(_sfx_q8(_sfx_enc(pm.r)), _sfx_q8(_sfx_enc(pm.g)), _sfx_q8(_sfx_enc(pm.b)));\n\
-	float3 lin = float3(_sfx_dec(s.r), _sfx_dec(s.g), _sfx_dec(s.b)) / a;\n\
-	return float4(_sfx_q8(_sfx_enc(lin.r)), _sfx_q8(_sfx_enc(lin.g)), _sfx_q8(_sfx_enc(lin.b)), a);\n\
+	float3 _sfx_c = float3(_sfx_q8(_sfx_r.r), _sfx_q8(_sfx_r.g), _sfx_q8(_sfx_r.b));\n\
+	if (_sfx_a >= 1.0)\n\
+		return float4(_sfx_c, 1.0);\n\
+	float3 _sfx_pm = float3(_sfx_dec(_sfx_c.r), _sfx_dec(_sfx_c.g), _sfx_dec(_sfx_c.b)) * _sfx_a;\n\
+	float3 _sfx_s = float3(_sfx_q8(_sfx_enc(_sfx_pm.r)), _sfx_q8(_sfx_enc(_sfx_pm.g)), _sfx_q8(_sfx_enc(_sfx_pm.b)));\n\
+	float3 _sfx_lin = float3(_sfx_dec(_sfx_s.r), _sfx_dec(_sfx_s.g), _sfx_dec(_sfx_s.b)) / _sfx_a;\n\
+	return float4(_sfx_q8(_sfx_enc(_sfx_lin.r)), _sfx_q8(_sfx_enc(_sfx_lin.g)), _sfx_q8(_sfx_enc(_sfx_lin.b)), _sfx_a);\n\
 }\n\
 \n";
 
 char *sf_fusion_build(const char *const *bodies, size_t count, const char *template_begin, const char *template_end)
 {
-	if (count < 2)
+	if (count < 1)
 		return NULL;
 
 	struct dstr out = {0};
@@ -450,7 +585,7 @@ char *sf_fusion_build(const char *const *bodies, size_t count, const char *templ
 		da_init(pw.samples);
 		if (s > 0) {
 			analyse(&t, &pw);
-			if (!pw.ok)
+			if (!pw.ok || macro_writes(bodies[s]))
 				ok = false;
 		}
 		/* An upstream stage that can discard would kill the whole fused

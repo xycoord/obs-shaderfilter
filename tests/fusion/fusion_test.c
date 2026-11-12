@@ -35,6 +35,10 @@ static const struct {
 	{"float4 helper(float2 uv) { return image.Sample(textureSampler, uv); }\n" BODY("return helper(v_in.uv);"), false},
 	{BODY("return image.SampleLevel(textureSampler, v_in.uv, 0);"), false},
 	{BODY("return float4(1.0, 0.0, 0.0, 1.0);"), false},
+	{"#define FLIP v_in.uv.y = 1.0 - v_in.uv.y\n" BODY("FLIP; return image.Sample(textureSampler, v_in.uv);"), false},
+	{"#define WOBBLE(p) p.x += 0.1\n" BODY("float2 uv = v_in.uv; WOBBLE(uv); return image.Sample(textureSampler, uv);"), false},
+	{"#define MOVE(p) \\\n  p++\n" BODY("float2 uv = v_in.uv; MOVE(uv); return image.Sample(textureSampler, uv);"), false},
+	{"#define PI 3.14159\n#define SAME(a, b) ((a) == (b))\n" BODY("return image.Sample(textureSampler, v_in.uv) * PI;"), true},
 };
 
 static int selftest(void)
@@ -69,6 +73,25 @@ static int selftest(void)
 	}
 	if ((r = sf_fusion_build(ok, 2, tb, "")) == NULL) {
 		printf("FAIL refused a downstream stage with discard\n");
+		failures++;
+	}
+	bfree(r);
+	/* Sampler state values in a renamed stage keep their names. */
+	const char *sampled[] = {"sampler_state tiled { Filter = Point; AddressU = Repeat; AddressV = wrap; };\n" BODY(
+					 "return image.Sample(tiled, v_in.uv * 4.0);"),
+				 BODY("return image.Sample(textureSampler, v_in.uv);")};
+	if ((r = sf_fusion_build(sampled, 2, tb, "")) == NULL ||
+	    !strstr(r, "sampler_state _sf0_tiled { Filter = Point; AddressU = Repeat; AddressV = wrap; }")) {
+		printf("FAIL sampler_state body renamed:\n%s\n", r ? r : "(not built)");
+		failures++;
+	}
+	bfree(r);
+	/* A builtin's name the stage defines itself is renamed. */
+	const char *own_floor[] = {"uniform float floor = 0.5;\n" BODY("return image.Sample(textureSampler, v_in.uv) * floor;"),
+				   BODY("return image.Sample(textureSampler, v_in.uv);")};
+	if ((r = sf_fusion_build(own_floor, 2, tb, "")) == NULL || !strstr(r, "uniform float _sf0_floor") ||
+	    !strstr(r, "* _sf0_floor")) {
+		printf("FAIL user uniform named like a builtin not renamed:\n%s\n", r ? r : "(not built)");
 		failures++;
 	}
 	bfree(r);

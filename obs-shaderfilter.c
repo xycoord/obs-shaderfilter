@@ -134,7 +134,22 @@ float4 mainImage(VertData v_in) : TARGET\n\
 }\n\
 ";
 
-/* "DrawLinked" is used when this filter's output is handed straight to the next
+static const char *effect_template_end = "\n\
+technique Draw\n\
+{\n\
+	pass\n\
+	{\n\
+		vertex_shader = mainTransform(v_in);\n\
+		pixel_shader = mainImage(v_in);\n\
+	}\n\
+}\n";
+
+/* The end of *derived* effects (see "Linked rendering" below), which are built
+ * separately from a filter's own effect, so a filter's own effect is exactly
+ * what it always was and anything generated here can only fail the
+ * optimisation, never the filter.
+ *
+ * "DrawLinked" is used when this filter's output is handed straight to the next
  * shader filter on the same source instead of going through libobs. It
  * reproduces, in this pass, what the boundary between two filters does to the
  * pixels: the output is stored in 8 bits, linearised and premultiplied by
@@ -144,31 +159,32 @@ float4 mainImage(VertData v_in) : TARGET\n\
  * form. Opaque pixels round-trip unchanged, so they skip the arithmetic.
  * "DrawPremul" stops half way, producing what libobs' texture would hold
  * (premultiplied in linear light, sRGB-encoded), for a downstream filter that
- * still makes its own input copy (expansion, previous_image, USE_PM_ALPHA). */
-static const char *effect_template_end = "\n\
-float _sf_q8(float x)\n\
+ * still makes its own input copy (expansion, previous_image, USE_PM_ALPHA).
+ * Locals are prefixed so a user's object-like macro can't capture them. */
+static const char *effect_template_end_derived = "\n\
+float _sf_q8(float _sf_x)\n\
 {\n\
-	float v = saturate(x) * 255.0 + 0.5;\n\
-	return (v - frac(v)) / 255.0;\n\
+	float _sf_v = saturate(_sf_x) * 255.0 + 0.5;\n\
+	return (_sf_v - frac(_sf_v)) / 255.0;\n\
 }\n\
 \n\
-float _sf_enc(float l)\n\
+float _sf_enc(float _sf_l)\n\
 {\n\
-	return (l <= 0.0031308) ? (12.92 * l) : (1.055 * pow(l, 1.0 / 2.4) - 0.055);\n\
+	return (_sf_l <= 0.0031308) ? (12.92 * _sf_l) : (1.055 * pow(_sf_l, 1.0 / 2.4) - 0.055);\n\
 }\n\
 \n\
-float4 _sf_boundary(float4 r)\n\
+float4 _sf_boundary(float4 _sf_r)\n\
 {\n\
-	float a = _sf_q8(r.a);\n\
-	if (a <= 0.0)\n\
+	float _sf_a = _sf_q8(_sf_r.a);\n\
+	if (_sf_a <= 0.0)\n\
 		return float4(0.0, 0.0, 0.0, 0.0);\n\
-	float3 v = float3(_sf_q8(r.r), _sf_q8(r.g), _sf_q8(r.b));\n\
-	if (a >= 1.0)\n\
-		return float4(v, 1.0);\n\
-	float3 pm = srgb_nonlinear_to_linear(v) * a;\n\
-	float3 s = float3(_sf_q8(_sf_enc(pm.r)), _sf_q8(_sf_enc(pm.g)), _sf_q8(_sf_enc(pm.b)));\n\
-	float3 lin = srgb_nonlinear_to_linear(s) / a;\n\
-	return float4(_sf_enc(lin.r), _sf_enc(lin.g), _sf_enc(lin.b), a);\n\
+	float3 _sf_c = float3(_sf_q8(_sf_r.r), _sf_q8(_sf_r.g), _sf_q8(_sf_r.b));\n\
+	if (_sf_a >= 1.0)\n\
+		return float4(_sf_c, 1.0);\n\
+	float3 _sf_pm = srgb_nonlinear_to_linear(_sf_c) * _sf_a;\n\
+	float3 _sf_s = float3(_sf_q8(_sf_enc(_sf_pm.r)), _sf_q8(_sf_enc(_sf_pm.g)), _sf_q8(_sf_enc(_sf_pm.b)));\n\
+	float3 _sf_lin = srgb_nonlinear_to_linear(_sf_s) / _sf_a;\n\
+	return float4(_sf_enc(_sf_lin.r), _sf_enc(_sf_lin.g), _sf_enc(_sf_lin.b), _sf_a);\n\
 }\n\
 \n\
 float4 _sf_linked(VertData v_in) : TARGET\n\
@@ -178,13 +194,13 @@ float4 _sf_linked(VertData v_in) : TARGET\n\
 \n\
 float4 _sf_premul(VertData v_in) : TARGET\n\
 {\n\
-	float4 r = mainImage(v_in);\n\
-	float a = _sf_q8(r.a);\n\
-	float3 v = float3(_sf_q8(r.r), _sf_q8(r.g), _sf_q8(r.b));\n\
-	if (a >= 1.0)\n\
-		return float4(v, 1.0);\n\
-	float3 pm = srgb_nonlinear_to_linear(v) * a;\n\
-	return float4(_sf_enc(pm.r), _sf_enc(pm.g), _sf_enc(pm.b), a);\n\
+	float4 _sf_r = mainImage(v_in);\n\
+	float _sf_a = _sf_q8(_sf_r.a);\n\
+	float3 _sf_c = float3(_sf_q8(_sf_r.r), _sf_q8(_sf_r.g), _sf_q8(_sf_r.b));\n\
+	if (_sf_a >= 1.0)\n\
+		return float4(_sf_c, 1.0);\n\
+	float3 _sf_pm = srgb_nonlinear_to_linear(_sf_c) * _sf_a;\n\
+	return float4(_sf_enc(_sf_pm.r), _sf_enc(_sf_pm.g), _sf_enc(_sf_pm.b), _sf_a);\n\
 }\n\
 \n\
 technique Draw\n\
@@ -368,43 +384,58 @@ struct shader_filter_data {
 	bool pointwise;
 	bool own_technique;
 	long effect_gen;
-	struct fused_effect *fused;
+	/* Ticks left in which derived effects may be compiled while showing,
+	 * after this filter's own effect was (re)built (a stall then anyway). */
+	int fresh_ticks;
+	struct derived_effect *derived[4];
 };
 
 static volatile long effect_generation = 0;
 
-/* A fused effect cached on the last filter of a fused run, keyed by the run's
- * filters and their effect generations (so a rebuilt or freed filter never
- * matches). `copies` maps each stage's own uniforms to the fused effect's. */
+/* Derived effects (linking and fusion; see "Linked rendering" below) are cached
+ * on the last filter of the run they render, keyed by the run's filters and
+ * their effect generations (so a rebuilt or freed filter never matches), a few
+ * per filter so that toggling a filter back and forth finds its effects
+ * again. `copies` maps each stage's own uniforms to the derived effect's. */
 #define SF_MAX_FUSED 16
+#define SF_DERIVED_CACHE 4
 
 struct fused_param_copy {
 	gs_eparam_t *src;
 	gs_eparam_t *dst;
 };
 
-struct fused_effect {
+struct derived_effect {
 	gs_effect_t *effect;
 	size_t count;
 	struct shader_filter_data *stages[SF_MAX_FUSED];
 	long gens[SF_MAX_FUSED];
 	bool failed;
+	uint64_t last_used;
 	DARRAY(struct fused_param_copy) copies;
 };
 
-static void fused_effect_free(struct shader_filter_data *filter)
+static uint64_t derived_use_counter = 0;
+
+static void derived_effect_destroy(struct derived_effect *de)
 {
-	struct fused_effect *fe = filter->fused;
-	if (!fe)
+	if (!de)
 		return;
-	if (fe->effect) {
+	if (de->effect) {
 		obs_enter_graphics();
-		gs_effect_destroy(fe->effect);
+		gs_effect_destroy(de->effect);
 		obs_leave_graphics();
 	}
-	da_free(fe->copies);
-	bfree(fe);
-	filter->fused = NULL;
+	da_free(de->copies);
+	bfree(de);
+}
+
+static void derived_effects_free(struct shader_filter_data *filter)
+{
+	for (size_t i = 0; i < SF_DERIVED_CACHE; i++) {
+		derived_effect_destroy(filter->derived[i]);
+		filter->derived[i] = NULL;
+	}
 }
 
 static unsigned int rand_interval(unsigned int min, unsigned int max)
@@ -664,6 +695,7 @@ static void shader_filter_reload_effect(struct shader_filter_data *filter)
 	filter->pointwise = false;
 	filter->own_technique = false;
 	filter->effect_gen = os_atomic_inc_long(&effect_generation);
+	filter->fresh_ticks = 3;
 
 	// Load text and build the effect from the template, if necessary.
 	char *shader_text = NULL;
@@ -942,7 +974,7 @@ static void shader_filter_destroy(void *data)
 	dstr_free(&filter->last_path);
 	da_free(filter->stored_param_list);
 	bfree(filter->shader_body);
-	fused_effect_free(filter);
+	derived_effects_free(filter);
 
 	if (filter->volmeter)
 		obs_volmeter_destroy(filter->volmeter);
@@ -2980,7 +3012,7 @@ static void shader_filter_update(void *data, obs_data_t *settings)
 	}
 }
 
-static void prewarm_fusion(struct shader_filter_data *filter);
+static void prepare_derived(struct shader_filter_data *filter);
 
 static void shader_filter_tick(void *data, float seconds)
 {
@@ -3083,7 +3115,7 @@ static void shader_filter_tick(void *data, float seconds)
 	}
 
 	if (!filter->transition)
-		prewarm_fusion(filter);
+		prepare_derived(filter);
 }
 
 gs_texrender_t *create_or_reset_texrender(gs_texrender_t *render, const enum gs_color_format format)
@@ -3131,14 +3163,21 @@ static void get_input_source(struct shader_filter_data *filter)
 
 	// Start the rendering process with our correct color space params,
 	// And set up your texrender to recieve the created texture.
-	// Without expansion, libobs may let a plain source draw itself straight
+	// Without expansion, libobs may let an image source draw itself straight
 	// through DrawAlphaDivide into our texture instead of first rendering it
 	// into its own (one full-screen pass fewer). With expansion the input must
 	// be stretched from libobs' texture as before.
+	// Only the image source is known to draw a single sprite: drawn directly
+	// with blending off, a source compositing several translucent primitives
+	// would come out differently.
 	const bool expanded = filter->expand_left || filter->expand_right || filter->expand_top || filter->expand_bottom;
+	obs_source_t *parent = obs_filter_get_parent(filter->context);
+	const bool direct = !expanded && source_space == GS_CS_SRGB && parent &&
+			    obs_filter_get_target(filter->context) == parent &&
+			    strcmp(obs_source_get_id(parent), "image_source") == 0;
 	if (!filter->transition &&
 	    !obs_source_process_filter_begin_with_color_space(filter->context, format, source_space,
-							      expanded ? OBS_NO_DIRECT_RENDERING : OBS_ALLOW_DIRECT_RENDERING))
+							      direct ? OBS_ALLOW_DIRECT_RENDERING : OBS_NO_DIRECT_RENDERING))
 		return;
 
 	if (gs_texrender_begin(filter->input_texrender, filter->total_width, filter->total_height)) {
@@ -3148,7 +3187,7 @@ static void get_input_source(struct shader_filter_data *filter)
 		gs_enable_blending(false);
 		gs_blend_function(GS_BLEND_ONE, GS_BLEND_ZERO);
 
-		if (!expanded) {
+		if (direct) {
 			// A source drawing itself need not cover the whole texture.
 			struct vec4 clear_color;
 			vec4_zero(&clear_color);
@@ -3530,7 +3569,7 @@ static void draw_shader(struct shader_filter_data *filter, gs_effect_t *effect, 
 
 	if (gs_texrender_begin(filter->output_texrender, filter->total_width, filter->total_height)) {
 		gs_ortho(0.0f, (float)filter->total_width, 0.0f, (float)filter->total_height, -100.0f, 100.0f);
-		const char *technique = filter->use_template ? out_form_technique(form) : "Draw";
+		const char *technique = out_form_technique(form);
 		while (gs_effect_loop(effect, technique)) {
 			if (filter->use_template) {
 				gs_draw_sprite(texture, 0, filter->total_width, filter->total_height);
@@ -3603,9 +3642,11 @@ enum link_kind {
 
 /* On success *ref holds a reference to the upstream filter, as libobs holds
  * one on a source while rendering it, so it can't be destroyed (on libobs'
- * destruction thread) while we use its data; release it after drawing. */
+ * destruction thread) while we use its data; release it after drawing.
+ * check_size is false only when preparing effects ahead, before sources have
+ * their sizes. */
 static struct shader_filter_data *linked_upstream(struct shader_filter_data *filter, enum link_kind *kind,
-						  obs_source_t **ref)
+						  obs_source_t **ref, bool check_size)
 {
 	*ref = NULL;
 	if (filter->transition)
@@ -3627,11 +3668,12 @@ static struct shader_filter_data *linked_upstream(struct shader_filter_data *fil
 	if (!held)
 		return NULL;
 	struct shader_filter_data *up = obs_obj_get_data(held);
-	bool ok = up && up->effect && !up->rendering && up->use_template && !up->own_technique && !up->use_pm_alpha &&
-		  !up->param_previous_output;
+	/* shader_body is only kept for plain template shaders. */
+	bool ok = up && up->effect && up->shader_body && !up->rendering && !up->param_previous_output;
 	/* Our base size is the upstream's output size. */
-	ok = ok && up->total_width == filter->total_width - ex && up->total_height == filter->total_height - ey &&
-	     up->total_width && up->total_height;
+	if (ok && check_size)
+		ok = up->total_width == filter->total_width - ex && up->total_height == filter->total_height - ey &&
+		     up->total_width && up->total_height;
 	ok = ok && shader_filter_get_color_space(filter, 0, NULL) == GS_CS_SRGB;
 	if (!ok) {
 		obs_source_release(held);
@@ -3649,29 +3691,33 @@ static void release_refs(obs_source_t **refs, size_t n)
 	}
 }
 
-/* The longest run ending at `last` in which every filter after the first only
- * reads its input at its own pixel, upstream first. */
-static size_t collect_fusion_group(struct shader_filter_data *last, struct shader_filter_data **stages,
-				   obs_source_t **refs)
+static bool fusion_disabled(void)
 {
 	static int disabled = -1;
 	if (disabled < 0) {
 		const char *e = getenv("SHADERFILTER_NO_FUSION");
 		disabled = e && *e && *e != '0';
 	}
+	return disabled;
+}
+
+/* The longest run ending at `last` in which every filter after the first only
+ * reads its input at its own pixel, upstream first; at least `last` itself.
+ * refs[i] holds a reference for every stage but `last` (the caller's). */
+static size_t collect_fusion_group(struct shader_filter_data *last, struct shader_filter_data **stages,
+				   obs_source_t **refs, bool check_size)
+{
 	struct shader_filter_data *rev[SF_MAX_FUSED];
 	obs_source_t *rev_refs[SF_MAX_FUSED];
 	size_t n = 0;
-	if (disabled || !last->shader_body)
-		return 0;
 	struct shader_filter_data *cur = last;
-	rev_refs[n] = NULL; /* the caller is rendering `last` and holds it */
+	rev_refs[n] = NULL;
 	rev[n++] = cur;
-	while (n < SF_MAX_FUSED && cur->pointwise) {
+	while (n < SF_MAX_FUSED && cur->pointwise && !fusion_disabled()) {
 		enum link_kind kind;
 		obs_source_t *ref;
-		struct shader_filter_data *up = linked_upstream(cur, &kind, &ref);
-		if (up && (kind != LINK_DIRECT || !up->shader_body)) {
+		struct shader_filter_data *up = linked_upstream(cur, &kind, &ref, check_size);
+		if (up && kind != LINK_DIRECT) {
 			obs_source_release(ref);
 			up = NULL;
 		}
@@ -3688,35 +3734,75 @@ static size_t collect_fusion_group(struct shader_filter_data *last, struct shade
 	return n;
 }
 
-static struct fused_effect *get_fused_effect(struct shader_filter_data *last, struct shader_filter_data **stages, size_t n,
-					     bool ahead)
+static struct derived_effect *find_derived(struct shader_filter_data *last, struct shader_filter_data **stages, size_t n)
 {
-	struct fused_effect *fe = last->fused;
-	if (fe && fe->count == n) {
+	for (size_t k = 0; k < SF_DERIVED_CACHE; k++) {
+		struct derived_effect *de = last->derived[k];
+		if (!de || de->count != n)
+			continue;
 		bool same = true;
 		for (size_t i = 0; i < n && same; i++)
-			same = fe->stages[i] == stages[i] && fe->gens[i] == stages[i]->effect_gen;
-		if (same)
-			return fe->failed ? NULL : fe;
+			same = de->stages[i] == stages[i] && de->gens[i] == stages[i]->effect_gen;
+		if (same) {
+			de->last_used = ++derived_use_counter;
+			return de;
+		}
 	}
-	fused_effect_free(last);
+	return NULL;
+}
 
-	fe = bzalloc(sizeof(*fe));
-	fe->count = n;
-	da_init(fe->copies);
+/* Compile the derived effect for `stages` (which ends at `last`) into the
+ * least recently used cache slot. The failure is cached too. */
+static struct derived_effect *build_derived(struct shader_filter_data *last, struct shader_filter_data **stages, size_t n)
+{
+	size_t slot = 0;
+	for (size_t k = 0; k < SF_DERIVED_CACHE; k++) {
+		if (!last->derived[k]) {
+			slot = k;
+			break;
+		}
+		if (last->derived[k]->last_used < last->derived[slot]->last_used)
+			slot = k;
+	}
+	derived_effect_destroy(last->derived[slot]);
+
+	struct derived_effect *de = bzalloc(sizeof(*de));
+	de->count = n;
+	de->last_used = ++derived_use_counter;
+	da_init(de->copies);
 	const char *bodies[SF_MAX_FUSED];
 	for (size_t i = 0; i < n; i++) {
-		fe->stages[i] = stages[i];
-		fe->gens[i] = stages[i]->effect_gen;
+		de->stages[i] = stages[i];
+		de->gens[i] = stages[i]->effect_gen;
 		bodies[i] = stages[i]->shader_body;
 	}
-	last->fused = fe;
+	last->derived[slot] = de;
 
-	char *text = sf_fusion_build(bodies, n, effect_template_begin, effect_template_end);
+	const char *name = obs_source_get_name(last->context);
+
+	/* libobs binds at most GS_MAX_TEXTURES textures per shader. */
+	size_t textures = 0;
+	for (size_t i = 0; i < n; i++) {
+		size_t count = gs_effect_get_num_params(stages[i]->effect);
+		for (size_t k = 0; k < count; k++) {
+			struct gs_effect_param_info info;
+			gs_effect_get_param_info(gs_effect_get_param_by_idx(stages[i]->effect, k), &info);
+			if (info.type == GS_SHADER_PARAM_TEXTURE)
+				textures++;
+		}
+	}
+	if (textures > GS_MAX_TEXTURES) {
+		blog(LOG_INFO, "[obs-shaderfilter] '%s': rendering %zu filters separately; %zu textures is too many for one pass",
+		     name, n, textures);
+		de->failed = true;
+		return de;
+	}
+
+	char *text = sf_fusion_build(bodies, n, effect_template_begin, effect_template_end_derived);
 	if (!text) {
-		blog(LOG_INFO, "[obs-shaderfilter] Rendering %zu filters separately; they can't be combined", n);
-		fe->failed = true;
-		return NULL;
+		blog(LOG_INFO, "[obs-shaderfilter] '%s': rendering %zu filters separately; they can't be combined", name, n);
+		de->failed = true;
+		return de;
 	}
 	struct dstr effect_text = {0};
 	dstr_cat(&effect_text, text);
@@ -3726,21 +3812,20 @@ static struct fused_effect *get_fused_effect(struct shader_filter_data *last, st
 		dstr_insert(&effect_text, 0, "#define OPENGL 1\n");
 	}
 	char *errors = NULL;
-	fe->effect = gs_effect_create(effect_text.array, NULL, &errors);
+	de->effect = gs_effect_create(effect_text.array, NULL, &errors);
 	dstr_free(&effect_text);
-	if (!fe->effect) {
-		blog(LOG_INFO, "[obs-shaderfilter] Rendering %zu filters separately; they could not be combined: %s", n,
-		     errors ? errors : "(no errors)");
+	if (!de->effect) {
+		blog(LOG_INFO, "[obs-shaderfilter] '%s': rendering %zu filter(s) the normal way; derived effect failed: %s",
+		     name, n, errors ? errors : "(no errors)");
 		bfree(errors);
-		fe->failed = true;
-		return NULL;
+		de->failed = true;
+		return de;
 	}
 	bfree(errors);
 
 	/* Every uniform of every stage must exist under its expected name, or
 	 * a stage would silently render with a default value. */
-	bool complete = true;
-	for (size_t i = 0; i < n && complete; i++) {
+	for (size_t i = 0; i < n && !de->failed; i++) {
 		gs_effect_t *own = stages[i]->effect;
 		size_t count = gs_effect_get_num_params(own);
 		for (size_t k = 0; k < count; k++) {
@@ -3749,31 +3834,30 @@ static struct fused_effect *get_fused_effect(struct shader_filter_data *last, st
 			gs_effect_get_param_info(src, &info);
 			if (strcmp(info.name, "ViewProj") == 0)
 				continue;
-			char *name = sf_fusion_param_name(i, n, info.name);
-			gs_eparam_t *dst = gs_effect_get_param_by_name(fe->effect, name);
+			char *pname = sf_fusion_param_name(i, n, info.name);
+			gs_eparam_t *dst = gs_effect_get_param_by_name(de->effect, pname);
 			if (!dst) {
 				blog(LOG_INFO,
-				     "[obs-shaderfilter] Rendering %zu filters separately; uniform '%s' not found when combined",
-				     n, name);
-				complete = false;
+				     "[obs-shaderfilter] '%s': rendering %zu filters separately; uniform '%s' not found when combined",
+				     name, n, pname);
+				de->failed = true;
 			}
-			bfree(name);
+			bfree(pname);
 			if (!dst)
 				break;
 			struct fused_param_copy c = {src, dst};
-			da_push_back(fe->copies, &c);
+			da_push_back(de->copies, &c);
 		}
 	}
-	if (!complete) {
-		gs_effect_destroy(fe->effect);
-		fe->effect = NULL;
-		da_free(fe->copies);
-		fe->failed = true;
-		return NULL;
+	if (de->failed) {
+		gs_effect_destroy(de->effect);
+		de->effect = NULL;
+		da_free(de->copies);
+		return de;
 	}
-	blog(LOG_INFO, "[obs-shaderfilter] '%s': combined %zu filters into one pass (%s)",
-	     obs_source_get_name(last->context), n, ahead ? "prepared ahead" : "on first render");
-	return fe;
+	if (n > 1)
+		blog(LOG_INFO, "[obs-shaderfilter] '%s': combined %zu filters into one pass", name, n);
+	return de;
 }
 
 static bool shader_filter_produce(struct shader_filter_data *filter, enum out_form form);
@@ -3819,7 +3903,7 @@ static void copy_linked_input(struct shader_filter_data *filter, gs_texture_t *s
 static gs_texture_t *acquire_input(struct shader_filter_data *filter, obs_source_t **ref)
 {
 	enum link_kind kind;
-	struct shader_filter_data *up = linked_upstream(filter, &kind, ref);
+	struct shader_filter_data *up = linked_upstream(filter, &kind, ref, true);
 	if (up) {
 		if (kind == LINK_DIRECT && shader_filter_produce(up, OUT_LINKED))
 			return gs_texrender_get_texture(up->output_texrender);
@@ -3837,8 +3921,9 @@ static gs_texture_t *acquire_input(struct shader_filter_data *filter, obs_source
 	return gs_texrender_get_texture(filter->input_texrender);
 }
 
-/* Render a fused run in one pass into the last filter's output_texrender. */
-static void render_fused(struct shader_filter_data **stages, size_t n, struct fused_effect *fe, enum out_form form)
+/* Render a run with its derived effect, in one pass, into the last filter's
+ * output_texrender. */
+static void render_derived(struct shader_filter_data **stages, size_t n, struct derived_effect *de, enum out_form form)
 {
 	struct shader_filter_data *last = stages[n - 1];
 
@@ -3857,8 +3942,8 @@ static void render_fused(struct shader_filter_data **stages, size_t n, struct fu
 				f = move_get_transition_filter(stages[i]->context, &filter_to);
 			bind_shader_params(stages[i], i == 0 ? input : NULL, f, filter_to);
 		}
-		for (size_t i = 0; i < fe->copies.num; i++) {
-			struct fused_param_copy *c = &fe->copies.array[i];
+		for (size_t i = 0; i < de->copies.num; i++) {
+			struct fused_param_copy *c = &de->copies.array[i];
 			size_t size = gs_effect_get_val_size(c->src);
 			if (!size)
 				continue;
@@ -3868,7 +3953,7 @@ static void render_fused(struct shader_filter_data **stages, size_t n, struct fu
 				bfree(val);
 			}
 		}
-		draw_shader(last, fe->effect, input, form);
+		draw_shader(last, de->effect, input, form);
 	}
 	obs_source_release(input_ref);
 
@@ -3893,51 +3978,86 @@ static void collect_shader_filters(obs_source_t *parent, obs_source_t *child, vo
 	}
 }
 
-/* Does a shader filter downstream fuse this one into its own pass? */
-static bool fused_into_downstream(struct shader_filter_data *filter)
+enum downstream_use {
+	DOWN_NONE,   /* no shader filter takes our output directly */
+	DOWN_LINKED, /* one samples or copies it (we render a derived form) */
+	DOWN_FUSED,  /* one compiles us into its own pass */
+};
+
+static enum downstream_use downstream_use(struct shader_filter_data *filter)
 {
 	obs_source_t *parent = obs_filter_get_parent(filter->context);
 	if (!parent)
-		return false;
+		return DOWN_NONE;
 	struct downstream_search ds = {.self = filter->context};
 	obs_source_enum_filters(parent, collect_shader_filters, &ds);
-	bool fused = false;
-	for (size_t i = 0; i < ds.num && !fused; i++) {
+	enum downstream_use use = DOWN_NONE;
+	for (size_t i = 0; i < ds.num && use == DOWN_NONE; i++) {
 		struct shader_filter_data *down = obs_obj_get_data(ds.found[i]);
-		if (!down || !down->pointwise || !obs_source_enabled(ds.found[i]))
+		if (!down || !obs_source_enabled(ds.found[i]))
 			continue;
 		enum link_kind kind;
 		obs_source_t *ref;
-		struct shader_filter_data *up = linked_upstream(down, &kind, &ref);
-		fused = up == filter && kind == LINK_DIRECT;
+		if (linked_upstream(down, &kind, &ref, false) == filter)
+			use = (kind == LINK_DIRECT && down->pointwise && !fusion_disabled()) ? DOWN_FUSED : DOWN_LINKED;
 		obs_source_release(ref);
 	}
 	release_refs(ds.found, ds.num);
-	return fused;
+	return use;
 }
 
-/* Build the fused effect for the run this filter ends, if any, during
- * video_tick: every source ticks from the moment a scene collection loads,
- * so effects are compiled then rather than on the first rendered frame of a
- * scene (a hitch on the live output). */
-static void prewarm_fusion(struct shader_filter_data *filter)
+/* Prepare the derived effects this filter will need, during video_tick.
+ *
+ * Compiling an effect stalls the graphics thread, so it is only done when a
+ * stall happens anyway or can't be seen: in the few ticks after one of the
+ * filters involved had its own effect (re)built (loading a scene collection,
+ * editing a shader; every source ticks from load, visible or not), or while
+ * the source isn't showing. Never on a render, and never just because a
+ * filter was toggled live: until the effect for the new arrangement exists,
+ * the filters render linked or the normal way, which is correct, just slower.
+ *
+ * Besides the effect for its own run, a filter that a downstream filter takes
+ * input from keeps a single-filter derived effect, so that toggling a filter
+ * live falls back to linked rendering rather than to the normal path. */
+static void prepare_derived(struct shader_filter_data *filter)
 {
-	if (!filter->shader_body || !filter->effect || !filter->total_width || fused_into_downstream(filter))
+	if (filter->fresh_ticks > 0)
+		filter->fresh_ticks--;
+	if (!filter->shader_body || !filter->effect)
 		return;
+
+	enum downstream_use use = downstream_use(filter);
 	struct shader_filter_data *stages[SF_MAX_FUSED];
 	obs_source_t *refs[SF_MAX_FUSED];
-	size_t n = collect_fusion_group(filter, stages, refs);
-	if (n >= 2) {
-		obs_enter_graphics();
-		get_fused_effect(filter, stages, n, true);
-		obs_leave_graphics();
+	size_t n = collect_fusion_group(filter, stages, refs, false);
+
+	obs_source_t *parent = obs_filter_get_parent(filter->context);
+	bool allowed = !parent || !obs_source_showing(parent);
+	for (size_t i = 0; i < n && !allowed; i++)
+		allowed = stages[i]->fresh_ticks > 0;
+
+	if (allowed) {
+		bool entered = false;
+		if (use != DOWN_FUSED && (n >= 2 || use == DOWN_LINKED) && !find_derived(filter, stages, n)) {
+			obs_enter_graphics();
+			entered = true;
+			build_derived(filter, stages, n);
+		}
+		if (use != DOWN_NONE && !find_derived(filter, &filter, 1)) {
+			if (!entered)
+				obs_enter_graphics();
+			entered = true;
+			build_derived(filter, &filter, 1);
+		}
+		if (entered)
+			obs_leave_graphics();
 	}
 	release_refs(refs, n);
 }
 
 /* Render this filter's shader output into output_texrender for the current
  * frame in the given form (or reuse it). Returns false when the filter can't
- * render. */
+ * (or, for a derived form, can't yet). */
 static bool shader_filter_produce(struct shader_filter_data *filter, enum out_form form)
 {
 	float f = 0.0f;
@@ -3951,18 +4071,41 @@ static bool shader_filter_produce(struct shader_filter_data *filter, enum out_fo
 	if (filter->effect == NULL || filter->rendering)
 		return false;
 
-	filter->rendering = true;
-
 	struct shader_filter_data *stages[SF_MAX_FUSED];
 	obs_source_t *refs[SF_MAX_FUSED];
-	size_t n = collect_fusion_group(filter, stages, refs);
-	struct fused_effect *fe = n >= 2 ? get_fused_effect(filter, stages, n, false) : NULL;
-	if (fe) {
-		render_fused(stages, n, fe, form);
+	size_t n = 1;
+	stages[0] = filter;
+	refs[0] = NULL;
+	if (filter->shader_body)
+		n = collect_fusion_group(filter, stages, refs, true);
+
+	/* The prepared effect for the whole run, else (for a derived form) the
+	 * one for this filter alone; never compiled here. */
+	struct derived_effect *de = NULL;
+	size_t used = n;
+	if (n >= 2) {
+		de = find_derived(filter, stages, n);
+		if (de && de->failed)
+			de = NULL;
+	}
+	if (!de && form != OUT_RAW && filter->shader_body) {
+		de = find_derived(filter, &filter, 1);
+		if (de && de->failed)
+			de = NULL;
+		used = 1;
+	}
+	if (!de && form != OUT_RAW) {
+		release_refs(refs, n);
+		return false;
+	}
+
+	filter->rendering = true;
+	if (de) {
+		render_derived(stages + (n - used), used, de, form);
 	} else {
 		obs_source_t *input_ref = NULL;
 		gs_texture_t *input = acquire_input(filter, &input_ref);
-		render_shader(filter, input, f, filter_to, form);
+		render_shader(filter, input, f, filter_to, OUT_RAW);
 		obs_source_release(input_ref);
 	}
 	release_refs(refs, n);

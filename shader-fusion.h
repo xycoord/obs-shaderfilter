@@ -29,6 +29,8 @@ bool sf_fusion_is_pointwise(const char *body);
 
 /* Build the fused effect text, or NULL if the bodies can't be fused. bodies[0]
  * is the most upstream stage; every stage after the first must be pointwise.
+ * With one body this is just that shader with template_end (used for the
+ * linking techniques, kept out of the filter's own effect).
  * template_begin/template_end are the plugin's effect template. bfree() it. */
 char *sf_fusion_build(const char *const *bodies, size_t count, const char *template_begin, const char *template_end);
 
