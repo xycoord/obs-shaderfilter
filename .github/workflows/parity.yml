@@ -1,0 +1,49 @@
+name: parity and performance tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  parity:
+    name: Parity with release 2.6.1 (headless OBS 33, llvmpipe)
+    runs-on: ubuntu-24.04
+    env:
+      WORK: ${{ github.workspace }}/.tests
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cache test libobs
+        uses: actions/cache@v4
+        with:
+          path: .tests/libobs/prefix
+          key: libobs-33.0.1-${{ hashFiles('tests/setup/build-libobs.sh') }}
+
+      - name: Set up (packages, libobs, harness, reference and current builds)
+        run: sudo -E env "PATH=$PATH" tests/run.sh setup
+
+      - name: Parity (translucent test image)
+        run: xvfb-run -a tests/run.sh parity
+
+      - name: Parity (opaque test image, rounding-level differences only)
+        run: xvfb-run -a tests/run.sh parity --opaque
+
+      - name: Benchmark
+        run: |
+          xvfb-run -a tests/run.sh bench --frames 30 --repeats 1
+          xvfb-run -a tests/run.sh bench-ref --frames 30 --repeats 1
+
+      - name: Upload report and diff montages
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: parity-report
+          path: |
+            .tests/parity/report.json
+            .tests/parity/diffs
+            .tests/bench/bench.json
+            .tests/bench-ref/bench.json
+          if-no-files-found: ignore

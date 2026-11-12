@@ -13,3 +13,4 @@
 **/.Brewfile.lock.json
 obs-shaderfilter.rc
 version.h
+tests/harness/build/
