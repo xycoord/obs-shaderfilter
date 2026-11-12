@@ -6,6 +6,7 @@
 main.png: gradients, colour bars, fine detail, soft-edged shapes, and regions
           that are fully transparent and semi-transparent (alpha handling is
           the part of a filter chain most easily broken).
+opaque.png: main.png with alpha forced to 1.
 alt.png:  a different, mostly opaque pattern used as the second input of
           transitions and as a texture/source parameter.
 """
@@ -83,5 +84,9 @@ if __name__ == "__main__":
     w = int(sys.argv[2]) if len(sys.argv) > 2 else 640
     h = int(sys.argv[3]) if len(sys.argv) > 3 else 360
     out.mkdir(parents=True, exist_ok=True)
-    main_image(w, h).save(out / f"main_{w}x{h}.png")
+    main = main_image(w, h)
+    main.save(out / f"main_{w}x{h}.png")
+    opaque = main.copy()
+    opaque.putalpha(255)
+    opaque.save(out / f"opaque_{w}x{h}.png")
     alt_image(w, h).save(out / f"alt_{w}x{h}.png")

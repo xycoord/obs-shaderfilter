@@ -2,6 +2,7 @@
 // Version 1.21 by Charles Fettinger https://github.com/Oncorporation/obs-shaderfilter
 // original version by nleseul https://github.com/nleseul/obs-shaderfilter
 #include "version.h"
+#include "shader-fusion.h"
 #include <float.h>
 #include <graphics/graphics.h>
 #include <graphics/image-file.h>
@@ -337,7 +338,52 @@ struct shader_filter_data {
 
 	DARRAY(struct effect_param_data) stored_param_list;
 	uint64_t last_frame_time;
+
+	/* Fusion (see shader-fusion.h): the template shader body, whether it
+	 * only reads `image` at its own pixel, and a generation number that
+	 * changes whenever the effect is rebuilt. */
+	char *shader_body;
+	bool pointwise;
+	bool own_technique;
+	long effect_gen;
+	struct fused_effect *fused;
 };
+
+static volatile long effect_generation = 0;
+
+/* A fused effect cached on the last filter of a fused run, keyed by the run's
+ * filters and their effect generations (so a rebuilt or freed filter never
+ * matches). `copies` maps each stage's own uniforms to the fused effect's. */
+#define SF_MAX_FUSED 16
+
+struct fused_param_copy {
+	gs_eparam_t *src;
+	gs_eparam_t *dst;
+};
+
+struct fused_effect {
+	gs_effect_t *effect;
+	size_t count;
+	struct shader_filter_data *stages[SF_MAX_FUSED];
+	long gens[SF_MAX_FUSED];
+	bool failed;
+	DARRAY(struct fused_param_copy) copies;
+};
+
+static void fused_effect_free(struct shader_filter_data *filter)
+{
+	struct fused_effect *fe = filter->fused;
+	if (!fe)
+		return;
+	if (fe->effect) {
+		obs_enter_graphics();
+		gs_effect_destroy(fe->effect);
+		obs_leave_graphics();
+	}
+	da_free(fe->copies);
+	bfree(fe);
+	filter->fused = NULL;
+}
 
 static unsigned int rand_interval(unsigned int min, unsigned int max)
 {
@@ -571,6 +617,12 @@ static void shader_filter_reload_effect(struct shader_filter_data *filter)
 		obs_leave_graphics();
 	}
 
+	bfree(filter->shader_body);
+	filter->shader_body = NULL;
+	filter->pointwise = false;
+	filter->own_technique = false;
+	filter->effect_gen = os_atomic_inc_long(&effect_generation);
+
 	// Load text and build the effect from the template, if necessary.
 	char *shader_text = NULL;
 	bool use_template = !obs_data_get_bool(settings, "override_entire_effect");
@@ -600,7 +652,16 @@ static void shader_filter_reload_effect(struct shader_filter_data *filter)
 
 	if (shader_text) {
 		dstr_cat(&effect_text, shader_text);
-		bfree(shader_text);
+		/* A .shader body that declares its own technique draws with that
+		 * (the first "Draw" wins), not necessarily through mainImage, so
+		 * it can't be linked from or fused. */
+		filter->own_technique = use_template && strstr(shader_text, "technique") != NULL;
+		if (use_template && !filter->own_technique && !filter->transition && !strstr(shader_text, "USE_PM_ALPHA")) {
+			filter->shader_body = shader_text;
+			filter->pointwise = sf_fusion_is_pointwise(shader_text);
+		} else {
+			bfree(shader_text);
+		}
 	}
 
 	if (use_template) {
@@ -838,6 +899,8 @@ static void shader_filter_destroy(void *data)
 
 	dstr_free(&filter->last_path);
 	da_free(filter->stored_param_list);
+	bfree(filter->shader_body);
+	fused_effect_free(filter);
 
 	if (filter->volmeter)
 		obs_volmeter_destroy(filter->volmeter);
@@ -3258,13 +3321,9 @@ static enum gs_color_space shader_filter_get_color_space(void *data, size_t coun
 	return obs_source_get_color_space(target, OBS_COUNTOF(potential_spaces), potential_spaces);
 }
 
-static void render_shader(struct shader_filter_data *filter, gs_texture_t *texture, float f, obs_source_t *filter_to,
-			  bool linked_out)
+/* Swap/reset output_texrender for this frame's draw. */
+static void prepare_output(struct shader_filter_data *filter)
 {
-	if (!texture) {
-		return;
-	}
-
 	if (filter->param_previous_output) {
 		gs_texrender_t *temp = filter->output_texrender;
 		filter->output_texrender = filter->previous_output_texrender;
@@ -3274,7 +3333,12 @@ static void render_shader(struct shader_filter_data *filter, gs_texture_t *textu
 	enum gs_color_space space = shader_filter_get_color_space(filter, 0, NULL);
 	enum gs_color_format format = gs_get_format_from_space(space);
 	filter->output_texrender = create_or_reset_texrender(filter->output_texrender, format);
+}
 
+/* Set every uniform of the filter's own effect for this frame, with `texture`
+ * as its input image (and move-transition interpolation applied). */
+static void bind_shader_params(struct shader_filter_data *filter, gs_texture_t *texture, float f, obs_source_t *filter_to)
+{
 	if (filter->param_image)
 		gs_effect_set_texture(filter->param_image, texture);
 	if (filter->param_previous_image)
@@ -3385,7 +3449,11 @@ static void render_shader(struct shader_filter_data *filter, gs_texture_t *textu
 			}
 		}
 	}
+}
 
+/* Draw `effect` (the filter's own or a fused one) into output_texrender. */
+static void draw_shader(struct shader_filter_data *filter, gs_effect_t *effect, gs_texture_t *texture, bool linked_out)
+{
 	gs_blend_state_push();
 	gs_reset_blend_state();
 	gs_enable_blending(false);
@@ -3394,7 +3462,7 @@ static void render_shader(struct shader_filter_data *filter, gs_texture_t *textu
 	if (gs_texrender_begin(filter->output_texrender, filter->total_width, filter->total_height)) {
 		gs_ortho(0.0f, (float)filter->total_width, 0.0f, (float)filter->total_height, -100.0f, 100.0f);
 		const char *technique = (linked_out && filter->use_template) ? "DrawLinked" : "Draw";
-		while (gs_effect_loop(filter->effect, technique)) {
+		while (gs_effect_loop(effect, technique)) {
 			if (filter->use_template) {
 				gs_draw_sprite(texture, 0, filter->total_width, filter->total_height);
 			} else {
@@ -3413,6 +3481,16 @@ static void render_shader(struct shader_filter_data *filter, gs_texture_t *textu
 	}
 
 	gs_blend_state_pop();
+}
+
+static void render_shader(struct shader_filter_data *filter, gs_texture_t *texture, float f, obs_source_t *filter_to,
+			  bool linked_out)
+{
+	if (!texture)
+		return;
+	prepare_output(filter);
+	bind_shader_params(filter, texture, f, filter_to);
+	draw_shader(filter, filter->effect, texture, linked_out);
 }
 
 /* ------------------------------------------------------------------------
@@ -3455,7 +3533,8 @@ static struct shader_filter_data *linked_upstream(struct shader_filter_data *fil
 		return NULL;
 
 	struct shader_filter_data *up = obs_obj_get_data(target);
-	if (!up || !up->effect || up->rendering || !up->use_template || up->use_pm_alpha || up->param_previous_output)
+	if (!up || !up->effect || up->rendering || !up->use_template || up->own_technique || up->use_pm_alpha ||
+	    up->param_previous_output)
 		return NULL;
 	if (up->total_width != filter->total_width || up->total_height != filter->total_height || !up->total_width ||
 	    !up->total_height)
@@ -3463,6 +3542,165 @@ static struct shader_filter_data *linked_upstream(struct shader_filter_data *fil
 	if (shader_filter_get_color_space(filter, 0, NULL) != GS_CS_SRGB)
 		return NULL;
 	return up;
+}
+
+/* The longest run ending at `last` in which every filter after the first only
+ * reads its input at its own pixel, upstream first. */
+static size_t collect_fusion_group(struct shader_filter_data *last, struct shader_filter_data **stages)
+{
+	static int disabled = -1;
+	if (disabled < 0) {
+		const char *e = getenv("SHADERFILTER_NO_FUSION");
+		disabled = e && *e && *e != '0';
+	}
+	struct shader_filter_data *rev[SF_MAX_FUSED];
+	size_t n = 0;
+	if (disabled || !last->shader_body)
+		return 0;
+	struct shader_filter_data *cur = last;
+	rev[n++] = cur;
+	while (n < SF_MAX_FUSED && cur->pointwise) {
+		struct shader_filter_data *up = linked_upstream(cur);
+		if (!up || !up->shader_body)
+			break;
+		rev[n++] = up;
+		cur = up;
+	}
+	for (size_t i = 0; i < n; i++)
+		stages[i] = rev[n - 1 - i];
+	return n;
+}
+
+static struct fused_effect *get_fused_effect(struct shader_filter_data *last, struct shader_filter_data **stages, size_t n)
+{
+	struct fused_effect *fe = last->fused;
+	if (fe && fe->count == n) {
+		bool same = true;
+		for (size_t i = 0; i < n && same; i++)
+			same = fe->stages[i] == stages[i] && fe->gens[i] == stages[i]->effect_gen;
+		if (same)
+			return fe->failed ? NULL : fe;
+	}
+	fused_effect_free(last);
+
+	fe = bzalloc(sizeof(*fe));
+	fe->count = n;
+	da_init(fe->copies);
+	const char *bodies[SF_MAX_FUSED];
+	for (size_t i = 0; i < n; i++) {
+		fe->stages[i] = stages[i];
+		fe->gens[i] = stages[i]->effect_gen;
+		bodies[i] = stages[i]->shader_body;
+	}
+	last->fused = fe;
+
+	char *text = sf_fusion_build(bodies, n, effect_template_begin, effect_template_end);
+	if (!text) {
+		blog(LOG_INFO, "[obs-shaderfilter] Rendering %zu filters separately; they can't be combined", n);
+		fe->failed = true;
+		return NULL;
+	}
+	struct dstr effect_text = {0};
+	dstr_cat(&effect_text, text);
+	bfree(text);
+	if (gs_get_device_type() == GS_DEVICE_OPENGL) {
+		dstr_replace(&effect_text, "[loop]", "");
+		dstr_insert(&effect_text, 0, "#define OPENGL 1\n");
+	}
+	char *errors = NULL;
+	fe->effect = gs_effect_create(effect_text.array, NULL, &errors);
+	dstr_free(&effect_text);
+	if (!fe->effect) {
+		blog(LOG_INFO, "[obs-shaderfilter] Rendering %zu filters separately; they could not be combined: %s", n,
+		     errors ? errors : "(no errors)");
+		bfree(errors);
+		fe->failed = true;
+		return NULL;
+	}
+	bfree(errors);
+
+	/* Every uniform of every stage must exist under its expected name, or
+	 * a stage would silently render with a default value. */
+	bool complete = true;
+	for (size_t i = 0; i < n && complete; i++) {
+		gs_effect_t *own = stages[i]->effect;
+		size_t count = gs_effect_get_num_params(own);
+		for (size_t k = 0; k < count; k++) {
+			gs_eparam_t *src = gs_effect_get_param_by_idx(own, k);
+			struct gs_effect_param_info info;
+			gs_effect_get_param_info(src, &info);
+			if (strcmp(info.name, "ViewProj") == 0)
+				continue;
+			char *name = sf_fusion_param_name(i, n, info.name);
+			gs_eparam_t *dst = gs_effect_get_param_by_name(fe->effect, name);
+			if (!dst) {
+				blog(LOG_INFO,
+				     "[obs-shaderfilter] Rendering %zu filters separately; uniform '%s' not found when combined",
+				     n, name);
+				complete = false;
+			}
+			bfree(name);
+			if (!dst)
+				break;
+			struct fused_param_copy c = {src, dst};
+			da_push_back(fe->copies, &c);
+		}
+	}
+	if (!complete) {
+		gs_effect_destroy(fe->effect);
+		fe->effect = NULL;
+		da_free(fe->copies);
+		fe->failed = true;
+		return NULL;
+	}
+	return fe;
+}
+
+static bool shader_filter_produce(struct shader_filter_data *filter, bool linked_out);
+
+/* Render a fused run in one pass into the last filter's output_texrender. */
+static void render_fused(struct shader_filter_data **stages, size_t n, struct fused_effect *fe, bool linked_out)
+{
+	struct shader_filter_data *head = stages[0];
+	struct shader_filter_data *last = stages[n - 1];
+
+	for (size_t i = 0; i < n; i++)
+		stages[i]->rendering = true;
+
+	gs_texture_t *input = NULL;
+	struct shader_filter_data *up = linked_upstream(head);
+	if (up && shader_filter_produce(up, true)) {
+		input = gs_texrender_get_texture(up->output_texrender);
+	} else {
+		get_input_source(head);
+		input = gs_texrender_get_texture(head->input_texrender);
+	}
+
+	if (input) {
+		prepare_output(last);
+		for (size_t i = 0; i < n; i++) {
+			float f = 0.0f;
+			obs_source_t *filter_to = NULL;
+			if (move_get_transition_filter)
+				f = move_get_transition_filter(stages[i]->context, &filter_to);
+			bind_shader_params(stages[i], i == 0 ? input : NULL, f, filter_to);
+		}
+		for (size_t i = 0; i < fe->copies.num; i++) {
+			struct fused_param_copy *c = &fe->copies.array[i];
+			size_t size = gs_effect_get_val_size(c->src);
+			if (!size)
+				continue;
+			void *val = gs_effect_get_val(c->src);
+			if (val) {
+				gs_effect_set_val(c->dst, val, size);
+				bfree(val);
+			}
+		}
+		draw_shader(last, fe->effect, input, linked_out);
+	}
+
+	for (size_t i = 0; i + 1 < n; i++)
+		stages[i]->rendering = false;
 }
 
 /* Render this filter's shader output into output_texrender for the current
@@ -3483,16 +3721,23 @@ static bool shader_filter_produce(struct shader_filter_data *filter, bool linked
 
 	filter->rendering = true;
 
-	gs_texture_t *input = NULL;
-	struct shader_filter_data *up = linked_upstream(filter);
-	if (up && shader_filter_produce(up, true)) {
-		input = gs_texrender_get_texture(up->output_texrender);
+	struct shader_filter_data *stages[SF_MAX_FUSED];
+	size_t n = collect_fusion_group(filter, stages);
+	struct fused_effect *fe = n >= 2 ? get_fused_effect(filter, stages, n) : NULL;
+	if (fe) {
+		render_fused(stages, n, fe, linked_out);
 	} else {
-		get_input_source(filter);
-		input = gs_texrender_get_texture(filter->input_texrender);
-	}
+		gs_texture_t *input = NULL;
+		struct shader_filter_data *up = linked_upstream(filter);
+		if (up && shader_filter_produce(up, true)) {
+			input = gs_texrender_get_texture(up->output_texrender);
+		} else {
+			get_input_source(filter);
+			input = gs_texrender_get_texture(filter->input_texrender);
+		}
 
-	render_shader(filter, input, f, filter_to, linked_out);
+		render_shader(filter, input, f, filter_to, linked_out);
+	}
 	if (f == 0.0f) {
 		filter->output_rendered = true;
 		filter->output_linked = linked_out;

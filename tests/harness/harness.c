@@ -60,7 +60,7 @@ static bool quiet_logs = true;
 static void log_handler(int lvl, const char *msg, va_list args, void *p)
 {
 	(void)p;
-	if (quiet_logs && lvl > LOG_WARNING)
+	if (quiet_logs && lvl > LOG_WARNING && !strstr(msg, "obs-shaderfilter]"))
 		return;
 	vfprintf(stderr, msg, args);
 	fputc('\n', stderr);
