@@ -3011,8 +3011,14 @@ static void get_input_source(struct shader_filter_data *filter)
 
 	// Start the rendering process with our correct color space params,
 	// And set up your texrender to recieve the created texture.
+	// Without expansion, libobs may let a plain source draw itself straight
+	// through DrawAlphaDivide into our texture instead of first rendering it
+	// into its own (one full-screen pass fewer). With expansion the input must
+	// be stretched from libobs' texture as before.
+	const bool expanded = filter->expand_left || filter->expand_right || filter->expand_top || filter->expand_bottom;
 	if (!filter->transition &&
-	    !obs_source_process_filter_begin_with_color_space(filter->context, format, source_space, OBS_NO_DIRECT_RENDERING))
+	    !obs_source_process_filter_begin_with_color_space(filter->context, format, source_space,
+							      expanded ? OBS_NO_DIRECT_RENDERING : OBS_ALLOW_DIRECT_RENDERING))
 		return;
 
 	if (gs_texrender_begin(filter->input_texrender, filter->total_width, filter->total_height)) {
@@ -3021,6 +3027,13 @@ static void get_input_source(struct shader_filter_data *filter)
 		gs_reset_blend_state();
 		gs_enable_blending(false);
 		gs_blend_function(GS_BLEND_ONE, GS_BLEND_ZERO);
+
+		if (!expanded) {
+			// A source drawing itself need not cover the whole texture.
+			struct vec4 clear_color;
+			vec4_zero(&clear_color);
+			gs_clear(GS_CLEAR_COLOR, &clear_color, 0.0f, 0);
+		}
 
 		gs_ortho(0.0f, (float)filter->total_width, 0.0f, (float)filter->total_height, -100.0f, 100.0f);
 		// The incoming source is pre-multiplied alpha, so use the
@@ -3036,35 +3049,6 @@ static void get_input_source(struct shader_filter_data *filter)
 		gs_blend_state_pop();
 		filter->input_rendered = true;
 	}
-}
-
-static void draw_output(struct shader_filter_data *filter)
-{
-	const enum gs_color_space preferred_spaces[] = {
-		GS_CS_SRGB,
-		GS_CS_SRGB_16F,
-		GS_CS_709_EXTENDED,
-	};
-
-	const enum gs_color_space source_space =
-		obs_source_get_color_space(obs_filter_get_target(filter->context), OBS_COUNTOF(preferred_spaces), preferred_spaces);
-
-	const enum gs_color_format format = gs_get_format_from_space(source_space);
-
-	if (!obs_source_process_filter_begin_with_color_space(filter->context, format, source_space, OBS_NO_DIRECT_RENDERING)) {
-		return;
-	}
-
-	gs_texture_t *texture = gs_texrender_get_texture(filter->output_texrender);
-	gs_effect_t *pass_through = filter->output_effect;
-	if (!pass_through)
-		pass_through = obs_get_base_effect(OBS_EFFECT_DEFAULT);
-
-	if (filter->param_output_image) {
-		gs_effect_set_texture(filter->param_output_image, texture);
-	}
-
-	obs_source_process_filter_end(filter->context, pass_through, filter->total_width, filter->total_height);
 }
 
 void shader_filter_set_effect_params(struct shader_filter_data *filter)
@@ -3518,9 +3502,11 @@ static bool shader_filter_produce(struct shader_filter_data *filter, bool linked
 }
 
 /* Draw output_texrender into the current target exactly as
- * obs_source_process_filter_end() would, without making libobs render this
- * filter's upstream (which a linked filter never needs). */
-static void draw_output_direct(struct shader_filter_data *filter)
+ * obs_source_process_filter_end() would with render_output.effect, but without
+ * obs_source_process_filter_begin(): a linked filter, or one whose input was
+ * drawn directly by its source, never had libobs render its upstream into
+ * libobs' own texture, and asking for it would cost a full extra pass. */
+static void draw_output(struct shader_filter_data *filter)
 {
 	gs_texture_t *texture = gs_texrender_get_texture(filter->output_texrender);
 	if (!texture || !filter->total_width || !filter->total_height)
@@ -3573,12 +3559,7 @@ static void shader_filter_render(void *data, gs_effect_t *effect)
 		}
 	}
 
-	/* If this frame's input came through libobs, draw through libobs as
-	 * before; otherwise libobs never rendered our upstream, so draw directly. */
-	if (filter->input_rendered)
-		draw_output(filter);
-	else
-		draw_output_direct(filter);
+	draw_output(filter);
 }
 
 static uint32_t shader_filter_getwidth(void *data)
