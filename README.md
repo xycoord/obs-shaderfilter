@@ -101,7 +101,8 @@ Add the filter to any source through "Filters" when right-clicking it; it is cal
 The shader list for a folder can be given categories, display names and cost ratings with a `library.ini`
 next to the shaders; see [data/examples/library.ini](data/examples/library.ini). Presets go in a
 `<shader name>.presets.ini` beside the shader: one `[section]` per preset with `parameter = value` lines
-(`;` starts a comment).
+(`;` starts a comment); see
+[data/examples/film_grain.presets.ini](data/examples/film_grain.presets.ini).
 
 Normally all that's required for OBS purposes is a pixel shader (a `.shader` file), and the plugin wraps it
 with a standard template that adds a basic vertex shader and other boilerplate. A full `.effect` file lets
