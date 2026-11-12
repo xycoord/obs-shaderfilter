@@ -323,10 +323,11 @@ struct shader_filter_data {
 	uint32_t gpu_samples;
 	uint64_t gpu_window_start;
 	float gpu_ms;          /* average over the last second; < 0 if not drawn */
-	bool gpu_merged;       /* last frame: drawn inside the next shader filter's pass */
-	uint32_t gpu_group;    /* last frame: filters drawn in this filter's pass, itself included */
-	bool frame_merged;     /* the same, for the frame being drawn */
-	uint32_t frame_group;
+	/* When (in gpu_tick) this filter was last drawn inside the next shader
+	 * filter's pass, or last drew group_n filters in its own; 0 if never. */
+	uint64_t merged_tick;
+	uint64_t group_tick;
+	uint32_t group_n;
 	bool gpu_props_waiting; /* the panel was built before there was a figure */
 	struct dstr last_path;
 	bool last_from_file;
@@ -797,6 +798,18 @@ static void mark_error_in_name(struct shader_filter_data *filter, obs_data_t *se
 	dstr_free(&marked);
 }
 
+/* How the filter has been drawn in the last couple of seconds, for its panel. */
+#define DRAWN_RECENTLY_TICKS 120
+static bool drawn_merged(const struct shader_filter_data *filter)
+{
+	return filter->merged_tick && filter->gpu_tick - filter->merged_tick < DRAWN_RECENTLY_TICKS;
+}
+
+static uint32_t drawn_group(const struct shader_filter_data *filter)
+{
+	return filter->group_tick && filter->gpu_tick - filter->group_tick < DRAWN_RECENTLY_TICKS ? filter->group_n : 1;
+}
+
 static char *examples_dir(void);
 
 static void shader_filter_reload_effect(struct shader_filter_data *filter)
@@ -1086,7 +1099,6 @@ static void *shader_filter_create(obs_data_t *settings, obs_source_t *source)
 	filter->context = source;
 	filter->reload_effect = true;
 	filter->gpu_ms = -1.0f;
-	filter->gpu_group = 1;
 
 	dstr_init(&filter->last_path);
 	dstr_copy(&filter->last_path, obs_data_get_string(settings, "shader_file_name"));
@@ -4098,7 +4110,7 @@ static obs_properties_t *shader_filter_properties(void *data)
 	/* ---- what it costs, measured on this computer ---- */
 	if (filter && !transition && (has_file || inline_code) && !(error_message && *error_message)) {
 		struct dstr t = {0};
-		if (filter->gpu_merged) {
+		if (drawn_merged(filter)) {
 			dstr_copy(&t, obs_module_text("ShaderFilter.GpuMerged"));
 		} else if (filter->gpu_ms >= 0.0f) {
 			struct obs_video_info ovi;
@@ -4110,9 +4122,10 @@ static obs_properties_t *shader_filter_properties(void *data)
 				fps = (int)((double)ovi.fps_num / ovi.fps_den + 0.5);
 			}
 			const double pct = filter->gpu_ms / frame_ms * 100.0;
-			if (filter->gpu_group > 1)
+			const uint32_t group = drawn_group(filter);
+			if (group > 1)
 				dstr_printf(&t, obs_module_text("ShaderFilter.GpuTimeGroup"), filter->gpu_ms, pct, fps,
-					    (int)filter->gpu_group - 1);
+					    (int)group - 1);
 			else
 				dstr_printf(&t, obs_module_text("ShaderFilter.GpuTime"), filter->gpu_ms, pct, fps);
 		} else {
@@ -4495,6 +4508,7 @@ static void prepare_derived(struct shader_filter_data *filter);
 
 static void gpu_publish(struct shader_filter_data *filter);
 
+
 static void shader_filter_tick(void *data, float seconds)
 {
 	struct shader_filter_data *filter = data;
@@ -4569,12 +4583,6 @@ static void shader_filter_tick(void *data, float seconds)
 	filter->output_rendered = false;
 	filter->input_rendered = false;
 	filter->output_form = 0;
-
-	/* How the last frame drew this filter, for its settings panel. */
-	filter->gpu_merged = filter->frame_merged;
-	filter->gpu_group = filter->frame_group ? filter->frame_group : 1;
-	filter->frame_merged = false;
-	filter->frame_group = 0;
 
 	if (gs_image_file_tick_func && gs_image_file_update_texture_func) {
 		uint64_t frame_time = obs_get_video_frame_time();
@@ -5492,9 +5500,10 @@ static void render_derived(struct shader_filter_data **stages, size_t n, struct 
 			}
 		}
 		draw_shader(last, de->effect, input, form);
-		last->frame_group = (uint32_t)n;
+		last->group_n = (uint32_t)n;
+		last->group_tick = last->gpu_tick;
 		for (size_t i = 0; i + 1 < n; i++)
-			stages[i]->frame_merged = true;
+			stages[i]->merged_tick = stages[i]->gpu_tick;
 	}
 	obs_source_release(input_ref);
 
@@ -5543,7 +5552,7 @@ static void gpu_publish(struct shader_filter_data *filter)
 
 	/* A panel built before there was a figure is rebuilt once to show it
 	 * (as a refresh, so the browsing tools stay as they are). */
-	if (filter->gpu_props_waiting && (filter->gpu_ms >= 0.0f || filter->gpu_merged)) {
+	if (filter->gpu_props_waiting && (filter->gpu_ms >= 0.0f || drawn_merged(filter))) {
 		filter->gpu_props_waiting = false;
 		filter->props_refresh_until = now + 1000000000ULL;
 		obs_source_update_properties(filter->context);
@@ -5883,7 +5892,6 @@ static void *shader_transition_create(obs_data_t *settings, obs_source_t *source
 	filter->context = source;
 	filter->reload_effect = true;
 	filter->gpu_ms = -1.0f;
-	filter->gpu_group = 1;
 	filter->transition = true;
 
 	dstr_init(&filter->last_path);
