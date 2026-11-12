@@ -9,6 +9,37 @@ that can be implemented strictly in shader code.
 Please note that this plugin may expose a reasonable number of bugs in OBS, as it uses the shader parser and 
 the property system in somewhat unusual ways.
 
+## Performance
+
+Several shader filters stacked on one source render much faster than they used to, with no change to
+your scenes or shaders:
+
+* **Consecutive shader filters hand their output straight to each other.** Previously every filter made
+  OBS render its input into a texture, copied it, ran its shader, and copied the result into the next
+  filter's texture: three full-screen passes per filter. Now a run of N shader filters costs N + 2 passes.
+  The first filter also lets a plain source (image, text, colour…) draw itself straight into its input.
+* **Filters that only read the pixel they are drawing are merged into the filter before them.** Colour
+  grading, invert, opacity, gamma, hue, vignette and many more only ever call
+  `image.Sample(textureSampler, v_in.uv)`; such a filter is compiled together with the one upstream of it
+  into a single shader, so a run of them costs one pass.
+* Output is the same as before: the plugin reproduces, inside the shaders, exactly what the removed passes
+  did to the pixels (8-bit storage, premultiplying and un-premultiplying alpha in linear light), so even
+  translucent pixels match to within a rounding step.
+
+Anything that can't be reproduced exactly keeps the old path for that link: full `.effect` files upstream,
+a `.shader` containing its own `technique`, `previous_output` or `#define USE_PM_ALPHA 1` upstream, and
+HDR colour spaces. Set the environment variable `SHADERFILTER_NO_FUSION=1` to turn merging off.
+
+Measured on a software GPU at 1080p. These are relative, not absolute, numbers; a real GPU should gain at
+least as much, since the passes removed are memory-bandwidth-bound copies:
+
+| Filters on one source | before | after | full-screen draws |
+|---|---|---|---|
+| 5 colour filters (grade, invert, opacity, gamma, luminance) | 123 ms | 36 ms | 17 → 4 |
+| 5 effects (hue, chromatic aberration, VHS, glow, vignette) | 167 ms | 99 ms | 17 → 7 |
+| the same with glow expanded by 16 px | 170 ms | 97 ms | 17 → 7 |
+| 1 filter | 29 ms | 23 ms | 5 → 4 |
+
 ## Installation
 
 The binary package mirrors the structure of the OBS Studio installation directory, so you should be able to
@@ -252,6 +283,21 @@ and the OBS Studio libraries and headers.
 1. Stand-alone build (Linux only)
     - Verify that you have package with development files for OBS
     - Check out this repository and run `cmake -S . -B build -DBUILD_OUT_OF_TREE=On && cmake --build build`
+
+## Testing
+
+`tests/` renders every example shader, chains of them, transitions, expansion, texture sources, temporal
+shaders and live changes to the filter stack in a headless OBS, with this build and with release 2.6.1,
+and compares the frames; it also times filter chains. On Ubuntu 24.04:
+
+```
+tests/run.sh setup              # once: packages, a test build of libobs 33, both plugin builds
+xvfb-run -a tests/run.sh parity
+xvfb-run -a tests/run.sh parity --opaque
+xvfb-run -a tests/run.sh bench
+```
+
+See [tests/README.md](tests/README.md) for what is compared and how differences are judged.
 
 ## Donations
 https://www.paypal.me/exeldro
