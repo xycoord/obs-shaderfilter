@@ -26,6 +26,7 @@
 #include <QTextStream>
 #include <map>
 #include <QComboBox>
+#include <QKeyEvent>
 #include <QFile>
 #include <QFont>
 #include <QHBoxLayout>
@@ -353,6 +354,37 @@ int main(int argc, char **argv)
 			content->resize(view->viewport()->width(), content->sizeHint().height());
 			app.processEvents();
 			content->grab().save(QString("%1/%2_panel.png").arg(out, shot_name));
+		}
+		if (getenv("UISHOT_KEYTEST") && view && !filters.empty()) {
+			/* Press Down on the Shader list a few times, as a person would. */
+			QList<QComboBox *> cs = view->findChildren<QComboBox *>();
+			if (!cs.isEmpty()) {
+				window.activateWindow();
+				cs[0]->setFocus();
+				app.processEvents();
+				for (int k = 0; k < 4; k++) {
+					QWidget *fw = QApplication::focusWidget();
+					auto *cb = qobject_cast<QComboBox *>(fw);
+					fprintf(stderr, "KEY %d focus=%s combo=%s\n", k, fw ? fw->metaObject()->className() : "none",
+						cb ? cb->currentText().toUtf8().constData() : "-");
+					if (!fw)
+						break;
+					QKeyEvent down(QEvent::KeyPress, k == 3 ? Qt::Key_Up : Qt::Key_Down, Qt::NoModifier);
+					QApplication::sendEvent(fw, &down);
+					for (int t = 0; t < 10; t++) {
+						app.processEvents();
+						env_tick(0.05f);
+						QThread::msleep(30);
+					}
+					OBSDataAutoRelease st = obs_source_get_settings(filters[sel]);
+					fprintf(stderr, "    -> file=%s name=%s\n", obs_data_get_string(st, "shader_file_name"),
+						obs_source_get_name(filters[sel]));
+				}
+				QWidget *fw = QApplication::focusWidget();
+				auto *cb = qobject_cast<QComboBox *>(fw);
+				fprintf(stderr, "KEY end focus=%s combo=%s\n", fw ? fw->metaObject()->className() : "none",
+					cb ? cb->currentText().toUtf8().constData() : "-");
+			}
 		}
 		int combo_index = obs_data_has_user_value(shot, "open_combo") ? (int)obs_data_get_int(shot, "open_combo") : -1;
 		QList<QComboBox *> combos = view ? view->findChildren<QComboBox *>() : QList<QComboBox *>();
