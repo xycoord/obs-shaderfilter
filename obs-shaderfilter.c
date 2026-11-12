@@ -546,6 +546,8 @@ static void shader_filter_clear_params(struct shader_filter_data *filter)
 			obs_leave_graphics();
 			param->render = NULL;
 		}
+		if (param->type == GS_SHADER_PARAM_STRING)
+			bfree(param->value.string);
 		dstr_free(&param->name);
 		dstr_free(&param->display_name);
 		dstr_free(&param->widget_type);
@@ -562,15 +564,41 @@ static void shader_filter_clear_params(struct shader_filter_data *filter)
 	da_free(filter->stored_param_list);
 }
 
+/* render_output.effect is the same for every filter: compile it once. */
+static pthread_mutex_t output_effect_mutex = PTHREAD_MUTEX_INITIALIZER;
+static gs_effect_t *shared_output_effect = NULL;
+static gs_eparam_t *shared_output_image = NULL;
+static long shared_output_refs = 0;
+
+static void create_shared_output_effect(void);
+
 static void load_output_effect(struct shader_filter_data *filter)
 {
-	if (filter->output_effect != NULL) {
-		obs_enter_graphics();
-		gs_effect_destroy(filter->output_effect);
-		filter->output_effect = NULL;
-		obs_leave_graphics();
-	}
+	pthread_mutex_lock(&output_effect_mutex);
+	if (shared_output_refs++ == 0)
+		create_shared_output_effect();
+	filter->output_effect = shared_output_effect;
+	filter->param_output_image = shared_output_image;
+	pthread_mutex_unlock(&output_effect_mutex);
+}
 
+static void release_output_effect(struct shader_filter_data *filter)
+{
+	pthread_mutex_lock(&output_effect_mutex);
+	if (--shared_output_refs == 0 && shared_output_effect) {
+		obs_enter_graphics();
+		gs_effect_destroy(shared_output_effect);
+		obs_leave_graphics();
+		shared_output_effect = NULL;
+		shared_output_image = NULL;
+	}
+	pthread_mutex_unlock(&output_effect_mutex);
+	filter->output_effect = NULL;
+	filter->param_output_image = NULL;
+}
+
+static void create_shared_output_effect(void)
+{
 	char *shader_text = NULL;
 	struct dstr filename = {0};
 	dstr_cat(&filename, obs_get_module_data_path(obs_current_module()));
@@ -587,24 +615,16 @@ static void load_output_effect(struct shader_filter_data *filter)
 	dstr_free(&filename);
 
 	obs_enter_graphics();
-	filter->output_effect = gs_effect_create(shader_text, NULL, &errors);
+	shared_output_effect = gs_effect_create(shader_text, NULL, &errors);
 	obs_leave_graphics();
 
 	bfree(shader_text);
-	if (filter->output_effect == NULL) {
+	if (shared_output_effect == NULL) {
 		blog(LOG_WARNING, "[obs-shaderfilter] Unable to load render_output.effect file.  Errors:\n%s",
 		     (errors == NULL || strlen(errors) == 0 ? "(None)" : errors));
 		bfree(errors);
 	} else {
-		size_t effect_count = gs_effect_get_num_params(filter->output_effect);
-		for (size_t effect_index = 0; effect_index < effect_count; effect_index++) {
-			gs_eparam_t *param = gs_effect_get_param_by_idx(filter->output_effect, effect_index);
-			struct gs_effect_param_info info;
-			gs_effect_get_param_info(param, &info);
-			if (strcmp(info.name, "output_image") == 0) {
-				filter->param_output_image = param;
-			}
-		}
+		shared_output_image = gs_effect_get_param_by_name(shared_output_effect, "output_image");
 	}
 }
 
@@ -905,8 +925,6 @@ static void shader_filter_destroy(void *data)
 	obs_enter_graphics();
 	if (filter->effect)
 		gs_effect_destroy(filter->effect);
-	if (filter->output_effect)
-		gs_effect_destroy(filter->output_effect);
 	if (filter->input_texrender)
 		gs_texrender_destroy(filter->input_texrender);
 	if (filter->output_texrender)
@@ -919,6 +937,8 @@ static void shader_filter_destroy(void *data)
 		gs_vertexbuffer_destroy(filter->sprite_buffer);
 	obs_leave_graphics();
 
+	if (!filter->transition)
+		release_output_effect(filter);
 	dstr_free(&filter->last_path);
 	da_free(filter->stored_param_list);
 	bfree(filter->shader_body);
@@ -2882,7 +2902,10 @@ static void shader_filter_update(void *data, obs_data_t *settings)
 				}
 				obs_source_release(source);
 				if (param->image) {
+					obs_enter_graphics();
 					gs_image_file_free_func(param->image);
+					obs_leave_graphics();
+					bfree(param->image);
 					param->image = NULL;
 				}
 				dstr_free(&param->path);
@@ -2948,7 +2971,8 @@ static void shader_filter_update(void *data, obs_data_t *settings)
 				obs_data_set_default_string(settings, param_name, (const char *)default_value);
 				param->has_default = true;
 			}
-			param->value.string = (char *)obs_data_get_string(settings, param_name);
+			bfree(param->value.string);
+			param->value.string = bstrdup(obs_data_get_string(settings, param_name));
 			break;
 		default:;
 		}
@@ -2972,14 +2996,16 @@ static void shader_filter_tick(void *data, float seconds)
 	filter->uv_size.x = (float)filter->total_width;
 	filter->uv_size.y = (float)filter->total_height;
 
-	filter->uv_scale.x = (float)filter->total_width / base_width;
-	filter->uv_scale.y = (float)filter->total_height / base_height;
+	if (base_width > 0 && base_height > 0) {
+		filter->uv_scale.x = (float)filter->total_width / base_width;
+		filter->uv_scale.y = (float)filter->total_height / base_height;
 
-	filter->uv_offset.x = (float)(-filter->expand_left) / base_width;
-	filter->uv_offset.y = (float)(-filter->expand_top) / base_height;
+		filter->uv_offset.x = (float)(-filter->expand_left) / base_width;
+		filter->uv_offset.y = (float)(-filter->expand_top) / base_height;
 
-	filter->uv_pixel_interval.x = 1.0f / base_width;
-	filter->uv_pixel_interval.y = 1.0f / base_height;
+		filter->uv_pixel_interval.x = 1.0f / base_width;
+		filter->uv_pixel_interval.y = 1.0f / base_height;
+	}
 
 	if (filter->shader_start_time == 0.0f) {
 		filter->shader_start_time = filter->elapsed_time + seconds;
@@ -3057,6 +3083,10 @@ static void shader_filter_tick(void *data, float seconds)
 
 gs_texrender_t *create_or_reset_texrender(gs_texrender_t *render, const enum gs_color_format format)
 {
+	if (render && gs_texrender_get_format(render) != format) {
+		gs_texrender_destroy(render);
+		render = NULL;
+	}
 	if (!render) {
 		render = gs_texrender_create(format, GS_ZS_NONE);
 	} else {
@@ -3302,8 +3332,8 @@ void shader_filter_set_effect_params(struct shader_filter_data *filter)
 
 			break;
 		case GS_SHADER_PARAM_STRING:
-			gs_effect_set_val(param->param, (param->value.string ? param->value.string : NULL),
-					  gs_effect_get_val_size(param->param));
+			if (param->value.string)
+				gs_effect_set_val(param->param, param->value.string, strlen(param->value.string) + 1);
 			break;
 		default:;
 		}
@@ -3540,7 +3570,8 @@ static void render_shader(struct shader_filter_data *filter, gs_texture_t *textu
  * technique, which applies in-shader what the skipped passes would have done
  * to the pixels. Only the first filter of such a run captures its input
  * through libobs, and only the last one draws into the caller's target, so a
- * run of N filters costs N + 3 passes instead of 3N + 1.
+ * run of N filters costs N + 2 passes instead of 3N + 1 (the first filter lets
+ * a plain source draw itself straight into its input texture).
  *
  * A downstream filter that needs its own input copy (expansion stretches it,
  * previous_image keeps last frame's) gets it with one DrawAlphaDivide copy of
