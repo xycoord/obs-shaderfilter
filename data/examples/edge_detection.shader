@@ -30,7 +30,7 @@ uniform bool alpha_channel<
 >;
 uniform float alpha_level<
     string label = "Alpha level";
-    string tooltip = "Transparency amount, where 1.0 is the base luminance (0.00 to 2.00 recommended).";
+    string tooltip = "How much of the edge result is mixed over the image: 0 shows the image, 1 or more the edges.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 100.0;

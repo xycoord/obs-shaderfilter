@@ -31,7 +31,7 @@ uniform float Speed<
     float step = 0.01;
 > = 2.4; //<Range(-10.0, 10.0)>
 uniform float Alpha_Percentage<
-    string label = "Rotation Offset";
+    string label = "Alpha Percentage";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 100.0;

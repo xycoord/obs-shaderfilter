@@ -59,7 +59,7 @@ uniform float Offset_X<
     float step = 0.001;
 > = 0.0;
 uniform float Offset_Y<
-    string label = "Offset X";
+    string label = "Offset Y";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 1.0;

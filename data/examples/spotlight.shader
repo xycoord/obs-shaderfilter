@@ -9,7 +9,7 @@ uniform float Speed_Percent<
 > = 100.0; 
 uniform float Focus_Percent<
     string label = "Focus Percent";
-    string tooltip = "How tightly the light is focused. A negative value creates a shade effect.";
+    string tooltip = "How tightly the light is focused.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 100.0;

@@ -27,7 +27,7 @@
 #define mix lerp
 
 uniform int Alpha_Percentage<
-    string label = "Aplha Percentage";
+    string label = "Alpha Percentage";
     string tooltip = "Adjusts how strongly the fire color is applied.";
     string widget_type = "slider";
     int minimum = 0;

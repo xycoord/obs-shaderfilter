@@ -16,7 +16,6 @@ uniform float rand_f;
 
 uniform float blend<
     string label = "Blend";
-    string tooltip = "Adjusts the ratio of source and texture.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 3.0;
@@ -32,6 +31,7 @@ uniform float copies<
 > = 4.0;
 uniform float alpha_percentage<
     string label = "alpha percentage";
+    string tooltip = "Adjusts the ratio of source and texture.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 100.0;
