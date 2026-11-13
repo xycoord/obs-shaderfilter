@@ -8,12 +8,20 @@
  *   - times frames (bench mode).
  *
  *   harness --plugin path/to/obs-shaderfilter.so --data path/to/data \
+ *           [--plugin2 other.so --data2 path/to/its/data] \
  *           --spec spec.json --out outdir [--bench]
+ *
+ * --plugin2 loads a second plugin, for chains that mix both (another
+ * plugin's filter followed by a shader filter, say).
  *
  * Spec (JSON):
  * {
  *   "width": 640, "height": 360,
  *   "images": { "main": "test.png", "alt": "test2.png" },   image sources
+ *     (a file named NAME_WxH_SPACE.f32 is an HDR test source instead: raw
+ *     half-float RGBA, linear and premultiplied, SPACE "extended" for the
+ *     canvas HDR space, "scrgb", or "srgb" for 16-bit SDR; the SDR white
+ *     level is 300 nits)
  *   "cases": [
  *     { "name": "invert",
  *       "source": "main",                                    filter target
@@ -158,11 +166,112 @@ static void capture(const char *name, int step)
 	}
 }
 
+/* A test source with HDR content: raw half-float RGBA (premultiplied, linear)
+ * from a file named NAME_WxH_SPACE.f32, SPACE being "extended"
+ * (GS_CS_709_EXTENDED), "scrgb" (GS_CS_709_SCRGB) or "srgb" (GS_CS_SRGB_16F). */
+struct hdr_src {
+	gs_texture_t *tex;
+	uint32_t w, h;
+	enum gs_color_space space;
+};
+
+static const char *hdr_name(void *unused)
+{
+	UNUSED_PARAMETER(unused);
+	return "harness HDR";
+}
+
+static void *hdr_create(obs_data_t *settings, obs_source_t *source)
+{
+	UNUSED_PARAMETER(source);
+	struct hdr_src *h = bzalloc(sizeof(*h));
+	const char *file = obs_data_get_string(settings, "file");
+	char space[32] = "";
+	const char *u = strrchr(file, '/');
+	u = u ? u : file;
+	const char *dims = strstr(u, "_");
+	while (dims && !(sscanf(dims, "_%ux%u_%31[a-z]", &h->w, &h->h, space) == 3))
+		dims = strstr(dims + 1, "_");
+	if (!h->w || !h->h) {
+		fprintf(stderr, "harness HDR: no _WxH_SPACE in the name %s\n", file);
+		h->w = h->h = 1;
+	}
+	h->space = strcmp(space, "scrgb") == 0 ? GS_CS_709_SCRGB
+		   : strcmp(space, "srgb") == 0 ? GS_CS_SRGB_16F
+						: GS_CS_709_EXTENDED;
+	FILE *f = fopen(file, "rb");
+	uint16_t *data = bmalloc(sizeof(uint16_t) * 4 * h->w * h->h); /* half floats */
+	if (!f || fread(data, sizeof(uint16_t) * 4, h->w * h->h, f) != h->w * h->h)
+		fprintf(stderr, "harness HDR: can't read %s\n", file);
+	if (f)
+		fclose(f);
+	const uint8_t *planes[] = {(const uint8_t *)data};
+	obs_enter_graphics();
+	h->tex = gs_texture_create(h->w, h->h, GS_RGBA16F, 1, planes, 0);
+	obs_leave_graphics();
+	bfree(data);
+	return h;
+}
+
+static void hdr_destroy(void *data)
+{
+	struct hdr_src *h = data;
+	obs_enter_graphics();
+	gs_texture_destroy(h->tex);
+	obs_leave_graphics();
+	bfree(h);
+}
+
+static uint32_t hdr_width(void *data)
+{
+	return ((struct hdr_src *)data)->w;
+}
+
+static uint32_t hdr_height(void *data)
+{
+	return ((struct hdr_src *)data)->h;
+}
+
+static void hdr_render(void *data, gs_effect_t *unused)
+{
+	UNUSED_PARAMETER(unused);
+	struct hdr_src *h = data;
+	gs_effect_t *e = obs_get_base_effect(OBS_EFFECT_DEFAULT);
+	gs_effect_set_texture(gs_effect_get_param_by_name(e, "image"), h->tex);
+	gs_blend_state_push();
+	gs_blend_function(GS_BLEND_ONE, GS_BLEND_INVSRCALPHA);
+	while (gs_effect_loop(e, "Draw"))
+		gs_draw_sprite(h->tex, 0, h->w, h->h);
+	gs_blend_state_pop();
+}
+
+static enum gs_color_space hdr_space(void *data, size_t count, const enum gs_color_space *preferred)
+{
+	UNUSED_PARAMETER(count);
+	UNUSED_PARAMETER(preferred);
+	return ((struct hdr_src *)data)->space;
+}
+
+static struct obs_source_info hdr_info = {
+	.id = "harness_hdr",
+	.type = OBS_SOURCE_TYPE_INPUT,
+	.output_flags = OBS_SOURCE_VIDEO | OBS_SOURCE_CUSTOM_DRAW | OBS_SOURCE_SRGB,
+	.get_name = hdr_name,
+	.create = hdr_create,
+	.destroy = hdr_destroy,
+	.get_width = hdr_width,
+	.get_height = hdr_height,
+	.video_render = hdr_render,
+	.video_get_color_space = hdr_space,
+};
+
 static obs_source_t *create_image(const char *name, const char *file)
 {
 	obs_data_t *s = obs_data_create();
 	obs_data_set_string(s, "file", file);
-	obs_source_t *src = obs_source_create("image_source", name, s, NULL);
+	const size_t n = strlen(file);
+	const bool hdr = n > 4 && strcmp(file + n - 4, ".f32") == 0;
+	obs_source_t *src = obs_source_create(hdr ? "harness_hdr" : "image_source", name, s, NULL);
 	obs_data_release(s);
 	return src;
 }
@@ -419,12 +528,17 @@ static bool load_module(const char *bin, const char *data)
 int main(int argc, char **argv)
 {
 	const char *plugin = NULL, *data = NULL, *spec_path = NULL, *obs_prefix = NULL;
+	const char *plugin2 = NULL, *data2 = NULL;
 	bool bench_mode = false;
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--plugin") && i + 1 < argc)
 			plugin = argv[++i];
 		else if (!strcmp(argv[i], "--data") && i + 1 < argc)
 			data = argv[++i];
+		else if (!strcmp(argv[i], "--plugin2") && i + 1 < argc)
+			plugin2 = argv[++i];
+		else if (!strcmp(argv[i], "--data2") && i + 1 < argc)
+			data2 = argv[++i];
 		else if (!strcmp(argv[i], "--spec") && i + 1 < argc)
 			spec_path = argv[++i];
 		else if (!strcmp(argv[i], "--out") && i + 1 < argc)
@@ -437,7 +551,7 @@ int main(int argc, char **argv)
 			quiet_logs = false;
 	}
 	if (!plugin || !data || !spec_path || !out_dir || !obs_prefix) {
-		fprintf(stderr, "usage: harness --obs-prefix DIR --plugin SO --data DIR --spec JSON --out DIR [--bench]\n");
+		fprintf(stderr, "usage: harness --obs-prefix DIR --plugin SO --data DIR [--plugin2 SO --data2 DIR] --spec JSON --out DIR [--bench]\n");
 		return 2;
 	}
 	freeze_ns = (void (*)(uint64_t))dlsym(RTLD_DEFAULT, "detshim_freeze_ns");
@@ -493,7 +607,11 @@ int main(int argc, char **argv)
 	dstr_free(&img_data);
 	if (!load_module(plugin, data))
 		return 1;
+	if (plugin2 && !load_module(plugin2, data2))
+		return 1;
 	obs_post_load_modules();
+	obs_set_video_levels(300.0f, 1000.0f); /* as OBS does at startup; HDR conversions use it */
+	obs_register_source(&hdr_info);
 
 	obs_data_t *images = obs_data_get_obj(spec, "images");
 	DARRAY(obs_source_t *) image_sources;
