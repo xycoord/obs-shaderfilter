@@ -10,6 +10,7 @@
 //   - now and then a frame is clearly darker (dirt, a splice) or brighter;
 //   - the light isn't even across the picture, and which side is brighter
 //     changes from frame to frame.
+// And for really old film: the speed wavering as film was cranked by hand.
 // Brightness is multiplied, as a lamp's would be: black stays black, and
 // nothing is clipped, so HDR highlights survive. It only reads the pixel it
 // draws, so the plugin can merge it into a neighbouring shader filter's pass.
@@ -55,6 +56,14 @@ uniform int Speed<
     int step = 1;
 > = 24;
 
+uniform float Hand_Cranked<
+    string label = "Hand Cranked";
+    string tooltip = "How much the speed wavers, as film did when cranked by hand (until about 1915): frames come a little faster, then slower. At 100 it wavers by up to 30%.";
+    string widget_type = "slider";
+    float minimum = 0.0;
+    float maximum = 100.0;
+    float step = 0.1;
+> = 0.0;
 // Three uniform random numbers in [0, 1) for a point (hash by Dave Hoskins, MIT).
 float3 flicker_hash(float3 p3)
 {
@@ -82,6 +91,27 @@ float flicker_smooth(float x, float seed)
     return v / sqrt((1.0 - u) * (1.0 - u) + u * u);
 }
 
+// Hand cranking: how far ahead of (or behind) steady running the film is at
+// time t, in seconds. The speed varies with two slow waves at unrelated rates,
+// by at most 30%, so the film never runs backwards.
+float flicker_crank(float t, float seed)
+{
+    float h = Hand_Cranked * 0.003;
+    float w1 = 6.2831853 * 0.23;
+    float w2 = 6.2831853 * 0.61;
+    float p1 = seed * 0.71;
+    float p2 = seed * 1.37;
+    return h * (0.6 * (cos(p1) - cos(w1 * t + p1)) / w1 + 0.4 * (cos(p2) - cos(w2 * t + p2)) / w2);
+}
+
+// Where the film is at time t, in frames: Speed frames a second, wavering
+// when cranked by hand. With Hand_Cranked at 0 this counts frames exactly as
+// Film Grain does.
+float flicker_film_position(float t, float seed)
+{
+    return float(Speed) * (t + flicker_crank(t, seed));
+}
+
 float4 mainImage(VertData v_in) : TARGET
 {
     float4 c = image.Sample(textureSampler, v_in.uv);
@@ -93,9 +123,11 @@ float4 mainImage(VertData v_in) : TARGET
     float gain = Lamp * 0.0012 * lamp;
 
     if (Speed > 0) {
-        // Frames counted as Film Grain counts them; the sequence repeats only
-        // after 9973 frames (7 minutes at 24), small enough for the hash.
-        float frame = fmod(floor(elapsed_time * float(Speed)), 9973.0);
+        // Frames counted as Film Grain counts them (unless hand cranked); the
+        // sequence repeats only after 9973 frames (7 minutes at 24), small
+        // enough for the hash.
+        float position = flicker_film_position(elapsed_time, seed);
+        float frame = fmod(floor(position), 9973.0);
 
         // From frame to frame: mostly new each frame, partly a drift over
         // about six frames, as density changes along a print.
