@@ -1,7 +1,10 @@
 // Projector Flicker for obs-shaderfilter: the unsteady brightness of a film
 // projected on a screen. Made to go with Film Grain: put it after Film Grain
 // (the grain is in the film, and the lamp lights all of it), and give both the
-// same frame rate (Film Grain's Speed) so grain and flicker change together.
+// same frame rate (Film Grain's Speed) so grain and flicker change at the same
+// rate. Each filter counts time from when it was created, so their frames
+// aren't in step with each other, and with hand cranking the flicker's frames
+// waver while the grain's don't.
 //
 // What it's made of, each its own setting, in percent of brightness where
 // that applies (a typical deviation, so 4% means about 4% brighter or darker):
@@ -65,7 +68,7 @@ uniform float Uneven_Illumination<
 > = 1.5;
 uniform int Speed<
     string label = "Frame Rate";
-    string tooltip = "Frames of film a second: the flicker steps this often. 24 for sound film, 16 to 18 for silent film and Super 8. Use the same as Film Grain's Speed. 0 leaves only the lamp flicker.";
+    string tooltip = "Frames of film a second: the flicker steps this often. 24 for sound film, 16 to 18 for silent film and Super 8. Use the same as Film Grain's Speed, so grain and flicker change at the same rate. 0 leaves only the lamp flicker.";
     string widget_type = "slider";
     int minimum = 0;
     int maximum = 60;
@@ -161,15 +164,15 @@ float4 mainImage(VertData v_in) : TARGET
 
         // Uneven illumination: brighter towards one side, at an angle that
         // changes each frame, and a middle brighter or dimmer than the edges
-        // (scaled so one half of the picture differs from the other by about
-        // the set amount).
+        // (scaled so the left and right halves of the picture differ by the
+        // set amount, as a standard deviation over frames).
         float3 r = flicker_hash(float3(frame, seed + 6.0, 11.0));
         float angle = r.x * 6.2831853;
         float2 d = v_in.uv - 0.5;
         float side = dot(d, float2(cos(angle), sin(angle))) * 2.0;
         float middle = 0.5 - 2.0 * dot(d, d);
         float uneven = (r.y - 0.5) * side * 2.0 + (r.z - 0.5) * middle * 2.0;
-        gain += Uneven_Illumination * 0.0227 * uneven;
+        gain += Uneven_Illumination * 0.0245 * uneven;
     }
 
     // Brightness multiplied, as a lamp's: black stays black, nothing clipped.
