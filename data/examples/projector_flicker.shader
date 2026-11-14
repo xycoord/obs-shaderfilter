@@ -1,69 +1,93 @@
 // Projector Flicker for obs-shaderfilter: the unsteady brightness of a film
 // projected on a screen. Made to go with Film Grain: put it after Film Grain
 // (the grain is in the film, and the lamp lights all of it), and give both the
-// same Speed so grain and flicker change at the same rate.
+// same frame rate (Film Grain's Speed) so grain and flicker change together.
 //
-// Four things make it up, each its own slider:
-//   - each frame of film is exposed and developed a little differently, so
-//     brightness steps from frame to frame (part random, part a slow drift);
-//   - the projector's lamp wavers smoothly, a few times a second;
-//   - now and then a frame is clearly darker (dirt, a splice) or brighter;
-//   - the light isn't even across the picture, and which side is brighter
-//     changes from frame to frame.
-// And for really old film: the speed wavering as film was cranked by hand.
+// What it's made of, each its own setting, in percent of brightness where
+// that applies (a typical deviation, so 4% means about 4% brighter or darker):
+//   - exposure flicker: each frame of film is exposed, developed and printed a
+//     little differently, so its density, and the brightness on the screen,
+//     steps from frame to frame (part random, part a slow drift along the
+//     print). This is what restorers call flicker;
+//   - lamp flicker: the projector's arc lamp wavers smoothly, a few times a
+//     second;
+//   - dark frames: now and then a single frame comes out dark (dirt, a splice,
+//     an underexposed frame);
+//   - uneven illumination: the light isn't even across the screen, and the
+//     brighter side moves from frame to frame;
+//   - hand cranking: film cranked by hand (until about 1915) didn't run at a
+//     steady frame rate.
 // Brightness is multiplied, as a lamp's would be: black stays black, and
-// nothing is clipped, so HDR highlights survive. It only reads the pixel it
-// draws, so the plugin can merge it into a neighbouring shader filter's pass.
+// nothing is clipped, so HDR highlights survive. White can't get brighter,
+// though: lower Lamp Brightness a little to let it flicker upwards too. It
+// only reads the pixel it draws, so the plugin can merge it into a
+// neighbouring shader filter's pass.
 
-uniform float Amount<
-    string label = "Amount";
-    string tooltip = "How much the brightness changes from one frame of film to the next.";
+uniform float Exposure_Flicker<
+    string label = "Exposure Flicker";
+    string tooltip = "How much brightness changes from one frame of film to the next, as each frame's density differs a little (in percent: about this much brighter or darker). 2% is a good print; 5% or more is old or badly printed film.";
     string widget_type = "slider";
     float minimum = 0.0;
-    float maximum = 100.0;
+    float maximum = 15.0;
     float step = 0.1;
-> = 30.0;
-uniform float Lamp<
-    string label = "Lamp";
-    string tooltip = "A smooth wavering of the projector's lamp, a few times a second, between the frame-to-frame changes.";
+> = 3.0;
+uniform float Lamp_Flicker<
+    string label = "Lamp Flicker";
+    string tooltip = "How much the projector's lamp wavers, smoothly, a few times a second (in percent). Carbon arc lamps, in cinemas until the 1970s, wavered most; a modern xenon lamp is steady.";
     string widget_type = "slider";
     float minimum = 0.0;
-    float maximum = 100.0;
+    float maximum = 10.0;
     float step = 0.1;
-> = 20.0;
-uniform float Bumps<
-    string label = "Bumps";
-    string tooltip = "How often a single frame comes out clearly darker (dirt, a splice) or now and then brighter. 0 never; 100 about once a second at 24 frames a second.";
+> = 2.0;
+uniform float Dark_Frames<
+    string label = "Dark Frames";
+    string tooltip = "How many single frames a minute come out dark: dirt, a splice, an underexposed frame. 0 for none.";
     string widget_type = "slider";
     float minimum = 0.0;
-    float maximum = 100.0;
-    float step = 0.1;
-> = 10.0;
-uniform float Unevenness<
-    string label = "Unevenness";
-    string tooltip = "How much the flicker varies across the picture: one side or the middle a little brighter, changing each frame.";
+    float maximum = 60.0;
+    float step = 0.5;
+> = 4.0;
+uniform float Dark_Frame_Depth<
+    string label = "Dark Frame Depth";
+    string tooltip = "How much darker a dark frame is (in percent, each one a little more or less than this).";
     string widget_type = "slider";
     float minimum = 0.0;
-    float maximum = 100.0;
+    float maximum = 50.0;
+    float step = 0.5;
+> = 15.0;
+uniform float Uneven_Illumination<
+    string label = "Uneven Illumination";
+    string tooltip = "How much brighter one side, or the middle, of the picture is than the rest (in percent), the brighter part moving from frame to frame.";
+    string widget_type = "slider";
+    float minimum = 0.0;
+    float maximum = 10.0;
     float step = 0.1;
-> = 25.0;
+> = 1.5;
 uniform int Speed<
-    string label = "Speed";
-    string tooltip = "Frames of film a second: the brightness steps this often. 24 for sound film, 16 to 18 for silent film and Super 8. Use the same as Film Grain's Speed. 0 leaves only the lamp.";
+    string label = "Frame Rate";
+    string tooltip = "Frames of film a second: the flicker steps this often. 24 for sound film, 16 to 18 for silent film and Super 8. Use the same as Film Grain's Speed. 0 leaves only the lamp flicker.";
     string widget_type = "slider";
     int minimum = 0;
     int maximum = 60;
     int step = 1;
 > = 24;
-
-uniform float Hand_Cranked<
-    string label = "Hand Cranked";
-    string tooltip = "How much the speed wavers, as film did when cranked by hand (until about 1915): frames come a little faster, then slower. At 100 it wavers by up to 30%.";
+uniform float Hand_Cranking<
+    string label = "Hand Cranking";
+    string tooltip = "How much the frame rate wavers (in percent), as it did when film was cranked by hand, until about 1915: frames come a little faster, then slower. 0 is a motor-driven projector.";
     string widget_type = "slider";
     float minimum = 0.0;
-    float maximum = 100.0;
-    float step = 0.1;
+    float maximum = 30.0;
+    float step = 0.5;
 > = 0.0;
+uniform float Lamp_Brightness<
+    string label = "Lamp Brightness";
+    string tooltip = "The picture's average brightness, in percent. White can't get any brighter, so at 100 the flicker only shows on white as dips; at 90 or so it can flicker both ways.";
+    string widget_type = "slider";
+    float minimum = 50.0;
+    float maximum = 100.0;
+    float step = 0.5;
+> = 100.0;
+
 // Three uniform random numbers in [0, 1) for a point (hash by Dave Hoskins, MIT).
 float3 flicker_hash(float3 p3)
 {
@@ -92,11 +116,11 @@ float flicker_smooth(float x, float seed)
 }
 
 // Hand cranking: how far ahead of (or behind) steady running the film is at
-// time t, in seconds. The speed varies with two slow waves at unrelated rates,
-// by at most 30%, so the film never runs backwards.
+// time t, in seconds. The frame rate varies with two slow waves at unrelated
+// rates, by at most Hand_Cranking percent, so the film never runs backwards.
 float flicker_crank(float t, float seed)
 {
-    float h = Hand_Cranked * 0.003;
+    float h = Hand_Cranking * 0.01;
     float w1 = 6.2831853 * 0.23;
     float w2 = 6.2831853 * 0.61;
     float p1 = seed * 0.71;
@@ -104,55 +128,51 @@ float flicker_crank(float t, float seed)
     return h * (0.6 * (cos(p1) - cos(w1 * t + p1)) / w1 + 0.4 * (cos(p2) - cos(w2 * t + p2)) / w2);
 }
 
-// Where the film is at time t, in frames: Speed frames a second, wavering
-// when cranked by hand. With Hand_Cranked at 0 this counts frames exactly as
-// Film Grain does.
-float flicker_film_position(float t, float seed)
-{
-    return float(Speed) * (t + flicker_crank(t, seed));
-}
-
 float4 mainImage(VertData v_in) : TARGET
 {
     float4 c = image.Sample(textureSampler, v_in.uv);
     float seed = rand_instance_f * 61.0;
 
-    // The lamp: two octaves of smooth noise, about 3 and 7 times a second.
+    // Lamp flicker: two octaves of smooth noise, about 3 and 7 times a second.
     float t = fmod(elapsed_time, 9973.0);
     float lamp = (flicker_smooth(t * 3.1, seed + 1.0) + 0.5 * flicker_smooth(t * 7.3, seed + 2.0)) / 1.118;
-    float gain = Lamp * 0.0012 * lamp;
+    float gain = Lamp_Flicker * 0.01 * lamp;
 
     if (Speed > 0) {
-        // Frames counted as Film Grain counts them (unless hand cranked); the
-        // sequence repeats only after 9973 frames (7 minutes at 24), small
-        // enough for the hash.
-        float position = flicker_film_position(elapsed_time, seed);
+        // The frame of film on screen: Speed frames a second, wavering when
+        // hand cranked (without, counted exactly as Film Grain counts them).
+        // The sequence repeats only after 9973 frames (7 minutes at 24),
+        // small enough for the hash.
+        float position = float(Speed) * (elapsed_time + flicker_crank(elapsed_time, seed));
         float frame = fmod(floor(position), 9973.0);
 
-        // From frame to frame: mostly new each frame, partly a drift over
-        // about six frames, as density changes along a print.
+        // Exposure flicker: mostly new each frame, partly a drift over about
+        // six frames, as density changes along a print (the two scaled so the
+        // total has the set standard deviation).
         float jump = flicker_gauss(frame, seed + 3.0);
         float drift = flicker_smooth(frame / 6.0, seed + 4.0);
-        gain += Amount * 0.0012 * (0.8 * jump + 0.6 * drift);
+        gain += Exposure_Flicker * 0.01 * (0.8 * jump + 0.6 * drift);
 
-        // A bump: about Bumps / 2400 of frames (once a second at 100 and
-        // 24 frames a second); three in four darker, by 15 to 35%.
+        // A dark frame: Dark_Frames a minute on average, each 75% to 125% of
+        // the set depth.
         float3 b = flicker_hash(float3(frame, seed + 5.0, 7.0));
-        if (b.x < Bumps / 2400.0)
-            gain += (b.y < 0.75 ? -1.0 : 0.6) * (0.15 + 0.2 * b.z);
+        if (b.x < Dark_Frames / (60.0 * float(Speed)))
+            gain -= Dark_Frame_Depth * 0.01 * (0.75 + 0.5 * b.y);
 
-        // Uneven light: brighter towards one side, at an angle that changes
-        // each frame, and a centre brighter or dimmer than the edges.
+        // Uneven illumination: brighter towards one side, at an angle that
+        // changes each frame, and a middle brighter or dimmer than the edges
+        // (scaled so one half of the picture differs from the other by about
+        // the set amount).
         float3 r = flicker_hash(float3(frame, seed + 6.0, 11.0));
         float angle = r.x * 6.2831853;
         float2 d = v_in.uv - 0.5;
         float side = dot(d, float2(cos(angle), sin(angle))) * 2.0;
         float middle = 0.5 - 2.0 * dot(d, d);
         float uneven = (r.y - 0.5) * side * 2.0 + (r.z - 0.5) * middle * 2.0;
-        gain += Unevenness * 0.0015 * uneven;
+        gain += Uneven_Illumination * 0.0227 * uneven;
     }
 
     // Brightness multiplied, as a lamp's: black stays black, nothing clipped.
-    c.rgb *= max(1.0 + gain, 0.0);
+    c.rgb *= Lamp_Brightness * 0.01 * max(1.0 + gain, 0.0);
     return c;
 }
