@@ -41,7 +41,7 @@ uniform float Lamp_Flicker<
     float minimum = 0.0;
     float maximum = 10.0;
     float step = 0.1;
-> = 2.0;
+> = 2.5;
 uniform float Dark_Frames<
     string label = "Dark Frames";
     string tooltip = "How many single frames a minute come out dark: dirt, a splice, an underexposed frame. 0 for none.";
@@ -49,7 +49,7 @@ uniform float Dark_Frames<
     float minimum = 0.0;
     float maximum = 60.0;
     float step = 0.5;
-> = 4.0;
+> = 2.0;
 uniform float Dark_Frame_Depth<
     string label = "Dark Frame Depth";
     string tooltip = "How much darker a dark frame is (in percent, each one a little more or less than this).";

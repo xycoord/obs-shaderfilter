@@ -13,7 +13,7 @@ uniform float Amount<
     float minimum = 0.0;
     float maximum = 100.0;
     float step = 0.1;
-> = 30.0;
+> = 26.0;
 uniform float Grain_Size<
     string label = "Grain Size";
     string tooltip = "Size of a grain, in pixels of a 1080-line picture. Grain belongs to the frame, so it scales with the source: twice as many pixels across at 4K, finer on smaller sources.";
@@ -21,7 +21,7 @@ uniform float Grain_Size<
     float minimum = 1.0;
     float maximum = 6.0;
     float step = 0.05;
-> = 1.5;
+> = 2.2;
 uniform float Color_Amount<
     string label = "Color";
     string tooltip = "0 gives black-and-white grain, as on most film; 100 gives each color channel its own grain.";
@@ -29,7 +29,7 @@ uniform float Color_Amount<
     float minimum = 0.0;
     float maximum = 100.0;
     float step = 0.1;
-> = 0.0;
+> = 15.0;
 uniform float Shadows<
     string label = "Shadows";
     string tooltip = "Grain strength in the darkest parts, compared with the midtones (100).";
@@ -37,7 +37,7 @@ uniform float Shadows<
     float minimum = 0.0;
     float maximum = 100.0;
     float step = 0.1;
-> = 60.0;
+> = 70.0;
 uniform float Highlights<
     string label = "Highlights";
     string tooltip = "Grain strength in the brightest parts, compared with the midtones (100).";
@@ -45,7 +45,7 @@ uniform float Highlights<
     float minimum = 0.0;
     float maximum = 100.0;
     float step = 0.1;
-> = 25.0;
+> = 30.0;
 uniform int Speed<
     string label = "Speed";
     string tooltip = "How many times a second the grain changes. 24 looks like film; 0 freezes it.";

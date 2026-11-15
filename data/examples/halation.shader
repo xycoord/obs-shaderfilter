@@ -34,7 +34,7 @@ uniform float Size<
     float minimum = 2.0;
     float maximum = 120.0;
     float step = 0.5;
-> = 30.0;
+> = 22.0;
 uniform float Threshold<
     string label = "Threshold";
     string tooltip = "How bright a part of the picture has to be to glow, in percent of white. Lower it for more of the picture to glow.";

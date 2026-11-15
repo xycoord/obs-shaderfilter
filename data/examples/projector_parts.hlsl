@@ -56,7 +56,7 @@ uniform float Exposure_Flicker<
     float minimum = 0.0;
     float maximum = 15.0;
     float step = 0.1;
-> = 3.5;
+> = 3.0;
 uniform float Lamp_Flicker<
     string label = "Lamp Flicker";
     string group = "Flicker";
@@ -76,7 +76,7 @@ uniform float Dark_Frames<
     float minimum = 0.0;
     float maximum = 60.0;
     float step = 0.5;
-> = 4.0;
+> = 2.0;
 uniform int Dark_Frame_Depth<
     string label = "Dark Frame Depth";
     string group = "Flicker";

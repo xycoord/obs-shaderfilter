@@ -46,7 +46,7 @@ uniform int Fade<
     int minimum = 0;
     int maximum = 100;
     int step = 1;
-> = 30;
+> = 20;
 uniform int Contrast<
     string label = "Contrast";
     string group = "Print";
@@ -130,7 +130,7 @@ uniform float Halation_Size<
     float minimum = 2.0;
     float maximum = 120.0;
     float step = 0.5;
-> = 30.0;
+> = 22.0;
 uniform int Halation_Threshold<
     string from = "halation:Threshold";
     string label = "Threshold";
@@ -158,7 +158,7 @@ uniform float Grain<
     float minimum = 0.0;
     float maximum = 100.0;
     float step = 0.1;
-> = 30.0;
+> = 26.0;
 uniform float Grain_Size<
     string label = "Grain Size";
     string group = "Grain";
@@ -169,7 +169,7 @@ uniform float Grain_Size<
     float minimum = 1.0;
     float maximum = 6.0;
     float step = 0.05;
-> = 2.4;
+> = 2.2;
 uniform int Grain_Colour<
     string from = "film_grain:Color_Amount";
     string label = "Colour";
@@ -181,7 +181,7 @@ uniform int Grain_Colour<
     int minimum = 0;
     int maximum = 100;
     int step = 1;
-> = 25;
+> = 15;
 uniform int Grain_Shadows<
     string from = "film_grain:Shadows";
     string label = "Shadows";
@@ -193,7 +193,7 @@ uniform int Grain_Shadows<
     int minimum = 0;
     int maximum = 100;
     int step = 1;
-> = 85;
+> = 70;
 uniform int Grain_Highlights<
     string from = "film_grain:Highlights";
     string label = "Highlights";

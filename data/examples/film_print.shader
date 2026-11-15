@@ -57,7 +57,7 @@ uniform float Fade<
     float minimum = 0.0;
     float maximum = 100.0;
     float step = 1.0;
-> = 30.0;
+> = 20.0;
 uniform float Warmth<
     string label = "Warmth";
     string tooltip = "How warm the projector's light is, in percent: 0 is neutral, 100 a tungsten lamp, as in 16mm and Super 8 projectors. Warmer in the shadows than the highlights, which turn cream.";
