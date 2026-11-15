@@ -2401,6 +2401,24 @@ static const struct effect_param_data *section_of(const struct shader_filter_dat
 	return NULL;
 }
 
+/* A blank line, for room above a tick (a tick's row is shorter than a
+ * slider's, and OBS leaves little room above a group's heading), named
+ * after the group it's above ("" for Show All Settings, a name no group
+ * has), so it's hidden with it. */
+static void gap_name(struct dstr *out, const char *above)
+{
+	dstr_printf(out, "shader_gap:%s", above);
+}
+
+static void add_gap(obs_properties_t *params, const char *above)
+{
+	struct dstr name = {0};
+	gap_name(&name, above);
+	obs_property_t *gap = obs_properties_add_text(params, name.array, " ", OBS_TEXT_INFO);
+	obs_property_text_set_info_word_wrap(gap, false);
+	dstr_free(&name);
+}
+
 /* Show or hide the shader's settings and groups for the ticks as they are. */
 static void apply_param_visibility(const struct shader_filter_data *filter, obs_properties_t *params, obs_data_t *settings)
 {
@@ -2412,7 +2430,9 @@ static void apply_param_visibility(const struct shader_filter_data *filter, obs_
 		obs_property_t *p = panel_owns(filter, q->name.array) ? obs_properties_get(params, q->name.array) : NULL;
 		if (!p)
 			continue;
-		obs_property_set_visible(p, all || !param_is_more(q));
+		const struct effect_param_data *sec = q->group.len ? section_of(filter, q->group.array) : NULL;
+		const bool off = sec && !obs_data_get_bool(settings, sec->name.array);
+		obs_property_set_visible(p, (all || !param_is_more(q)) && !off);
 	}
 	/* A group shows when it has a setting to show. (An unticked section's
 	 * settings show greyed, as OBS shows them, so it's clear what's off.) */
@@ -2425,7 +2445,7 @@ static void apply_param_visibility(const struct shader_filter_data *filter, obs_
 			any = any || obs_property_visible(c);
 		obs_property_set_visible(g, any);
 		struct dstr gap = {0};
-		dstr_printf(&gap, "shader_gap:%s", obs_property_name(g));
+		gap_name(&gap, obs_property_name(g));
 		obs_property_t *gp = obs_properties_get(params, gap.array);
 		if (gp)
 			obs_property_set_visible(gp, any);
@@ -2474,15 +2494,6 @@ static bool look_restore_clicked(obs_properties_t *props, obs_property_t *proper
 	obs_source_update(filter->context, NULL);
 	obs_source_update_properties(filter->context);
 	return false;
-}
-
-/* A blank line, for room above a tick (a tick's row is shorter than a
- * slider's, and OBS leaves little room above a group's heading). */
-static obs_property_t *add_gap(obs_properties_t *params, const char *name)
-{
-	obs_property_t *gap = obs_properties_add_text(params, name, " ", OBS_TEXT_INFO);
-	obs_property_text_set_info_word_wrap(gap, false);
-	return gap;
 }
 
 /* The "Show All Settings" tick, for a shader that hides some settings. */
@@ -4629,7 +4640,7 @@ static obs_properties_t *shader_filter_properties(void *data)
 		 * so it stays where it is when ticked. */
 		if (has_more && !all_added && (param_is_more(param) || (group_name && *group_name))) {
 			if (flat)
-				add_gap(params, "shader_gap:show_all");
+				add_gap(params, "");
 			add_show_all(params);
 			all_added = true;
 		}
@@ -4640,10 +4651,7 @@ static obs_properties_t *shader_filter_properties(void *data)
 			 * title shows an & as itself rather than as a shortcut key. */
 			struct dstr gname = {0};
 			const struct effect_param_data *sec = section_of(filter, group_name);
-			if (sec)
-				dstr_copy(&gname, sec->name.array);
-			else
-				dstr_printf(&gname, SF_GROUP_PREFIX "%s", group_name);
+			dstr_printf(&gname, SF_GROUP_PREFIX "%s", group_name);
 			for (size_t i = 0; i < groups.num; i++) {
 				const char *n = obs_property_name(groups.array[i]);
 				if (strcmp(n, gname.array) == 0) {
@@ -4657,22 +4665,24 @@ static obs_properties_t *shader_filter_properties(void *data)
 					dstr_cat(&title, obs_module_text("ShaderFilter.SectionOff"));
 				dstr_replace(&title, "&", "&&");
 				group = obs_properties_create();
-				if (flat) {
-					/* (Room above a heading; named after its group, so it's
-					 * hidden with it.) */
-					struct dstr gap = {0};
-					dstr_printf(&gap, "shader_gap:%s", gname.array);
-					add_gap(params, gap.array);
-					dstr_free(&gap);
-				}
-				obs_property_t *p = obs_properties_add_group(params, gname.array, title.array,
-									    sec ? OBS_GROUP_CHECKABLE : OBS_GROUP_NORMAL, group);
+				/* (Room above its heading, if the group can be added.) */
+				if (flat && !obs_properties_get(params, gname.array))
+					add_gap(params, gname.array);
+				obs_property_t *p = obs_properties_add_group(params, gname.array, title.array, OBS_GROUP_NORMAL, group);
 				if (p)
 					dstr_catf(&filter->panel_names, "%s;", gname.array);
 				if (sec) {
+					/* The section's tick is its first row ("On"); unticked,
+					 * the section folds to its heading and that tick. (The
+					 * heading and the Look list say what's off.) */
 					shader_filter_set_tooltip(p, &sec->tooltip);
-					/* (The heading and the Look list say what's off.) */
-					obs_property_set_modified_callback(p, section_toggled);
+					obs_property_t *tick = obs_properties_add_bool(group, sec->name.array,
+										       obs_module_text("ShaderFilter.SectionOn"));
+					if (tick) {
+						shader_filter_set_tooltip(tick, &sec->tooltip);
+						obs_property_set_modified_callback(tick, section_toggled);
+						dstr_catf(&filter->panel_names, "%s;", sec->name.array);
+					}
 				}
 				da_push_back(groups, &p);
 				dstr_free(&title);
