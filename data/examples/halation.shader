@@ -81,7 +81,8 @@ float4 mainImage(VertData v_in) : TARGET
     // pattern. Each point is the last turned by the golden angle, and its
     // weight the last times a constant, so the loop has no sines, cosines or
     // exponentials; the sRGB curve in it is a close cubic (within 0.002).
-    float sigma = max(Size, 1.0) / 1.645 * uv_size.y / 1080.0;
+    // (The source's own height: uv_size includes any space added round it.)
+    float sigma = max(Size, 1.0) / 1.645 / (uv_pixel_interval.y * 1080.0);
     float2 reach = sigma * 3.2 * uv_pixel_interval;
     float2 px = v_in.uv * uv_size;
     float turn = 6.2831853 * frac(52.9829189 * frac(dot(px, float2(0.06711056, 0.00583715))));
@@ -104,8 +105,9 @@ float4 mainImage(VertData v_in) : TARGET
     float own = c.a * max(dot(halation_to_linear(c.rgb), float3(0.2126, 0.7152, 0.0722)) - t, 0.0) / (1.0 - t);
     glow = max(glow - own, 0.0) * Strength * 0.01;
 
-    // The halo's colour: red-orange, or neutral for black and white.
-    float3 tint = Film == 1 ? float3(0.45, 0.45, 0.45) : float3(1.0, 0.13, 0.03);
+    // The halo's colour: red-orange, or neutral for black and white, the two
+    // equally bright (luminance 0.31).
+    float3 tint = Film == 1 ? float3(0.31, 0.31, 0.31) : float3(1.0, 0.13, 0.03);
     float3 h = tint * glow;
 
     // Added as light, over the picture with its transparency: where the source
