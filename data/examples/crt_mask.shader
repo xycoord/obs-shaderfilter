@@ -66,26 +66,26 @@ float4 mainImage(VertData v_in) : TARGET
     // This pixel's position in units of the pitch: Pitch on a 1080-line
     // picture, rounded to whole pixels of this one, at least 3.
     float p = max(floor(Pitch / (uv_pixel_interval.y * 1080.0) + 0.5), 3.0);
-    float2 q = floor(v_in.uv / uv_pixel_interval) / p;
+    float2 q = (floor(v_in.uv / uv_pixel_interval) + 0.5) / p;
 
     // How much of each colour's phosphor is here, from 0 to 1, smooth.
     float3 phase = float3(0.0, 1.0 / 3.0, 2.0 / 3.0);
     float3 g;
     if (Mask_Type == 0) {
-        // Dots in triangles: rows 0.87 pitch apart, each shifted half a
+        // Dots in triangles: rows 0.87 pitch apart (in whole pixels), each shifted half a
         // pitch from the last; each dot fades at its row's top and bottom.
-        float rows = q.y / 0.866;
+        float rows = q.y * p / max(floor(0.866 * p + 0.5), 2.0);
         float row = floor(rows);
         float shift = fmod(row, 2.0) * 0.5;
         float3 across = 0.5 + 0.5 * cos(6.2831853 * (q.x + shift - phase));
         float down = 0.5 - 0.5 * cos(6.2831853 * (rows - row));
         g = across * down;
     } else if (Mask_Type == 2) {
-        // Slots: stripes broken every 1.5 pitches, alternate columns
+        // Slots: stripes broken every 1.5 pitches (in whole pixels), alternate columns
         // shifted half a slot, the breaks shallow.
         float3 across = 0.5 + 0.5 * cos(6.2831853 * (q.x - phase));
         float column = floor(q.x);
-        float down = 0.7 + 0.3 * cos(6.2831853 * (q.y / 1.5 + fmod(column, 2.0) * 0.5));
+        float down = 0.7 + 0.3 * cos(6.2831853 * (q.y * p / max(floor(1.5 * p + 0.5), 2.0) + fmod(column, 2.0) * 0.5));
         g = across * down;
     } else {
         // Unbroken vertical stripes.

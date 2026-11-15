@@ -90,7 +90,7 @@ uniform float Colour_Noise<
 > = 2.0;
 uniform float Dropouts<
     string label = "Dropouts";
-    string tooltip = "Dropouts a minute, on average: a short stretch of a line replaced by the line above (or, one in four, a dim streak), for 1/30 s. 10 or so for a good tape, hundreds for a worn one.";
+    string tooltip = "Dropouts a minute, on average: a short stretch of a line replaced by the line above (or, one in four, a dim streak), for 1/24 s. 10 or so for a good tape, hundreds for a worn one.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 600.0;
@@ -225,6 +225,7 @@ float4 mainImage(VertData v_in) : TARGET
     float wl = 0.0;
     float ww = 0.0;
     float wa = 0.0;
+    float a_s = 0.0;
     for (int i = -12; i <= 12; i++) {
         float u = float(i) / 12.0;
         float4 s = image.Sample(textureSampler, uv + float2(float(i) * step_l * px.x, 0.0));
@@ -239,16 +240,14 @@ float4 mainImage(VertData v_in) : TARGET
         ww += kw;
         a_l += ka * s.a;
         wa += ka;
+        a_s += kl * s.a;
     }
     // (Brightness is taken out of premultiplied with transparency filtered
-    // the same way, so edges against transparency don't brighten or dim.)
-    float a_s = 0.0;
-    for (int i2 = -12; i2 <= 12; i2++) {
-        float u2 = float(i2) / 12.0;
-        float sinc2 = i2 == 0 ? 1.0 : sin(12.566371 * u2) / (12.566371 * u2);
-        a_s += sinc2 * (0.42 + 0.5 * cos(3.1415927 * u2) + 0.08 * cos(6.2831853 * u2)) * image.Sample(textureSampler, uv + float2(float(i2) * step_l * px.x, 0.0)).a;
-    }
-    a_s = max(a_s / wl, 0.02);
+    // the same way, held between half the smooth transparency and 1 so the
+    // filter's ringing can't dim or brighten it; the result's transparency
+    // is that same filtered transparency, so over black an edge against
+    // transparency is as bright as the same picture on black.)
+    a_s = clamp(a_s / wl, a_l / wa * 0.5, 1.0);
     y_l /= wl;
     a_l /= wa;
     y_w /= ww;
@@ -272,7 +271,7 @@ float4 mainImage(VertData v_in) : TARGET
             a_c += k * s.a;
         }
     }
-    if (a_l <= 0.002)
+    if (a_l <= 0.0)
         return float4(0.0, 0.0, 0.0, 0.0);
     float y_here = max(y_out / a_s, 0.0) * (1.0 + (White_Level * 0.01 - 1.0) * A);
     float2 smeared = yiq_c.yz / max(a_c, 0.0001) * smoothstep(0.0, 0.03, yiq_c.x / max(a_c, 0.0001));
@@ -282,18 +281,18 @@ float4 mainImage(VertData v_in) : TARGET
     float3 yiq = float3(y_here, iq);
 
     // --- Noise (VHS Noise): kept off black.
-    float tick = fmod(floor(elapsed_time * 120.0), 99991.0);
-    float drop_t = fmod(floor(elapsed_time * 30.0), 99991.0);
+    float tick = fmod(floor(elapsed_time * 120.0), 9973.0);
+    float drop_t = fmod(floor(elapsed_time * 24.0), 9973.0);
     float lseed = line + tick * 0.618;
     float keep = smoothstep(0.02, 0.08, yiq.x) * a_l;
     yiq.x += tape_smooth(x / 4.5, lseed, seed + 11.0) * Noise * 0.01 * A * keep;
     yiq.y += tape_smooth(x / 50.0, lseed, seed + 12.0) * Colour_Noise * 0.01 * A * 0.6 * keep;
     yiq.z += tape_smooth(x / 50.0, lseed, seed + 13.0) * Colour_Noise * 0.01 * A * 0.5 * keep;
     float3 rgb = max(tape_from_yiq(yiq), 0.0);
-    float alpha = saturate(a_l);
+    float alpha = a_s;
 
     // Dropouts: the line above in place of a short stretch of this one.
-    float per_chance = Dropouts * A / 60.0 / (4.0 * 30.0);
+    float per_chance = Dropouts * A / 60.0 / (4.0 * 24.0);
     for (int k = 0; k < 4; k++) {
         float3 h = tape_hash(float3(drop_t, float(k) + 21.0, seed));
         if (h.z >= per_chance)
@@ -307,7 +306,11 @@ float4 mainImage(VertData v_in) : TARGET
             // (three samples), at the tape's white level and saturation.
             float2 up = uv - float2(0.0, 1.0 / lines);
             float soft = 404.8 / max(Luma_Resolution, 1.0) * A * 1.5 * px.x;
-            float4 above = (image.Sample(textureSampler, up - float2(soft, 0.0)) + image.Sample(textureSampler, up) + image.Sample(textureSampler, up + float2(soft, 0.0))) / 3.0;
+            float4 a1 = image.Sample(textureSampler, up - float2(soft, 0.0));
+            float4 a2 = image.Sample(textureSampler, up);
+            float4 a3 = image.Sample(textureSampler, up + float2(soft, 0.0));
+            float4 above = float4(a1.rgb * a1.a + a2.rgb * a2.a + a3.rgb * a3.a, a1.a + a2.a + a3.a) / 3.0;
+            above.rgb /= max(above.a, 0.0001);
             float3 ay = tape_to_yiq(above.rgb);
             ay.x *= 1.0 + (White_Level * 0.01 - 1.0) * A;
             ay.yz *= max(sat, 0.0);

@@ -19,7 +19,7 @@
 
 uniform int Standard<
     string label = "Lines";
-    string tooltip = "How many lines: a TV's broadcast picture (576 or 480, a faint texture), or games and computers (270 lines of 4 pixels, or 360 of 3, with clear gaps between them).";
+    string tooltip = "How many lines: a TV's broadcast picture (576 or 480, a faint texture), or games and computers (270 or 360 on a 1080-line picture, 4 or 3 pixels apart, with clear gaps between them; on other sizes rounded to whole pixels apart).";
     string widget_type = "select";
     int option_0_value = 0;
     string option_0_label = "TV, PAL (576 lines)";
@@ -86,7 +86,7 @@ float4 mainImage(VertData v_in) : TARGET
 
     // The two nearest lines above and below.
     float n = floor(y / gap - 0.5);
-    float last = floor(height / gap);
+    float last = ceil(height / gap - 0.001);
     float3 light = float3(0.0, 0.0, 0.0);
     for (int k = -1; k <= 2; k++) {
         float li = n + float(k);

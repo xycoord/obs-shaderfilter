@@ -44,7 +44,7 @@ uniform float Colour_Noise<
 > = 2.0;
 uniform float Dropouts<
     string label = "Dropouts";
-    string tooltip = "How many dropouts a minute, on average: a short stretch of a line replaced by the line above (or, one in four, a dim streak), for 1/30 s. 10 or so for a good tape, a few hundred for a worn one.";
+    string tooltip = "How many dropouts a minute, on average: a short stretch of a line replaced by the line above (or, one in four, a dim streak), for 1/24 s. 10 or so for a good tape, a few hundred for a worn one.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 600.0;
@@ -79,11 +79,11 @@ float4 mainImage(VertData v_in) : TARGET
     float seed = rand_instance_f * 61.0;
 
     // The moment (120 a second), the line, and this pixel along the line in
-    // pixels of a 1080-line picture. Hash inputs repeat after 99991 moments
-    // (14 minutes).
+    // pixels of a 1080-line picture. Hash inputs repeat after 9973 moments
+    // (83 seconds for the noise, 7 minutes for dropouts).
     float lines = Standard == 1 ? 480.0 : 576.0;
-    float field = fmod(floor(elapsed_time * 120.0), 99991.0);
-    float drop_t = fmod(floor(elapsed_time * 30.0), 99991.0);
+    float field = fmod(floor(elapsed_time * 120.0), 9973.0);
+    float drop_t = fmod(floor(elapsed_time * 24.0), 9973.0);
     float line = floor(v_in.uv.y * lines);
     float aspect = uv_pixel_interval.y / uv_pixel_interval.x;
     float x = v_in.uv.x * 1080.0 * aspect;
@@ -106,11 +106,11 @@ float4 mainImage(VertData v_in) : TARGET
     float3 rgb = float3(iq.x + 0.956 * iq.y + 0.621 * iq.z, iq.x - 0.272 * iq.y - 0.647 * iq.z, iq.x - 1.106 * iq.y + 1.703 * iq.z);
     rgb = max(rgb, 0.0);
 
-    // Dropouts: four chances every 1/30 s, each a stretch 30 to 300 pixels
-    // long on one line, held for that 1/30 s (so it's seen at any output
-    // rate of 30 frames a second or more), Dropouts a minute on average. The VCR puts the line
+    // Dropouts: four chances every 1/24 s, each a stretch 30 to 300 pixels
+    // long on one line, held for that 1/24 s (so it's seen at any output
+    // rate of 24 frames a second or more), Dropouts a minute on average. The VCR puts the line
     // above in its place (a little noisier), fading in and out at the ends.
-    float per_chance = Dropouts / 60.0 / (4.0 * 30.0);
+    float per_chance = Dropouts / 60.0 / (4.0 * 24.0);
     for (int k = 0; k < 4; k++) {
         float3 h = vhsn_hash(float3(drop_t, float(k) + 11.0, seed));
         if (h.z >= per_chance)

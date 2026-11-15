@@ -37,7 +37,7 @@ uniform float Convergence<
 > = 0.8;
 uniform int Standard<
     string label = "Lines";
-    string tooltip = "How many lines: a TV's broadcast picture (576 or 480, a faint texture), or games and computers (270 lines of 4 pixels, or 360 of 3, with clear gaps between them).";
+    string tooltip = "How many lines: a TV's broadcast picture (576 or 480, a faint texture), or games and computers (270 or 360 on a 1080-line picture, 4 or 3 pixels apart, with clear gaps between them; on other sizes rounded to whole pixels apart).";
     string widget_type = "select";
     int option_0_value = 0;
     string option_0_label = "TV, PAL (576 lines)";
@@ -179,7 +179,7 @@ float4 mainImage(VertData v_in) : TARGET
     float s_bright = bw * 0.01 * gap / 2.3548;
     float s_dark = s_bright / (1.0 + Blooming * 0.01 * max(A, 1.0));
     float n = floor(y / gap - 0.5);
-    float last = floor(height / gap);
+    float last = ceil(height / gap - 0.001);
     float3 light = float3(0.0, 0.0, 0.0);
     float cover = 0.0;
     for (int kk = -1; kk <= 2; kk++) {
@@ -218,15 +218,15 @@ float4 mainImage(VertData v_in) : TARGET
     float ms = min(Mask_Strength * A, 100.0) * 0.01;
     if (ms > 0.0) {
         float pitch = max(floor(Pitch / (uv_pixel_interval.y * 1080.0) + 0.5), 3.0);
-        float2 q = floor(v_in.uv / uv_pixel_interval) / pitch;
+        float2 q = (floor(v_in.uv / uv_pixel_interval) + 0.5) / pitch;
         float3 phase = float3(0.0, 1.0 / 3.0, 2.0 / 3.0);
         float3 g;
         if (Mask_Type == 0) {
-            float rows = q.y / 0.866;
+            float rows = q.y * pitch / max(floor(0.866 * pitch + 0.5), 2.0);
             float row = floor(rows);
             g = (0.5 + 0.5 * cos(6.2831853 * (q.x + fmod(row, 2.0) * 0.5 - phase))) * (0.5 - 0.5 * cos(6.2831853 * (rows - row)));
         } else if (Mask_Type == 2) {
-            float down = 0.7 + 0.3 * cos(6.2831853 * (q.y / 1.5 + fmod(floor(q.x), 2.0) * 0.5));
+            float down = 0.7 + 0.3 * cos(6.2831853 * (q.y * pitch / max(floor(1.5 * pitch + 0.5), 2.0) + fmod(floor(q.x), 2.0) * 0.5));
             g = (0.5 + 0.5 * cos(6.2831853 * (q.x - phase))) * down;
         } else {
             g = 0.5 + 0.5 * cos(6.2831853 * (q.x - phase));

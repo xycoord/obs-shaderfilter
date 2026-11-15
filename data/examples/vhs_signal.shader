@@ -107,6 +107,7 @@ float4 mainImage(VertData v_in) : TARGET
     float wl = 0.0;
     float ww = 0.0;
     float wa = 0.0;
+    float a_s = 0.0;
     for (int i = -12; i <= 12; i++) {
         float u = float(i) / 12.0;
         float4 s = image.Sample(textureSampler, v_in.uv + float2(float(i) * step_l * px.x, 0.0));
@@ -121,16 +122,14 @@ float4 mainImage(VertData v_in) : TARGET
         ww += kw;
         a_l += ka * s.a;
         wa += ka;
+        a_s += kl * s.a;
     }
     // (Brightness is taken out of premultiplied with transparency filtered
-    // the same way, so edges against transparency don't brighten or dim.)
-    float a_s = 0.0;
-    for (int i2 = -12; i2 <= 12; i2++) {
-        float u2 = float(i2) / 12.0;
-        float sinc2 = i2 == 0 ? 1.0 : sin(12.566371 * u2) / (12.566371 * u2);
-        a_s += sinc2 * (0.42 + 0.5 * cos(3.1415927 * u2) + 0.08 * cos(6.2831853 * u2)) * image.Sample(textureSampler, v_in.uv + float2(float(i2) * step_l * px.x, 0.0)).a;
-    }
-    a_s = max(a_s / wl, 0.02);
+    // the same way, held between half the smooth transparency and 1 so the
+    // filter's ringing can't dim or brighten it; the result's transparency
+    // is that same filtered transparency, so over black an edge against
+    // transparency is as bright as the same picture on black.)
+    a_s = clamp(a_s / wl, a_l / wa * 0.5, 1.0);
     y_l /= wl;
     a_l /= wa;
     y_w /= ww;
@@ -163,7 +162,7 @@ float4 mainImage(VertData v_in) : TARGET
             a_c += k * s.a;
         }
     }
-    if (a_l <= 0.002)
+    if (a_l <= 0.0)
         return float4(0.0, 0.0, 0.0, 0.0);
     float y_here = max(y_out / a_s, 0.0) * (White_Level * 0.01);
 
@@ -181,5 +180,5 @@ float4 mainImage(VertData v_in) : TARGET
 
     // Back to RGB. The detail circuit's undershoot can't go below black.
     float3 rgb = max(vhs_from_yiq(float3(y_here, iq)), 0.0);
-    return float4(rgb, saturate(a_l));
+    return float4(rgb, a_s);
 }
