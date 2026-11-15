@@ -4,6 +4,11 @@
 // A scratch along the film stays in about the same place for as long as the
 // damaged stretch takes to go through the projector, wandering a little.
 //
+// A little goes a long way: a kept print shows the odd faint mark, mostly
+// dark (so on a logo on black, only on the logo), and no scratches, which is
+// what the defaults do. Light specks on black and scratches read as very old
+// film; the old-film presets have them.
+//
 // Dust is set as specks a frame, on average, and their size in pixels on a
 // 1080-line picture (scaled for other sizes); scratches as how many are on
 // screen at once, on average. Give it the same Speed as Film Grain, Gate Weave
@@ -13,12 +18,12 @@
 
 uniform float Dust<
     string label = "Dust";
-    string tooltip = "How many specks of dust or hair are on each frame, on average (each is on screen for one frame). 1 or 2 for a clean print, 5 or more for a dirty one.";
+    string tooltip = "How many specks of dust or hair are on each frame, on average (each is on screen for one frame). Under 1 for a kept print; 3 or more for a dirty one.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 16.0;
-    float step = 0.1;
-> = 3.0;
+    float step = 0.05;
+> = 0.5;
 uniform float Speck_Size<
     string label = "Speck Size";
     string tooltip = "How wide a typical speck is, in pixels on a 1080-line picture (they vary, from about half to twice this). Dust looks bigger on smaller film, magnified more.";
@@ -26,7 +31,7 @@ uniform float Speck_Size<
     float minimum = 2.0;
     float maximum = 24.0;
     float step = 0.5;
-> = 8.0;
+> = 5.0;
 uniform float Light_Specks<
     string label = "Light Specks";
     string tooltip = "The share of specks that are light (dirt on the negative), in percent; the rest are dark (dirt on the print). On a logo on black, only light specks show on the black.";
@@ -34,7 +39,15 @@ uniform float Light_Specks<
     float minimum = 0.0;
     float maximum = 100.0;
     float step = 1.0;
-> = 70.0;
+> = 25.0;
+uniform float Strength<
+    string label = "Strength";
+    string tooltip = "How visible each mark is, in percent: 100 is a light speck of full white or a dark one blocking the picture; less is fainter, as dirt is on a kept print.";
+    string widget_type = "slider";
+    float minimum = 0.0;
+    float maximum = 100.0;
+    float step = 1.0;
+> = 50.0;
 uniform float Scratches<
     string label = "Scratches";
     string tooltip = "How many scratches are on screen at once, on average (up to 3). Each lasts a second or so, wandering a little.";
@@ -42,7 +55,7 @@ uniform float Scratches<
     float minimum = 0.0;
     float maximum = 3.0;
     float step = 0.05;
-> = 0.5;
+> = 0.0;
 uniform int Speed<
     string label = "Speed";
     string tooltip = "Frames of film a second: the dust changes this often. 24 for sound film, 16 to 18 for silent film and Super 8. Use the same as Film Grain's, Gate Weave's and Projector Flicker's Speed.";
@@ -121,6 +134,7 @@ float4 mainImage(VertData v_in) : TARGET
 
     // Dark marks take the picture away; light ones add a warm white over it,
     // with their own transparency where the source is transparent.
+    mark *= Strength * 0.01;
     float3 rgb = c.rgb * (1.0 - saturate(-mark));
     float light = max(mark, 0.0);
     float3 lit = rgb * c.a + float3(0.85, 0.82, 0.75) * light;
