@@ -168,8 +168,8 @@ next to the shaders; see [data/examples/library.ini](data/examples/library.ini).
 `<shader name>.presets.ini` beside the shader: one `[section]` per preset with `parameter = value` lines
 (`;` starts a comment); see
 [data/examples/film_grain.presets.ini](data/examples/film_grain.presets.ini). The Preset list remembers the one
-picked, and after a change shows "*preset* — changed" rather than Custom (picking it again, or Back to, puts it back),
-naming any sections that are unticked. Before the first preset, a `default = <name>` line names the preset the
+picked, and after a change shows "*preset* — changed" rather than Custom, naming any sections that are unticked
+(picking the preset again puts it back, with every section ticked). Before the first preset, a `default = <name>` line names the preset the
 shader's defaults are, shown (of several with the same values) until another is picked, and a `label = ...` line
 renames the list; a `description = ...` line in a preset is shown under the list.
 The film pack's presets are all written from one table by [tools/film_looks.py](tools/film_looks.py).
