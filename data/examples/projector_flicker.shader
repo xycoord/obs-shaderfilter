@@ -72,7 +72,7 @@ uniform float Uneven_Illumination<
     float step = 0.1;
 > = 1.5;
 uniform int Speed<
-    string label = "Speed";
+    string label = "Frame Rate";
     string tooltip = "Frames of film a second: the flicker steps this often. 24 for sound film, 16 to 18 for silent film and Super 8. Use the same as Film Grain's Speed, so grain and flicker change at the same rate. 0 leaves only the lamp flicker.";
     string widget_type = "slider";
     string suffix = " fps";

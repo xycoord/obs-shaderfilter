@@ -30,7 +30,7 @@ uniform float Grain_Size<
     float step = 0.05;
 > = 1.9;
 uniform float Color_Amount<
-    string label = "Colour";
+    string label = "Colour Grain";
     string tooltip = "0 gives black-and-white grain, as on most film; 100 gives each color channel its own grain.";
     string widget_type = "slider";
     string suffix = " %";
@@ -39,7 +39,7 @@ uniform float Color_Amount<
     float step = 0.1;
 > = 10.0;
 uniform float Shadows<
-    string label = "Shadows";
+    string label = "In Shadows";
     string tooltip = "Grain strength in the darkest parts, compared with the midtones (100).";
     string widget_type = "slider";
     string suffix = " %";
@@ -48,7 +48,7 @@ uniform float Shadows<
     float step = 0.1;
 > = 70.0;
 uniform float Highlights<
-    string label = "Highlights";
+    string label = "In Highlights";
     string tooltip = "Grain strength in the brightest parts, compared with the midtones (100).";
     string widget_type = "slider";
     string suffix = " %";
@@ -57,7 +57,7 @@ uniform float Highlights<
     float step = 0.1;
 > = 30.0;
 uniform int Speed<
-    string label = "Speed";
+    string label = "Frame Rate";
     string tooltip = "How many times a second the grain changes. 24 looks like film; 0 freezes it.";
     string widget_type = "slider";
     string suffix = " fps";

@@ -36,7 +36,7 @@ uniform float Jump<
 > = 0.6;
 uniform int Hand_Cranking<
     string label = "Hand Cranking";
-    string group = "Gate Weave";
+    string group = "Speed (frame rate)";
     string show = "more";
     string tooltip = "How much the frame rate wavers, as it did when film was cranked by hand, until about 1915: the weave and the flicker both speed up and slow down. 0 is a motor-driven projector.";
     string widget_type = "slider";
@@ -121,46 +121,46 @@ uniform int Lamp_Brightness<
 > = 100;
 uniform bool Gate_On<
 #ifdef FILM_LOOK
-    string label = "Projector · Frame Edge (rounded corners)";
+    string label = "Projector · Frame Edge (corners and border)";
 #else
-    string label = "Frame Edge (rounded corners)";
+    string label = "Frame Edge (corners and border)";
 #endif
     string widget_type = "section";
     string group = "Frame Edge";
     string tooltip = "The projected frame's edge (the projector's gate): slightly in from the picture's edges, with round corners and a soft edge, so a full-frame picture doesn't look like an office projector's. Outside it is transparent (black on a projector).";
 > = true;
-uniform float Corner_Radius<
+uniform int Corner_Radius<
     string label = "Rounded Corners";
     string group = "Frame Edge";
     string tooltip = "How round the frame's corners are, in pixels on a 1080-line picture.";
     string widget_type = "slider";
     string suffix = " px";
-    float minimum = 0.0;
-    float maximum = 200.0;
-    float step = 1.0;
-> = 30.0;
-uniform float Inset<
+    int minimum = 0;
+    int maximum = 200;
+    int step = 1;
+> = 30;
+uniform int Inset<
     string label = "Border";
     string group = "Frame Edge";
     string tooltip = "How far in from the picture's edges the frame's edge sits, in pixels on a 1080-line picture.";
     string widget_type = "slider";
     string suffix = " px";
-    float minimum = 0.0;
-    float maximum = 100.0;
-    float step = 0.5;
-> = 6.0;
-uniform float Gate_Softness<
+    int minimum = 0;
+    int maximum = 100;
+    int step = 1;
+> = 6;
+uniform int Gate_Softness<
     string from = "projector_gate:Edge_Softness";
-    string label = "Edge Softness";
+    string label = "Border Fade";
     string group = "Frame Edge";
     string show = "more";
     string tooltip = "How soft the frame's edge is, in pixels on a 1080-line picture (the gate is a little out of focus).";
     string widget_type = "slider";
     string suffix = " px";
-    float minimum = 0.0;
-    float maximum = 40.0;
-    float step = 0.5;
-> = 8.0;
+    int minimum = 0;
+    int maximum = 40;
+    int step = 1;
+> = 8;
 
 // Three uniform random numbers in [0, 1) for a point (hash by Dave Hoskins, MIT).
 float3 projector_hash(float3 p3)
@@ -195,7 +195,7 @@ float projector_smooth(float x, float seed)
 float projector_frame(float a)
 {
     float seed = rand_instance_f * 61.0;
-    float h = Weave_On ? Hand_Cranking * 0.01 * a : 0.0;
+    float h = float(Hand_Cranking) * 0.01 * a;
     float w1 = 6.2831853 * 0.23;
     float w2 = 6.2831853 * 0.61;
     float t = elapsed_time;

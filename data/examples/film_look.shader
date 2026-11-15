@@ -52,6 +52,7 @@ uniform int Lens_Amount<
 > = 100;
 uniform int Speed<
     string label = "Frame Rate";
+    string group = "Speed (frame rate)";
     string show = "more";
     string tooltip = "Frames of film a second: the grain, dust, weave and flicker change this often. 24 for sound film, 16 to 18 for silent film and Super 8.";
     string widget_type = "slider";

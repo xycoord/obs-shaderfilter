@@ -5,7 +5,7 @@
 
 #ifdef FILM_LOOK
 uniform bool Lens_On<
-    string label = "Lens · Colour Fringes, Dark Corners, Bend";
+    string label = "Lens · Glass (colour fringes, dark corners, bend)";
     string widget_type = "section";
     string group = "Lens";
     string tooltip = "What the projector's lens does: straight edges bow a little, colours fringe towards the edges, the corners darken and soften.";
@@ -49,7 +49,7 @@ uniform float Distortion<
 > = 2.0;
 uniform float Corner_Softness<
     string from = "lens_softness:Edge_Softness";
-    string label = "Corner Softness";
+    string label = "Corner Blur";
 #ifdef FILM_LOOK
     string group = "Lens";
 #endif

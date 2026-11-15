@@ -62,7 +62,7 @@ uniform float Scratches<
     float step = 0.05;
 > = 0.0;
 uniform int Speed<
-    string label = "Speed";
+    string label = "Frame Rate";
     string tooltip = "Frames of film a second: the dust changes this often. 24 for sound film, 16 to 18 for silent film and Super 8. Use the same as Film Grain's, Gate Weave's and Projector Flicker's Speed.";
     string widget_type = "slider";
     string suffix = " fps";

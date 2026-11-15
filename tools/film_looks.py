@@ -187,7 +187,9 @@ LOOKS = {
 }
 DEFAULT_LOOK = "Classic Film (16mm)"
 
-# One line for each Look, shown under the Look list: what it looks like.
+# One line for each Look, shown under Film Look's Look list: what it looks
+# like. (Only Film Look's: a part or single-effect filter does only some of
+# it.)
 DESCRIPTIONS = {
     "Subtle Film": "Barely there: fine grain, a touch of warmth and glow, a gentle rounded frame.",
     "Projector Only (true colours)": "Your colours exactly as they are, shown on an old projector: rounded frame, a little wobble and flicker, lens fringes.",
@@ -305,7 +307,7 @@ def main():
         text = HEADER.format(name=name)
         for look, values in sections:
             text += "\n[%s]\n" % look
-            if look in DESCRIPTIONS:
+            if look in DESCRIPTIONS and name == "film_look":
                 text += "description = %s\n" % DESCRIPTIONS[look]
             text += "".join("%s = %s\n" % (k, fmt(v)) for k, v in values.items())
         (EX / (name + ".presets.ini")).write_text(text)

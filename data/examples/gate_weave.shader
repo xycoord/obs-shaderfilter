@@ -39,7 +39,7 @@ uniform float Jump<
     float step = 0.1;
 > = 0.6;
 uniform int Speed<
-    string label = "Speed";
+    string label = "Frame Rate";
     string tooltip = "Frames of film a second: the picture moves this often. 24 for sound film, 16 to 18 for silent film and Super 8. Use the same as Film Grain's and Projector Flicker's Speed.";
     string widget_type = "slider";
     string suffix = " fps";

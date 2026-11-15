@@ -96,7 +96,7 @@ uniform int Black_Lift<
     int step = 1;
 > = 0;
 uniform float Softness<
-    string label = "Softness";
+    string label = "Picture Softness";
     string group = "Print";
     string show = "more";
     string tooltip = "How soft the film's picture is all over, in pixels on a 1080-line picture (a blur's standard deviation): about 0.5 for 35mm, 1 for 16mm. The lens's softer corners are in Lens.";
@@ -127,21 +127,21 @@ uniform int Halation_Strength<
     int maximum = 100;
     int step = 1;
 > = 11;
-uniform float Halation_Size<
+uniform int Halation_Size<
     string from = "halation:Size";
-    string label = "Size";
+    string label = "Glow Size";
     string group = "Halation";
     string show = "more";
     string tooltip = "How far the glow reaches from a bright edge (to a tenth of its brightness at the edge), in pixels on a 1080-line picture.";
     string widget_type = "slider";
     string suffix = " px";
-    float minimum = 2.0;
-    float maximum = 120.0;
-    float step = 0.5;
-> = 22.0;
+    int minimum = 2;
+    int maximum = 120;
+    int step = 1;
+> = 22;
 uniform int Halation_Threshold<
     string from = "halation:Threshold";
-    string label = "Threshold";
+    string label = "Glows Above";
     string group = "Halation";
     string show = "more";
     string tooltip = "How bright a part of the picture has to be to glow, in percent of white.";
@@ -249,17 +249,17 @@ uniform float Scratches<
     float maximum = 3.0;
     float step = 0.05;
 > = 0.0;
-uniform float Speck_Size<
+uniform int Speck_Size<
     string label = "Speck Size";
     string group = "Dust & Scratches";
     string show = "more";
     string tooltip = "How wide a typical speck is, in pixels on a 1080-line picture.";
     string widget_type = "slider";
     string suffix = " px";
-    float minimum = 2.0;
-    float maximum = 24.0;
-    float step = 0.5;
-> = 5.0;
+    int minimum = 2;
+    int maximum = 24;
+    int step = 1;
+> = 5;
 uniform int Light_Specks<
     string label = "White Specks";
     string group = "Dust & Scratches";
