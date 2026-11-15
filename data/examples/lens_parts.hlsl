@@ -139,7 +139,7 @@ float4 lens_at(float2 uv, float a)
             float kk = 3.0 * t - 1.5;
             float3 ws = saturate(float3(-kk, 1.0 - abs(kk), kk)) * w;
             float2 at = uv0 + dir * reach * sqrt((float(i) + 0.5) / float(n));
-            float4 s = image.Sample(textureSampler, clamp(0.5 + (at - 0.5) * (1.0 + spread * (0.5 - t)), lo, hi));
+            float4 s = image.SampleLevel(textureSampler, clamp(0.5 + (at - 0.5) * (1.0 + spread * (0.5 - t)), lo, hi), 0.0);
             // Light added in (near enough) linear light: the square, undone
             // exactly below.
             sum += ws * s.rgb * s.rgb * s.a;

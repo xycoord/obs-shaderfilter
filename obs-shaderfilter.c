@@ -1119,12 +1119,14 @@ static void shader_filter_reload_effect(struct shader_filter_data *filter)
 			// Nothing.
 		} else if (strcmp(info.name, "image") == 0) {
 			filter->param_image = param;
-		} else if (strcmp(info.name, "source_image") == 0) {
+		} else if (filter->n_stages && strcmp(info.name, "source_image") == 0) {
+			/* (Only in a multi-stage shader: elsewhere these are the
+			 * shader's own settings, as they always were.) */
 			filter->param_source_image = param;
-		} else if (strcmp(info.name, "stages_drawn") == 0) {
+		} else if (filter->n_stages && strcmp(info.name, "stages_drawn") == 0) {
 			filter->param_stages_drawn = param;
-		} else if (strncmp(info.name, "stage", 5) == 0 && info.name[5] >= '1' && info.name[5] < '1' + SF_MAX_STAGES &&
-			   strcmp(info.name + 6, "_image") == 0) {
+		} else if (filter->n_stages && strncmp(info.name, "stage", 5) == 0 && info.name[5] >= '1' &&
+			   info.name[5] < '1' + SF_MAX_STAGES && strcmp(info.name + 6, "_image") == 0) {
 			filter->param_stage_image[info.name[5] - '1'] = param;
 		} else if (strcmp(info.name, "previous_image") == 0) {
 			filter->param_previous_image = param;

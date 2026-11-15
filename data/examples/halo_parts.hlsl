@@ -55,6 +55,13 @@ float4 halo_source(float2 uv)
     return stages_drawn ? source_image.Sample(textureSampler, uv) : image.Sample(textureSampler, uv);
 }
 
+// The same, without derivatives, for loops whose length isn't fixed (which
+// Direct3D won't take a derivative in): the same here, with no mipmaps.
+float4 halo_source_level(float2 uv)
+{
+    return stages_drawn ? source_image.SampleLevel(textureSampler, uv, 0.0) : image.SampleLevel(textureSampler, uv, 0.0);
+}
+
 // Stage 1: the light above the threshold averaged over the 4 by 4 pixels
 // round each pixel of the small picture, from four samples each between 2 by
 // 2 pixels (thresholded after that blending, as the full-size halo's samples
@@ -88,7 +95,7 @@ float4 halo_blur(float2 uv, float2 axis)
     float total = 0.0;
     for (int i = -r; i <= r; i++) {
         float w = exp(k * float(i * i));
-        sum += w * image.Sample(textureSampler, uv + float(i) * step_uv).r;
+        sum += w * image.SampleLevel(textureSampler, uv + float(i) * step_uv, 0.0).r;
         total += w;
     }
     return float4(sum / total, 0.0, 0.0, 1.0);

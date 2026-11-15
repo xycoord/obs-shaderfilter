@@ -107,7 +107,7 @@ float4 mainImage(VertData v_in) : TARGET
     float step_w = exp(-4.5 / float(n));
     float w = sqrt(step_w);
     for (int i = 0; i < n; i++) {
-        float4 s = image.Sample(textureSampler, clamp(v_in.uv + dir * reach * sqrt((float(i) + 0.5) / float(n)), lo, hi));
+        float4 s = image.SampleLevel(textureSampler, clamp(v_in.uv + dir * reach * sqrt((float(i) + 0.5) / float(n)), lo, hi), 0.0);
         sum += w * softness_to_linear(s.rgb) * s.a;
         cover += w * s.a;
         total += w;

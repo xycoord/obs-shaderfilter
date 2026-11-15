@@ -412,7 +412,7 @@ float4 film_at(float2 uv, float a, float frame_count)
         float step_w = exp(-4.5 / float(n));
         float w = sqrt(step_w);
         for (int i = 0; i < n; i++) {
-            float4 s = halo_source(clamp(uv + dir * reach * sqrt((float(i) + 0.5) / float(n)), lo, hi));
+            float4 s = halo_source_level(clamp(uv + dir * reach * sqrt((float(i) + 0.5) / float(n)), lo, hi));
             sum += w * s.rgb * s.rgb * s.a;
             cover += w * s.a;
             total += w;

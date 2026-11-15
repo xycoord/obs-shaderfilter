@@ -85,7 +85,7 @@ float4 mainImage(VertData v_in) : TARGET
         float t = float(i) / float(n - 1);
         float k = 3.0 * t - 1.5;
         float3 w = saturate(float3(-k, 1.0 - abs(k), k));
-        float4 s = image.Sample(textureSampler, clamp(0.5 + d * (1.0 + spread * (0.5 - t)), lo, hi));
+        float4 s = image.SampleLevel(textureSampler, clamp(0.5 + d * (1.0 + spread * (0.5 - t)), lo, hi), 0.0);
         sum += w * lens_ca_to_linear(s.rgb) * s.a;
         cover += w * s.a;
         weight += w;

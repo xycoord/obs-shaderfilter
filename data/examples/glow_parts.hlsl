@@ -68,7 +68,7 @@ float4 glow_blur(float2 uv, float2 axis)
     float total = 0.0;
     for (int i = -r; i <= r; i++) {
         float w = exp(k * float(i * i));
-        sum += w * image.Sample(textureSampler, uv + float(i) * step_uv);
+        sum += w * image.SampleLevel(textureSampler, uv + float(i) * step_uv, 0.0);
         total += w;
     }
     return sum / total;
