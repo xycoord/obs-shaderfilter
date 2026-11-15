@@ -6,9 +6,10 @@
 //
 // Amount scales every effect from none (0: the picture comes through
 // untouched) through the settings as set (100) to twice as strong (200).
-// Weave and flicker step once per frame of film, at Speed; Hand Cranking
-// wavers the flicker, as in Projector Flicker. Set Speed the same as Film's or
-// Film Grain's, and the picture weaves in step with the grain.
+// Weave and flicker step together, once per frame of film, at Speed (with
+// Hand Cranking wavering both). Set Speed the same as Film's or Film Grain's;
+// each filter counts time from when it was added, so their frames change at
+// the same rate but not at the same moment.
 // It goes after the film's own effects (grain and dust move with the picture)
 // and before the lens's. Outside the gate the picture turns transparent
 // (black on a projector).
@@ -170,18 +171,17 @@ float4 mainImage(VertData v_in) : TARGET
     float a = Amount * 0.01;
     float seed = rand_instance_f * 61.0;
 
-    // The frame of film in the gate, counted as Gate Weave, Film and Film
-    // Grain count them, so the picture weaves in step with the grain; and the
-    // frame of film as the lamp lights it, wavering when hand cranked (by at
-    // most Hand_Cranking percent, from two slow waves, so the film never runs
-    // backwards), as Projector Flicker counts it.
+    // The frame of film on screen: Speed frames a second, wavering when hand
+    // cranked (by at most Hand_Cranking percent, from two slow waves, so the
+    // film never runs backwards). Weave and flicker both step on it, so each
+    // frame weaves and flickers together.
     float h = Hand_Cranking * 0.01 * a;
     float w1 = 6.2831853 * 0.23;
     float w2 = 6.2831853 * 0.61;
     float t = elapsed_time;
     float crank = h * (0.6 * (cos(seed * 0.71) - cos(w1 * t + seed * 0.71)) / w1 + 0.4 * (cos(seed * 1.37) - cos(w2 * t + seed * 1.37)) / w2);
-    float frame = floor(float(Speed) * t);
-    float lit_frame = floor(float(Speed) * (t + crank));
+    float frame = floor(float(Speed) * (t + crank));
+    float lit_frame = frame;
 
     // Gate weave: side to side mostly a wander over about half a second, up
     // and down mostly new each frame; pixels on a 1080-line picture.

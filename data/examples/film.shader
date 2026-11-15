@@ -10,9 +10,10 @@
 // untouched) through the settings as set (100) to twice as strong (200). In
 // one pass the softness and the halo's threshold work on the picture before
 // the print rather than after it, so it differs a little from the separate
-// filters chained (by about a level in 255 on average). The halo is red-orange on a colour stock and neutral on the others, as on black
-// and white film. Grain and dust change Speed times a second; set it the same
-// as Projector's. Sizes are in pixels on a 1080-line picture (scaled for other
+// filters chained (by about a level in 255 on average). The halo is
+// red-orange on a colour stock and neutral on the others, as on black and
+// white film. Grain and dust change Speed times a second; set it the same as
+// Projector's. Sizes are in pixels on a 1080-line picture (scaled for other
 // sizes). Where the source is transparent, as round a logo, the halo and light
 // specks are drawn with their own transparency.
 
@@ -310,7 +311,8 @@ float4 mainImage(VertData v_in) : TARGET
     float3 lw = float3(0.2126, 0.7152, 0.0722);
 
     // The film's softness: a Gaussian from points on a turned spiral (as Lens
-    // Softness: 24, or 48 wider than 2 pixels), in near-linear light, kept
+    // Softness: 24, 48 wider than 2 pixels, 96 wider than 5), in near-linear
+    // light, kept
     // inside the picture.
     float4 raw = image.Sample(textureSampler, v_in.uv);
     float4 c = raw;
@@ -323,7 +325,7 @@ float4 mainImage(VertData v_in) : TARGET
         float3 sum = float3(0.0, 0.0, 0.0);
         float cover = 0.0;
         float total = 0.0;
-        int n = sigma > 2.0 ? 48 : 24;
+        int n = sigma > 5.0 ? 96 : (sigma > 2.0 ? 48 : 24);
         float step_w = exp(-4.5 / float(n));
         float w = sqrt(step_w);
         for (int i = 0; i < n; i++) {
@@ -357,7 +359,8 @@ float4 mainImage(VertData v_in) : TARGET
         glow /= 12.421987 * (1.0 - t);
         // (The pixel's own share from the unsoftened pixel, as the samples
         // are, so a softened bright edge doesn't let the halo in.)
-        float own = raw.a * max(dot(film_to_linear(raw.rgb), lw) - t, 0.0) / (1.0 - t);
+        float3 raw_lin = raw.rgb * (raw.rgb * (raw.rgb * 0.305306011 + 0.682171111) + 0.012522878);
+        float own = raw.a * max(dot(raw_lin, lw) - t, 0.0) / (1.0 - t);
         glow = max(glow - own, 0.0) * strength;
     }
 

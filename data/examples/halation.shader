@@ -103,7 +103,10 @@ float4 mainImage(VertData v_in) : TARGET
     // and doesn't show: a print is graded so the area has the colour it should.
     // So only what's more than the pixel would get from its own brightness is
     // drawn: the halo spilling onto darker parts round bright ones.
-    float own = c.a * max(dot(halation_to_linear(c.rgb), float3(0.2126, 0.7152, 0.0722)) - t, 0.0) / (1.0 - t);
+    // (The same close cubic as the samples, so in an even area the two cancel
+    // exactly.)
+    float3 c_lin = c.rgb * (c.rgb * (c.rgb * 0.305306011 + 0.682171111) + 0.012522878);
+    float own = c.a * max(dot(c_lin, float3(0.2126, 0.7152, 0.0722)) - t, 0.0) / (1.0 - t);
     glow = max(glow - own, 0.0) * Strength * 0.01;
 
     // The halo's colour: red-orange, or neutral for black and white, the two
