@@ -19,7 +19,7 @@
 
 uniform int Standard<
     string label = "Standard";
-    string tooltip = "The TV system: PAL (576 lines, 50 fields a second) or NTSC (480 lines, 59.94 fields a second). Sets the noise's lines and how often it changes.";
+    string tooltip = "The TV system: PAL (576 lines) or NTSC (480 lines). Sets the lines the noise runs along.";
     string widget_type = "select";
     int option_0_value = 0;
     string option_0_label = "PAL";
@@ -44,7 +44,7 @@ uniform float Colour_Noise<
 > = 2.0;
 uniform float Dropouts<
     string label = "Dropouts";
-    string tooltip = "How many dropouts a minute, on average: a short stretch of a line replaced by the line above (or, one in four, a dim streak), for one frame. 10 or so for a good tape, a few hundred for a worn one.";
+    string tooltip = "How many dropouts a minute, on average: a short stretch of a line replaced by the line above (or, one in four, a dim streak), for 1/30 s. 10 or so for a good tape, a few hundred for a worn one.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 600.0;
@@ -79,10 +79,11 @@ float4 mainImage(VertData v_in) : TARGET
     float seed = rand_instance_f * 61.0;
 
     // The moment (120 a second), the line, and this pixel along the line in
-    // pixels of a 1080-line picture. Hash inputs repeat after 9973 moments.
+    // pixels of a 1080-line picture. Hash inputs repeat after 99991 moments
+    // (14 minutes).
     float lines = Standard == 1 ? 480.0 : 576.0;
-    float rate = Standard == 1 ? 59.94 : 50.0;
-    float field = fmod(floor(elapsed_time * 120.0), 9973.0);
+    float field = fmod(floor(elapsed_time * 120.0), 99991.0);
+    float drop_t = fmod(floor(elapsed_time * 30.0), 99991.0);
     float line = floor(v_in.uv.y * lines);
     float aspect = uv_pixel_interval.y / uv_pixel_interval.x;
     float x = v_in.uv.x * 1080.0 * aspect;
@@ -105,15 +106,16 @@ float4 mainImage(VertData v_in) : TARGET
     float3 rgb = float3(iq.x + 0.956 * iq.y + 0.621 * iq.z, iq.x - 0.272 * iq.y - 0.647 * iq.z, iq.x - 1.106 * iq.y + 1.703 * iq.z);
     rgb = max(rgb, 0.0);
 
-    // Dropouts: four chances each moment, each a stretch 30 to 300 pixels long
-    // on one line, so Dropouts a minute on average. The VCR puts the line
+    // Dropouts: four chances every 1/30 s, each a stretch 30 to 300 pixels
+    // long on one line, held for that 1/30 s (so it's seen at any output
+    // rate of 30 frames a second or more), Dropouts a minute on average. The VCR puts the line
     // above in its place (a little noisier), fading in and out at the ends.
-    float per_chance = Dropouts / 60.0 / (4.0 * 120.0);
+    float per_chance = Dropouts / 60.0 / (4.0 * 30.0);
     for (int k = 0; k < 4; k++) {
-        float3 h = vhsn_hash(float3(field, float(k) + 11.0, seed));
+        float3 h = vhsn_hash(float3(drop_t, float(k) + 11.0, seed));
         if (h.z >= per_chance)
             continue;
-        float3 g = vhsn_hash(float3(field, float(k) + 23.0, seed + 5.0));
+        float3 g = vhsn_hash(float3(drop_t, float(k) + 23.0, seed + 5.0));
         float dline = floor(h.x * lines);
         float len = 30.0 + 270.0 * g.x * g.x;
         float along = (x - h.y * 1080.0 * aspect) / len;
@@ -121,10 +123,10 @@ float4 mainImage(VertData v_in) : TARGET
             float shape = smoothstep(0.0, 0.15, along) * smoothstep(1.0, 0.7, along);
             float4 above = image.Sample(textureSampler, v_in.uv - float2(0.0, 1.0 / lines));
             float3 rep = above.rgb * (1.0 + 0.08 * vhsn_smooth(x / 4.5, lseed + 7.0, seed + 9.0));
-            // One in four the VCR doesn't hide well: a dimmer, noisier
-            // streak instead. It only ever darkens, so black stays black.
+            // One in four the VCR doesn't hide well: a dim, mottled streak
+            // instead. It only ever darkens, so black stays black.
             if (g.y < 0.25)
-                rep = rgb * (0.55 + 0.2 * vhsn_smooth(x / 3.0, lseed + 9.0, seed + 10.0));
+                rep = rgb * min(0.45 + 0.1 * vhsn_smooth(x / 8.0, lseed + 9.0, seed + 10.0), 0.8);
             rgb = lerp(rgb, max(rep, 0.0), shape);
             c.a = lerp(c.a, above.a, shape);
         }

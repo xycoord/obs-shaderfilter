@@ -10,7 +10,8 @@
 // green at the left and right edges, in pixels on a 1080-line picture
 // (scaled for other sizes), none in the middle. What moves in from outside
 // the picture is transparent. It goes first among the CRT filters, after any
-// VHS ones, before CRT Scanlines (whose lines then follow the curve).
+// VHS ones, before CRT Scanlines (which draws its lines straight, in the
+// output's pixels, over the bent picture).
 
 uniform float Curvature<
     string label = "Curvature";

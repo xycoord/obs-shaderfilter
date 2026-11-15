@@ -12,7 +12,9 @@
 // 3, so it doesn't beat against the picture's pixels (it can against a
 // projector's own scaling: show it at the projector's resolution). Strength
 // is how much light the dark parts lose; the picture loses half that on
-// average (it isn't brightened back, which would clip white). In light
+// average with the aperture grille, more with the dot and slot masks,
+// which let less light through (it isn't brightened back, which would clip
+// white). In light
 // (linear); black stays black and transparency is kept. It only reads the
 // pixel it draws, so it can be merged with neighbouring shader filters. It
 // goes after CRT Scanlines and before CRT Glass.
@@ -38,7 +40,7 @@ uniform float Pitch<
 > = 3.0;
 uniform float Strength<
     string label = "Strength";
-    string tooltip = "How much light the pattern's dark parts lose, in percent; the picture as a whole loses half this. 10 to 20 is a texture, which at a distance only dims a little; past 40 it darkens and colours the picture.";
+    string tooltip = "How much light the pattern's dark parts lose, in percent; the picture as a whole loses half this with the aperture grille, about two thirds with the slot mask and three quarters with the shadow mask. 10 to 20 is a texture, which at a distance only dims a little; past 40 it darkens and colours the picture.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 100.0;
@@ -61,10 +63,10 @@ float4 mainImage(VertData v_in) : TARGET
 {
     float4 c = image.Sample(textureSampler, v_in.uv);
 
-    // This pixel's position in units of the pitch.
-    float aspect = uv_pixel_interval.y / uv_pixel_interval.x;
-    float p = max(floor(Pitch + 0.5), 3.0) / 1080.0;
-    float2 q = float2(v_in.uv.x * aspect, v_in.uv.y) / p;
+    // This pixel's position in units of the pitch: Pitch on a 1080-line
+    // picture, rounded to whole pixels of this one, at least 3.
+    float p = max(floor(Pitch / (uv_pixel_interval.y * 1080.0) + 0.5), 3.0);
+    float2 q = floor(v_in.uv / uv_pixel_interval) / p;
 
     // How much of each colour's phosphor is here, from 0 to 1, smooth.
     float3 phase = float3(0.0, 1.0 / 3.0, 2.0 / 3.0);

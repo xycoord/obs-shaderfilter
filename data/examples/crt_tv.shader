@@ -85,7 +85,7 @@ uniform float Pitch<
 > = 3.0;
 uniform float Mask_Strength<
     string label = "Mask Strength";
-    string tooltip = "How much light the mask's dark parts lose, in percent; the picture loses half this.";
+    string tooltip = "How much light the mask's dark parts lose, in percent; the picture loses half this with the aperture grille, more with the slot and shadow masks.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 100.0;
@@ -171,16 +171,20 @@ float4 mainImage(VertData v_in) : TARGET
     float lines = Standard == 1 ? 480.0 : (Standard == 2 ? 270.0 : (Standard == 3 ? 360.0 : 576.0));
     float height = 1.0 / uv_pixel_interval.y;
     float gap = height / lines;
+    // Games and computers' lines in whole pixels of this picture, whatever its size.
+    if (Standard >= 2)
+        gap = max(floor(gap + 0.5), 2.0);
     float y = v_in.uv.y * height;
     float bw = Beam_Width / max(1.0 + (A - 1.0) * 0.5, 1.0);
     float s_bright = bw * 0.01 * gap / 2.3548;
     float s_dark = s_bright / (1.0 + Blooming * 0.01 * max(A, 1.0));
     float n = floor(y / gap - 0.5);
+    float last = floor(height / gap);
     float3 light = float3(0.0, 0.0, 0.0);
     float cover = 0.0;
     for (int kk = -1; kk <= 2; kk++) {
         float li = n + float(kk);
-        if (li < 0.0 || li >= lines)
+        if (li < 0.0 || li >= last)
             continue;
         float yc = (li + 0.5) * gap;
         float3 v = float3(0.0, 0.0, 0.0);
@@ -191,7 +195,7 @@ float4 mainImage(VertData v_in) : TARGET
             float4 sr = image.Sample(textureSampler, tv_warp(p, k, -conv, aspect));
             float4 sg = image.Sample(textureSampler, tv_warp(p, k, 0.0, aspect));
             float4 sb = image.Sample(textureSampler, tv_warp(p, k, conv, aspect));
-            v += wt * float3(tv_to_linear(sr.rgb).r * sr.a, tv_to_linear(sg.rgb).g * sg.a, tv_to_linear(sb.rgb).b * sb.a);
+            v += wt * tv_to_linear(float3(sr.r, sg.g, sb.b)) * float3(sr.a, sg.a, sb.a);
             a += wt * max(sg.a, max(sr.a, sb.a));
         }
         v /= 2.21306132;
@@ -213,8 +217,8 @@ float4 mainImage(VertData v_in) : TARGET
     // --- Mask, flat in the output's pixels.
     float ms = min(Mask_Strength * A, 100.0) * 0.01;
     if (ms > 0.0) {
-        float pitch = max(floor(Pitch + 0.5), 3.0) / 1080.0;
-        float2 q = float2(v_in.uv.x * aspect, v_in.uv.y) / pitch;
+        float pitch = max(floor(Pitch / (uv_pixel_interval.y * 1080.0) + 0.5), 3.0);
+        float2 q = floor(v_in.uv / uv_pixel_interval) / pitch;
         float3 phase = float3(0.0, 1.0 / 3.0, 2.0 / 3.0);
         float3 g;
         if (Mask_Type == 0) {
@@ -253,7 +257,8 @@ float4 mainImage(VertData v_in) : TARGET
             dir = float2(dir.x * -0.73736886 - dir.y * 0.67549032, dir.x * 0.67549032 + dir.y * -0.73736886);
             w *= step_w;
         }
-        light = light * (1.0 - gl) + sum / total * (1.0 - ms * 0.5) * gl;
+        float through = Mask_Type == 0 ? 0.25 : (Mask_Type == 2 ? 0.35 : 0.5);
+        light = light * (1.0 - gl) + sum / total * (1.0 - ms * (1.0 - through)) * gl;
         cover = cover * (1.0 - gl) + sum_a / total * gl;
     }
 
@@ -262,8 +267,9 @@ float4 mainImage(VertData v_in) : TARGET
     float q2 = 1.0 + kf * dot(d, d);
     light /= q2 * q2;
     float r = Corner_Radius * A / 1080.0;
-    float2 e = max(abs(d) - (float2(aspect * 0.5, 0.5) - r), 0.0);
-    float inside = saturate(0.5 - (length(e) - r) / uv_pixel_interval.y);
+    float2 qd = abs(d) - (float2(aspect * 0.5, 0.5) - r);
+    float dist = length(max(qd, 0.0)) + min(max(qd.x, qd.y), 0.0) - r;
+    float inside = saturate(0.5 - dist / uv_pixel_interval.y);
     light *= inside;
     cover = saturate(cover) * inside;
 

@@ -3,9 +3,10 @@
 // about 240 TV lines of detail across, and colour (chroma) at only about
 // 0.5 MHz, a fraction of that: colour is smeared sideways well past the
 // edges it belongs to, and arrives a little late, so it sits slightly to the
-// right. The player's detail circuit sharpens what's left, which leaves a
+// right. The tape's steep luma filter rings a little at sharp edges, and the
+// player's detail circuit sharpens what's left, which leaves a
 // faint light and dark outline either side of strong edges. Playback also
-// averages colour over two lines, so it sits half a line low. 60% of the
+// averages colour over two lines, so it sits half a line low. 70% of the
 // colour is laid on the brightness detail it belongs to, so thin coloured
 // lettering keeps some colour (strict tape loses nearly all of it).
 //
@@ -14,8 +15,8 @@
 // they're down to half contrast) and pixels on a 1080-line picture (scaled
 // for other sizes). It works on the signal as recorded (gamma-encoded Y'IQ,
 // not light), as a VCR does. Colour bleeds past coloured edges, as on tape,
-// onto the black beside them, but black away from any colour stays black. Transparency is blurred
-// with the picture.
+// onto the black beside them, but black away from any colour stays black.
+// Transparency is blurred with the picture.
 //
 // It goes first in a VHS look, before VHS Noise and VHS Tracking, and before
 // any CRT filters.
@@ -31,7 +32,7 @@ uniform int Standard<
 > = 0;
 uniform float Luma_Resolution<
     string label = "Luma Resolution";
-    string tooltip = "How much brightness detail survives across the picture, in TV lines. About 240 for VHS, 400 for S-VHS, 330 for broadcast TV; lower is softer.";
+    string tooltip = "How much brightness detail survives across the picture, in TV lines (where it's down to half; it's all but gone a third above). About 240 for VHS, 400 for S-VHS, 330 for broadcast TV; lower is softer.";
     string widget_type = "slider";
     float minimum = 100.0;
     float maximum = 600.0;
@@ -39,7 +40,7 @@ uniform float Luma_Resolution<
 > = 240.0;
 uniform float Chroma_Resolution<
     string label = "Chroma Resolution";
-    string tooltip = "How much colour detail survives across the picture, in TV lines: far less than brightness on tape. About 30 for VHS, 40 for S-VHS, 100 for broadcast TV; lower smears colour further.";
+    string tooltip = "How much colour detail survives across the picture, in TV lines (for colour changing at the same brightness): far less than brightness on tape. About 30 to 40 for VHS, 45 for S-VHS, 100 for broadcast TV; lower smears colour further.";
     string widget_type = "slider";
     float minimum = 10.0;
     float maximum = 200.0;
@@ -47,7 +48,7 @@ uniform float Chroma_Resolution<
 > = 40.0;
 uniform float Chroma_Delay<
     string label = "Chroma Delay";
-    string tooltip = "How far colour sits to the right of where it belongs, in pixels on a 1080-line picture (about 37 ns of signal each). 3 to 6 on a typical VCR; 0 on a well-adjusted one; negative moves it left.";
+    string tooltip = "How far colour sits to the right of where it belongs, in pixels on a 1080-line picture (about 37 ns of signal each). 2 to 6 on a typical VCR; 0 on a well-adjusted one; negative moves it left.";
     string widget_type = "slider";
     float minimum = -10.0;
     float maximum = 10.0;
@@ -55,12 +56,12 @@ uniform float Chroma_Delay<
 > = 3.0;
 uniform float Sharpening<
     string label = "Sharpening";
-    string tooltip = "How much further a sharp edge overshoots, in percent of its step, from the player's detail circuit: a faint light and dark outline either side. The steep tape filter already rings about 6% by itself; 4 to 8 more is a typical VCR, 0 a plain one.";
+    string tooltip = "How much further a sharp edge overshoots, in percent of its step, from the player's detail circuit: a faint light and dark outline either side. The steep tape filter already rings about 6% by itself; 2 to 5 more is a typical VCR, 0 a plain one.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 30.0;
     float step = 0.5;
-> = 3.0;
+> = 2.0;
 uniform float White_Level<
     string label = "White Level";
     string tooltip = "How bright full white plays back, in percent. 100 keeps it; a worn or long-play tape plays back a little grey (92 to 96), which also leaves room for its noise to show in the whites.";
@@ -121,6 +122,15 @@ float4 mainImage(VertData v_in) : TARGET
         a_l += ka * s.a;
         wa += ka;
     }
+    // (Brightness is taken out of premultiplied with transparency filtered
+    // the same way, so edges against transparency don't brighten or dim.)
+    float a_s = 0.0;
+    for (int i2 = -12; i2 <= 12; i2++) {
+        float u2 = float(i2) / 12.0;
+        float sinc2 = i2 == 0 ? 1.0 : sin(12.566371 * u2) / (12.566371 * u2);
+        a_s += sinc2 * (0.42 + 0.5 * cos(3.1415927 * u2) + 0.08 * cos(6.2831853 * u2)) * image.Sample(textureSampler, v_in.uv + float2(float(i2) * step_l * px.x, 0.0)).a;
+    }
+    a_s = max(a_s / wl, 0.02);
     y_l /= wl;
     a_l /= wa;
     y_w /= ww;
@@ -153,21 +163,21 @@ float4 mainImage(VertData v_in) : TARGET
             a_c += k * s.a;
         }
     }
-    if (a_l <= 0.0)
+    if (a_l <= 0.002)
         return float4(0.0, 0.0, 0.0, 0.0);
-    float y_here = max(y_out / a_l, 0.0) * (White_Level * 0.01);
+    float y_here = max(y_out / a_s, 0.0) * (White_Level * 0.01);
 
-    // The colour, two ways. 40% is tape colour as it is: the
+    // The colour, two ways. 30% is tape colour as it is: the
     // smeared average (straight, not premultiplied), kept wherever there's
     // picture within its reach (luma averaged the same way, above 3%), so it
     // bleeds past coloured edges but fades out where everything round is
-    // black. The other 60% is the same colour per unit of brightness, laid
+    // black. The other 70% is the same colour per unit of brightness, laid
     // on this pixel's brightness: it follows the detail it belongs to, so
     // thin coloured lettering keeps some colour where strict tape would lose
     // nearly all of it. Black far from colour stays black.
     float2 smeared = yiq_c.yz / max(a_c, 0.0001) * smoothstep(0.0, 0.03, yiq_c.x / max(a_c, 0.0001));
     float2 follows = yiq_c.yz / max(yiq_c.x, 0.0001) * y_here;
-    float2 iq = (0.4 * smeared + 0.6 * follows) * (Saturation * 0.01);
+    float2 iq = (0.3 * smeared + 0.7 * follows) * (Saturation * 0.01);
 
     // Back to RGB. The detail circuit's undershoot can't go below black.
     float3 rgb = max(vhs_from_yiq(float3(y_here, iq)), 0.0);

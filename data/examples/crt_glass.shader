@@ -102,8 +102,9 @@ float4 mainImage(VertData v_in) : TARGET
     lit /= q * q;
     float r = Corner_Radius / 1080.0;
     float2 half_size = float2(aspect * 0.5, 0.5);
-    float2 e = max(abs(d) - (half_size - r), 0.0);
-    float inside = saturate(0.5 - (length(e) - r) / uv_pixel_interval.y);
+    float2 qd = abs(d) - (half_size - r);
+    float dist = length(max(qd, 0.0)) + min(max(qd.x, qd.y), 0.0) - r;
+    float inside = saturate(0.5 - dist / uv_pixel_interval.y);
     lit *= inside;
     cover *= inside;
 

@@ -73,6 +73,9 @@ float4 mainImage(VertData v_in) : TARGET
     // Positions in output pixels, down the picture.
     float height = 1.0 / uv_pixel_interval.y;
     float gap = height / lines;
+    // Games and computers' lines in whole pixels of this picture, whatever its size.
+    if (Standard >= 2)
+        gap = max(floor(gap + 0.5), 2.0);
     float y = v_in.uv.y * height;
     float y0 = y - 0.5;
     float y1 = y + 0.5;
@@ -83,10 +86,11 @@ float4 mainImage(VertData v_in) : TARGET
 
     // The two nearest lines above and below.
     float n = floor(y / gap - 0.5);
+    float last = floor(height / gap);
     float3 light = float3(0.0, 0.0, 0.0);
     for (int k = -1; k <= 2; k++) {
         float li = n + float(k);
-        if (li < 0.0 || li >= lines)
+        if (li < 0.0 || li >= last)
             continue;
         float yc = (li + 0.5) * gap;
 
