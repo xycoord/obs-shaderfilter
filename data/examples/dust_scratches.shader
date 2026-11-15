@@ -84,15 +84,19 @@ float4 mainImage(VertData v_in) : TARGET
         if (h.z * 16.0 >= Dust)
             continue;
         float3 g = dust_hash(float3(frame, float(i) + 31.0, seed + 7.0));
-        float2 q = p - float2(h.x * 1080.0 * aspect, h.y * 1080.0);
-        float ang = g.x * 6.2831853;
-        q = float2(cos(ang) * q.x + sin(ang) * q.y, -sin(ang) * q.x + cos(ang) * q.y);
+        float3 k = dust_hash(float3(frame, float(i) + 63.0, seed + 13.0));
         // Radius from about a quarter to the whole of Speck_Size (half of it
         // typically, for a speck Speck_Size wide); one in eight is a hair,
         // long and thin.
         float size = Speck_Size * 0.5 * (0.45 + 1.65 * g.y * g.y);
-        float3 k = dust_hash(float3(frame, float(i) + 63.0, seed + 13.0));
         float2 shape = k.x < 0.125 ? float2(size * (4.0 + 6.0 * k.y), size * 0.35) : float2(size, size * (0.7 + 0.3 * k.y));
+        // Nothing to draw this far from it (it ends at 1.5 times its shape).
+        float2 q = p - float2(h.x * 1080.0 * aspect, h.y * 1080.0);
+        float extent = 1.5 * max(shape.x, shape.y);
+        if (dot(q, q) > extent * extent)
+            continue;
+        float ang = g.x * 6.2831853;
+        q = float2(cos(ang) * q.x + sin(ang) * q.y, -sin(ang) * q.x + cos(ang) * q.y);
         float s = saturate(1.5 - length(q / shape));
         mark += (k.z * 100.0 < Light_Specks ? 1.0 : -1.0) * s;
     }
