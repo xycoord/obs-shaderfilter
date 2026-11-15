@@ -67,7 +67,8 @@ float4 mainImage(VertData v_in) : TARGET
         sum += w * lens_ca_to_linear(s.rgb) * s.a;
         cover += w * s.a;
     }
-    // (The weights' sums per channel.)
+    // (The weights' sums per channel, for these nine samples: recompute them
+    // if the loop or the weights change.)
     sum /= float3(3.125, 2.75, 3.125);
     cover /= float3(3.125, 2.75, 3.125);
 

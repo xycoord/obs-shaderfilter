@@ -81,10 +81,11 @@ float4 mainImage(VertData v_in) : TARGET
     // pattern. Each point is the last turned by the golden angle, and its
     // weight the last times a constant, so the loop has no sines, cosines or
     // exponentials; the sRGB curve in it is a close cubic (within 0.002).
-    // (The source's own height: uv_size includes any space added round it.)
+    // (Sizes and pixel positions from the source's own size: uv_size includes
+    // any space added round it.)
     float sigma = max(Size, 1.0) / 1.645 / (uv_pixel_interval.y * 1080.0);
     float2 reach = sigma * 3.2 * uv_pixel_interval;
-    float2 px = v_in.uv * uv_size;
+    float2 px = v_in.uv / uv_pixel_interval;
     float turn = 6.2831853 * frac(52.9829189 * frac(dot(px, float2(0.06711056, 0.00583715))));
     float2 dir = float2(cos(turn), sin(turn));
     float w = 0.96078944;
