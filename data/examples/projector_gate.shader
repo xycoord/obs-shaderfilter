@@ -13,6 +13,11 @@
 // steady frame, as it does in a projector. It only reads the pixel it draws,
 // so it can be merged with neighbouring shader filters.
 
+uniform string Full_Look<
+    string label = "Switch to Film Look (adds the rest of the look)";
+    string widget_type = "switch";
+    string tooltip = "Make this filter a Film Look (the film, projector and lens in one filter), keeping these settings: the parts this filter doesn't have are set to the same Look.";
+> = "film_look.shader";
 uniform float Corner_Radius<
     string label = "Corner Radius";
     string tooltip = "How round the picture's corners are, in pixels on a 1080-line picture. A projector gate's corners are slightly round: about 30 for 16mm.";
@@ -37,11 +42,6 @@ uniform float Inset<
     float maximum = 100.0;
     float step = 0.5;
 > = 6.0;
-uniform string Full_Look<
-    string label = "Switch to Film Look";
-    string widget_type = "switch";
-    string tooltip = "Make this filter a Film Look (the film, projector and lens in one filter), keeping these settings: the parts this filter doesn't have are set to the same Look.";
-> = "film_look.shader";
 
 float4 mainImage(VertData v_in) : TARGET
 {

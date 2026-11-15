@@ -15,7 +15,7 @@
 #define FILM_LOOK 1
 
 uniform int Look_Amount<
-    string label = "Amount";
+    string label = "Overall Amount";
     string tooltip = "How strong the whole look is, in percent of the settings below: 0 is none (the picture untouched), 100 as set, 200 twice as strong.";
     string widget_type = "slider";
     string suffix = " %";
@@ -51,7 +51,7 @@ uniform int Lens_Amount<
     int step = 1;
 > = 100;
 uniform int Speed<
-    string label = "Speed";
+    string label = "Frame Rate";
     string show = "more";
     string tooltip = "Frames of film a second: the grain, dust, weave and flicker change this often. 24 for sound film, 16 to 18 for silent film and Super 8.";
     string widget_type = "slider";

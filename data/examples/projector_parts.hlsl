@@ -24,7 +24,7 @@ uniform float Weave<
     float step = 0.1;
 > = 0.8;
 uniform float Jump<
-    string label = "Jump";
+    string label = "Frame Jumps";
     string group = "Gate Weave";
     string show = "more";
     string tooltip = "How far the picture jumps up or down from one frame to the next, in pixels on a 1080-line picture (typical).";
@@ -34,29 +34,29 @@ uniform float Jump<
     float maximum = 10.0;
     float step = 0.1;
 > = 0.6;
-uniform float Hand_Cranking<
+uniform int Hand_Cranking<
     string label = "Hand Cranking";
     string group = "Gate Weave";
     string show = "more";
     string tooltip = "How much the frame rate wavers, as it did when film was cranked by hand, until about 1915: the weave and the flicker both speed up and slow down. 0 is a motor-driven projector.";
     string widget_type = "slider";
     string suffix = " %";
-    float minimum = 0.0;
-    float maximum = 30.0;
-    float step = 0.5;
-> = 0.0;
+    int minimum = 0;
+    int maximum = 30;
+    int step = 1;
+> = 0;
 uniform bool Flicker_On<
 #ifdef FILM_LOOK
-    string label = "Projector · Flicker";
+    string label = "Projector · Flicker (brightness pulsing)";
 #else
-    string label = "Flicker";
+    string label = "Flicker (brightness pulsing)";
 #endif
     string widget_type = "section";
     string group = "Flicker";
     string tooltip = "The picture's brightness changing from frame to frame: the film's density and the projector's lamp. Kept gentle, as fast flashing across a big picture can be uncomfortable to watch.";
 > = true;
 uniform float Exposure_Flicker<
-    string label = "Exposure Flicker";
+    string label = "Frame Flicker";
     string group = "Flicker";
     string tooltip = "How much brightness changes from one frame of film to the next (typical): 2% is a good print, 5% or more old film.";
     string widget_type = "slider";
@@ -98,7 +98,7 @@ uniform int Dark_Frame_Depth<
     int step = 1;
 > = 15;
 uniform float Uneven_Illumination<
-    string label = "Uneven Illumination";
+    string label = "Uneven Lamp";
     string group = "Flicker";
     string show = "more";
     string tooltip = "How much brighter one side, or the middle, of the picture is than the rest, moving from frame to frame: the lamp's, unlike the lens's steady Corner Falloff.";
@@ -108,29 +108,29 @@ uniform float Uneven_Illumination<
     float maximum = 10.0;
     float step = 0.1;
 > = 1.5;
-uniform float Lamp_Brightness<
+uniform int Lamp_Brightness<
     string label = "Lamp Brightness";
     string group = "Flicker";
     string show = "more";
     string tooltip = "The picture's average brightness. At 100 white can only flicker darker; at 90 or so it flickers both ways.";
     string widget_type = "slider";
     string suffix = " %";
-    float minimum = 50.0;
-    float maximum = 100.0;
-    float step = 0.5;
-> = 100.0;
+    int minimum = 50;
+    int maximum = 100;
+    int step = 1;
+> = 100;
 uniform bool Gate_On<
 #ifdef FILM_LOOK
-    string label = "Projector · Frame Edge";
+    string label = "Projector · Frame Edge (rounded corners)";
 #else
-    string label = "Frame Edge";
+    string label = "Frame Edge (rounded corners)";
 #endif
     string widget_type = "section";
     string group = "Frame Edge";
     string tooltip = "The projected frame's edge (the projector's gate): slightly in from the picture's edges, with round corners and a soft edge, so a full-frame picture doesn't look like an office projector's. Outside it is transparent (black on a projector).";
 > = true;
 uniform float Corner_Radius<
-    string label = "Corner Radius";
+    string label = "Rounded Corners";
     string group = "Frame Edge";
     string tooltip = "How round the frame's corners are, in pixels on a 1080-line picture.";
     string widget_type = "slider";
@@ -140,7 +140,7 @@ uniform float Corner_Radius<
     float step = 1.0;
 > = 30.0;
 uniform float Inset<
-    string label = "Inset";
+    string label = "Border";
     string group = "Frame Edge";
     string tooltip = "How far in from the picture's edges the frame's edge sits, in pixels on a 1080-line picture.";
     string widget_type = "slider";

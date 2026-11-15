@@ -11,6 +11,11 @@
 // It goes first in a film look, before Halation and Film Grain. Brighter than
 // white (HDR) rolls off into the shoulder too.
 
+uniform string Full_Look<
+    string label = "Switch to Film Look (adds the rest of the look)";
+    string widget_type = "switch";
+    string tooltip = "Make this filter a Film Look (the film, projector and lens in one filter), keeping these settings: the parts this filter doesn't have are set to the same Look.";
+> = "film_look.shader";
 uniform int Stock<
     string label = "Stock";
     string tooltip = "What the print is: colour; black and white; black and white toned brown (sepia); or black and white tinted a colour all over, as silent films were (amber for daylight and interiors, blue for night).";
@@ -74,11 +79,6 @@ uniform float Black_Lift<
     float maximum = 20.0;
     float step = 0.5;
 > = 0.0;
-uniform string Full_Look<
-    string label = "Switch to Film Look";
-    string widget_type = "switch";
-    string tooltip = "Make this filter a Film Look (the film, projector and lens in one filter), keeping these settings: the parts this filter doesn't have are set to the same Look.";
-> = "film_look.shader";
 
 float4 mainImage(VertData v_in) : TARGET
 {

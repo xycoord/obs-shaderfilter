@@ -6,6 +6,11 @@
 // It only reads the pixel it draws, so the plugin can merge it into a
 // neighbouring shader filter's pass.
 
+uniform string Full_Look<
+    string label = "Switch to Film Look (adds the rest of the look)";
+    string widget_type = "switch";
+    string tooltip = "Make this filter a Film Look (the film, projector and lens in one filter), keeping these settings: the parts this filter doesn't have are set to the same Look.";
+> = "film_look.shader";
 uniform float Amount<
     string label = "Strength";
     string tooltip = "How strong the grain is.";
@@ -60,11 +65,6 @@ uniform int Speed<
     int maximum = 60;
     int step = 1;
 > = 24;
-uniform string Full_Look<
-    string label = "Switch to Film Look";
-    string widget_type = "switch";
-    string tooltip = "Make this filter a Film Look (the film, projector and lens in one filter), keeping these settings: the parts this filter doesn't have are set to the same Look.";
-> = "film_look.shader";
 
 // Three uniform random numbers in [0, 1) for a point (hash by Dave Hoskins, MIT).
 float3 grain_hash(float3 p3)

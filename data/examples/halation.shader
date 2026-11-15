@@ -19,6 +19,11 @@
 // past them. It treats the picture as an ordinary (SDR) one; on an HDR source
 // the threshold falls in a different place.
 
+uniform string Full_Look<
+    string label = "Switch to Film Look (adds the rest of the look)";
+    string widget_type = "switch";
+    string tooltip = "Make this filter a Film Look (the film, projector and lens in one filter), keeping these settings: the parts this filter doesn't have are set to the same Look.";
+> = "film_look.shader";
 uniform float Strength<
     string label = "Strength";
     string tooltip = "How bright the halo is (in percent): the share of the light above the threshold that spreads into it. Just outside a large white area it's about half this. Dark detail inside bright parts, such as thin lines narrower than the halo, fills with it too, as on film: keep it low for detailed logos.";
@@ -52,11 +57,6 @@ uniform int Film<
     int option_1_value = 1;
     string option_1_label = "Black and white";
 > = 0;
-uniform string Full_Look<
-    string label = "Switch to Film Look";
-    string widget_type = "switch";
-    string tooltip = "Make this filter a Film Look (the film, projector and lens in one filter), keeping these settings: the parts this filter doesn't have are set to the same Look.";
-> = "film_look.shader";
 
 // The sRGB curve, both ways, carried on above 1.
 float3 halation_to_linear(float3 c)

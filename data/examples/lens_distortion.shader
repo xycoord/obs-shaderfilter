@@ -13,6 +13,11 @@
 // lens's slight bend. It goes with the other lens effects, near the end of a
 // film look.
 
+uniform string Full_Look<
+    string label = "Switch to Film Look (adds the rest of the look)";
+    string widget_type = "switch";
+    string tooltip = "Make this filter a Film Look (the film, projector and lens in one filter), keeping these settings: the parts this filter doesn't have are set to the same Look.";
+> = "film_look.shader";
 uniform float Distortion<
     string label = "Distortion";
     string tooltip = "How strongly the picture bends, in percent: positive for barrel (its edges bow outwards and its corners round in), negative for pincushion. The middles of the left and right edges stay at the frame's edges, so the picture still fills the frame there. About 2 for a projector lens; 5 or more is a strong bend.";
@@ -21,11 +26,6 @@ uniform float Distortion<
     float maximum = 10.0;
     float step = 0.1;
 > = 2.0;
-uniform string Full_Look<
-    string label = "Switch to Film Look";
-    string widget_type = "switch";
-    string tooltip = "Make this filter a Film Look (the film, projector and lens in one filter), keeping these settings: the parts this filter doesn't have are set to the same Look.";
-> = "film_look.shader";
 
 float4 mainImage(VertData v_in) : TARGET
 {

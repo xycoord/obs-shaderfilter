@@ -16,7 +16,7 @@ uniform bool Print_On<
 > = true;
 uniform int Stock<
     string from = "halation:Film";
-    string label = "Stock";
+    string label = "Film Type";
     string group = "Print";
     string tooltip = "What the print is: colour; black and white; sepia toned; or tinted all over, amber or blue, as silent films were.";
     string widget_type = "select";
@@ -62,19 +62,19 @@ uniform int Contrast<
     int maximum = 100;
     int step = 1;
 > = 35;
-uniform float White<
-    string label = "White";
+uniform int White<
+    string label = "White Level";
     string group = "Print";
     string show = "more";
     string tooltip = "How bright white is: the brightest parts roll off into it.";
     string widget_type = "slider";
     string suffix = " %";
-    float minimum = 70.0;
-    float maximum = 100.0;
-    float step = 0.5;
-> = 97.0;
+    int minimum = 70;
+    int maximum = 100;
+    int step = 1;
+> = 97;
 uniform int Roll_Off<
-    string label = "Highlight Roll-off";
+    string label = "Highlight Softening";
     string group = "Print";
     string show = "more";
     string tooltip = "How softly the brightest parts roll off into White: 0 is a straight line up to White.";
@@ -84,17 +84,17 @@ uniform int Roll_Off<
     int maximum = 100;
     int step = 1;
 > = 40;
-uniform float Black_Lift<
-    string label = "Black Lift";
+uniform int Black_Lift<
+    string label = "Lifted Blacks";
     string group = "Print";
     string show = "more";
     string tooltip = "How far black is lifted. It lifts black everywhere, which shows a projector's own picture edge on the wall: leave it at 0 for a logo on black.";
     string widget_type = "slider";
     string suffix = " %";
-    float minimum = 0.0;
-    float maximum = 20.0;
-    float step = 0.5;
-> = 0.0;
+    int minimum = 0;
+    int maximum = 20;
+    int step = 1;
+> = 0;
 uniform float Softness<
     string label = "Softness";
     string group = "Print";
@@ -153,24 +153,25 @@ uniform int Halation_Threshold<
 > = 80;
 uniform bool Grain_On<
 #ifdef FILM_LOOK
-    string label = "Film · Grain";
+    string label = "Film · Grain (texture)";
 #else
-    string label = "Grain";
+    string label = "Grain (texture)";
 #endif
     string widget_type = "section";
     string group = "Grain";
     string tooltip = "The film's grain, moving every frame.";
 > = true;
-uniform float Grain<
+uniform int Grain<
     string from = "film_grain:Amount";
-    string label = "Grain";
+    string label = "Strength";
     string group = "Grain";
-    string tooltip = "How strong the grain is (as Film Grain's Amount).";
+    string tooltip = "How strong the grain is (as Film Grain's Strength).";
     string widget_type = "slider";
-    float minimum = 0.0;
-    float maximum = 100.0;
-    float step = 0.1;
-> = 23.0;
+    string suffix = " %";
+    int minimum = 0;
+    int maximum = 100;
+    int step = 1;
+> = 23;
 uniform float Grain_Size<
     string label = "Grain Size";
     string group = "Grain";
@@ -184,7 +185,7 @@ uniform float Grain_Size<
 > = 1.9;
 uniform int Grain_Colour<
     string from = "film_grain:Color_Amount";
-    string label = "Colour";
+    string label = "Colour Grain";
     string group = "Grain";
     string show = "more";
     string tooltip = "0 gives black-and-white grain, as on most film; 100 gives each colour channel its own grain.";
@@ -196,7 +197,7 @@ uniform int Grain_Colour<
 > = 10;
 uniform int Grain_Shadows<
     string from = "film_grain:Shadows";
-    string label = "Shadows";
+    string label = "In Shadows";
     string group = "Grain";
     string show = "more";
     string tooltip = "Grain strength in the darkest parts, compared with the midtones (100). It always fades out just above black, so black stays black.";
@@ -208,7 +209,7 @@ uniform int Grain_Shadows<
 > = 70;
 uniform int Grain_Highlights<
     string from = "film_grain:Highlights";
-    string label = "Highlights";
+    string label = "In Highlights";
     string group = "Grain";
     string show = "more";
     string tooltip = "Grain strength in the brightest parts, compared with the midtones (100).";
@@ -220,9 +221,9 @@ uniform int Grain_Highlights<
 > = 30;
 uniform bool Dust_On<
 #ifdef FILM_LOOK
-    string label = "Film · Dust & Scratches";
+    string label = "Film · Dust & Scratches (specks and lines)";
 #else
-    string label = "Dust & Scratches";
+    string label = "Dust & Scratches (specks and lines)";
 #endif
     string widget_type = "section";
     string group = "Dust & Scratches";
@@ -233,7 +234,7 @@ uniform float Dust<
     string group = "Dust & Scratches";
     string tooltip = "How many specks of dust or hair are on each frame, on average.";
     string widget_type = "slider";
-    string suffix = " a frame";
+    string suffix = " per frame";
     float minimum = 0.0;
     float maximum = 16.0;
     float step = 0.05;
@@ -243,7 +244,7 @@ uniform float Scratches<
     string group = "Dust & Scratches";
     string tooltip = "How many scratches are on screen at once, on average (up to 3).";
     string widget_type = "slider";
-    string suffix = " on screen";
+    string suffix = " at once";
     float minimum = 0.0;
     float maximum = 3.0;
     float step = 0.05;
@@ -260,7 +261,7 @@ uniform float Speck_Size<
     float step = 0.5;
 > = 5.0;
 uniform int Light_Specks<
-    string label = "Light Specks";
+    string label = "White Specks";
     string group = "Dust & Scratches";
     string show = "more";
     string tooltip = "The share of specks that are light (dirt on the negative); the rest are dark.";
@@ -272,7 +273,7 @@ uniform int Light_Specks<
 > = 25;
 uniform int Dust_Strength<
     string from = "dust_scratches:Strength";
-    string label = "Strength";
+    string label = "Visibility";
     string group = "Dust & Scratches";
     string show = "more";
     string tooltip = "How visible each mark is.";

@@ -27,12 +27,12 @@ uniform int Film_Amount<
     int step = 1;
 > = 100;
 uniform string Full_Look<
-    string label = "Switch to Film Look";
+    string label = "Switch to Film Look (adds the other parts)";
     string widget_type = "switch";
     string tooltip = "Make this filter a Film Look (the film, projector and lens in one filter), keeping these settings: the parts this filter doesn't have are set to the same Look.";
 > = "film_look.shader";
 uniform int Speed<
-    string label = "Speed";
+    string label = "Frame Rate";
     string show = "more";
     string tooltip = "Frames of film a second: the grain and dust change this often. 24 for sound film, 16 to 18 for silent film and Super 8.";
     string widget_type = "slider";

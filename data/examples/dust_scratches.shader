@@ -16,6 +16,11 @@
 // dirt is on the film, which weaves). Light marks show on a transparent
 // source too, as round a logo, with their own transparency.
 
+uniform string Full_Look<
+    string label = "Switch to Film Look (adds the rest of the look)";
+    string widget_type = "switch";
+    string tooltip = "Make this filter a Film Look (the film, projector and lens in one filter), keeping these settings: the parts this filter doesn't have are set to the same Look.";
+> = "film_look.shader";
 uniform float Dust<
     string label = "Dust";
     string tooltip = "How many specks of dust or hair are on each frame, on average (each is on screen for one frame). Under 1 for a kept print; 3 or more for a dirty one.";
@@ -65,11 +70,6 @@ uniform int Speed<
     int maximum = 60;
     int step = 1;
 > = 24;
-uniform string Full_Look<
-    string label = "Switch to Film Look";
-    string widget_type = "switch";
-    string tooltip = "Make this filter a Film Look (the film, projector and lens in one filter), keeping these settings: the parts this filter doesn't have are set to the same Look.";
-> = "film_look.shader";
 
 // Three uniform random numbers in [0, 1) for a point (hash by Dave Hoskins, MIT).
 float3 dust_hash(float3 p3)
