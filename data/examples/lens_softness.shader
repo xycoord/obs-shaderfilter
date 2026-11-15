@@ -7,7 +7,7 @@
 // Two settings, as blur in pixels on a 1080-line picture (scaled for other
 // sizes), as a Gaussian's standard deviation: Softness everywhere, and Edge
 // Softness added towards the corners, growing with the square of the distance
-// from the middle. Light is blurred as light (in linear light), and
+// from the middle. Light is blurred as light (in near-linear light), and
 // transparency with it.
 //
 // It goes before Film Grain: the grain stays crisp on a soft picture, which
@@ -31,6 +31,18 @@ uniform float Edge_Softness<
     float step = 0.05;
 > = 1.0;
 
+// Near enough linear light for a blur, both ways: the square (a gamma of 2,
+// close to sRGB's 2.2) and its exact inverse, so a pixel left as it was comes
+// back unchanged.
+float3 softness_to_linear(float3 c)
+{
+    return c * c;
+}
+float3 softness_from_linear(float3 c)
+{
+    return sqrt(max(c, 0.0));
+}
+
 float4 mainImage(VertData v_in) : TARGET
 {
     // Distance from the middle, squared, with the corners at 1.
@@ -43,12 +55,15 @@ float4 mainImage(VertData v_in) : TARGET
     if (sigma < 0.05)
         return image.Sample(textureSampler, v_in.uv);
 
-    // A Gaussian from 24 points on a spiral out to 3 standard deviations,
-    // each standing for an equal area of it and the last turned by the golden
-    // angle. The spiral is turned differently at each pixel, so the gaps
+    // A Gaussian from points on a spiral out to 3 standard deviations, each
+    // standing for an equal area of it and the last turned by the golden
+    // angle: 24, or 48 for a blur wider than 2 pixels, so it stays smooth. The spiral is turned differently at each pixel, so the gaps
     // between its points come out as an even fine noise, not a pattern. In
-    // linear light, by a close cubic for the sRGB curve (within 0.002),
-    // weighted by transparency.
+    // (near enough) linear light, weighted by transparency. Samples are kept
+    // half a pixel inside the picture (so a full-frame picture's edges stay
+    // opaque), unless this pixel is outside it, in added space.
+    float2 lo = min(v_in.uv, 0.5 * uv_pixel_interval);
+    float2 hi = max(v_in.uv, 1.0 - 0.5 * uv_pixel_interval);
     float2 px = v_in.uv / uv_pixel_interval;
     float turn = 6.2831853 * frac(52.9829189 * frac(dot(px, float2(0.06711056, 0.00583715))));
     float2 dir = float2(cos(turn), sin(turn));
@@ -56,21 +71,20 @@ float4 mainImage(VertData v_in) : TARGET
     float3 sum = float3(0.0, 0.0, 0.0);
     float cover = 0.0;
     float total = 0.0;
-    float w = 0.91051036;
-    for (int i = 0; i < 24; i++) {
-        float4 s = image.Sample(textureSampler, v_in.uv + dir * reach * sqrt((float(i) + 0.5) / 24.0));
-        float3 lin = s.rgb * (s.rgb * (s.rgb * 0.305306011 + 0.682171111) + 0.012522878);
-        sum += w * lin * s.a;
+    int n = sigma > 2.0 ? 48 : 24;
+    float step_w = exp(-4.5 / float(n));
+    float w = sqrt(step_w);
+    for (int i = 0; i < n; i++) {
+        float4 s = image.Sample(textureSampler, clamp(v_in.uv + dir * reach * sqrt((float(i) + 0.5) / float(n)), lo, hi));
+        sum += w * softness_to_linear(s.rgb) * s.a;
         cover += w * s.a;
         total += w;
         dir = float2(dir.x * -0.73736886 - dir.y * 0.67549032, dir.x * 0.67549032 + dir.y * -0.73736886);
-        w *= 0.82902912;
+        w *= step_w;
     }
     if (cover <= 0.0)
         return float4(0.0, 0.0, 0.0, 0.0);
 
     // Back to the sRGB curve, over the colour the covered parts have.
-    float3 l = max(sum / cover, 0.0);
-    float3 enc = lerp(l * 12.92, 1.055 * pow(l, float3(1.0 / 2.4, 1.0 / 2.4, 1.0 / 2.4)) - 0.055, step(0.0031308, l));
-    return float4(enc, cover / total);
+    return float4(softness_from_linear(sum / cover), cover / total);
 }
