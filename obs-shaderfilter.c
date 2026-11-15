@@ -319,10 +319,6 @@ struct shader_filter_data {
 	/* Until this time, a properties rebuild is a refresh of an open panel
 	 * after the shader changed (so browsing tools stay as they were). */
 	uint64_t props_refresh_until;
-	/* What the panel was last built with for the browsing tools, so a
-	 * change can be told apart from libobs re-running callbacks when it
-	 * builds the panel. */
-	bool browse_shown;
 
 	/* Measured GPU time of this filter's own pass (graphics thread). */
 	struct gpu_timer_slot gpu_slots[GPU_TIMER_SLOTS];
@@ -1672,10 +1668,10 @@ static bool contains_ci(const char *haystack, const char *needle)
 	return false;
 }
 
-/* The shaders in `dir` for a filter or a transition, by name, in `category`
- * (if any) and matching `search` (if any, against name and category). An
+/* The shaders in `dir` for a filter or a transition, by name, matching
+ * `search` (if any, against name and category). An
  * .effect with a .shader of the same name is listed once, as the .shader. */
-static void list_shaders(const char *dir, bool transitions, const char *search, const char *category,
+static void list_shaders(const char *dir, bool transitions, const char *search,
 			 shader_list_t *out)
 {
 	da_init((*out));
@@ -1751,8 +1747,7 @@ static void list_shaders(const char *dir, bool transitions, const char *search, 
 	size_t w = 0;
 	for (size_t i = 0; i < out->num; i++) {
 		struct shader_entry *e = &out->array[i];
-		bool keep = (!category || !*category || astrcmpi(e->category, category) == 0) &&
-			    (contains_ci(e->label, search) || (*e->category && contains_ci(e->category, search)));
+		bool keep = contains_ci(e->label, search) || (*e->category && contains_ci(e->category, search));
 		if (keep) {
 			out->array[w++] = *e;
 		} else {
@@ -1762,26 +1757,6 @@ static void list_shaders(const char *dir, bool transitions, const char *search, 
 		}
 	}
 	out->num = w;
-}
-
-typedef DARRAY(char *) category_list_t;
-
-/* The categories used in a folder's library.ini, in file order. */
-static void library_categories(const char *dir, category_list_t *out)
-{
-	library_t lib;
-	library_load(dir, &lib);
-	for (size_t i = 0; i < lib.num; i++) {
-		const char *c = lib.array[i].category;
-		bool seen = !*c;
-		for (size_t k = 0; k < out->num && !seen; k++)
-			seen = astrcmpi(out->array[k], c) == 0;
-		if (!seen) {
-			char *copy = bstrdup(c);
-			da_push_back((*out), &copy);
-		}
-	}
-	library_free(&lib);
 }
 
 /* The folder whose shaders the list offers. */
@@ -1873,9 +1848,8 @@ static bool same_path(const struct dstr *last, const char *path)
 }
 
 /* ------------------------------------------------------------------------
- * The person's choices kept across filters and OBS sessions: the shaders
- * they used last (the Shader list's Recent group) and the category they last
- * narrowed the list to. Kept in the plugin's config folder.
+ * The shaders the person used last (the Shader list's Recently used group),
+ * kept across filters and OBS sessions in the plugin's config folder.
  * ------------------------------------------------------------------------ */
 
 #define SF_RECENT_MAX 6
@@ -1985,46 +1959,6 @@ static void recent_note(const char *path, bool transitions, obs_data_array_t **b
 	obs_data_release(d);
 }
 
-static char *remembered_category(void)
-{
-	obs_data_t *d = prefs_load();
-	char *c = bstrdup(obs_data_get_string(d, "category"));
-	obs_data_release(d);
-	return c;
-}
-
-/* Narrowing to a category keeps the browsing tools open, so the list is
- * still narrowed next time. */
-static void remember_category(const char *category)
-{
-	obs_data_t *d = prefs_load();
-	if (strcmp(obs_data_get_string(d, "category"), category ? category : "") != 0) {
-		obs_data_set_string(d, "category", category ? category : "");
-		if (category && *category)
-			obs_data_set_bool(d, "browse", true);
-		prefs_save(d);
-	}
-	obs_data_release(d);
-}
-
-static bool remembered_browsing(void)
-{
-	obs_data_t *d = prefs_load();
-	bool b = obs_data_get_bool(d, "browse");
-	obs_data_release(d);
-	return b;
-}
-
-static void remember_browsing(bool open)
-{
-	obs_data_t *d = prefs_load();
-	if (obs_data_get_bool(d, "browse") != open) {
-		obs_data_set_bool(d, "browse", open);
-		prefs_save(d);
-	}
-	obs_data_release(d);
-}
-
 /* Switch the filter to a shader file, as if chosen in the list. */
 static void choose_shader_file(struct shader_filter_data *filter, obs_data_t *settings, const char *path)
 {
@@ -2094,14 +2028,12 @@ static size_t fill_shader_list(obs_property_t *pick, obs_data_t *settings, bool 
 	char *bundled = examples_dir();
 	char *own = library_dir(settings);
 	const bool own_folder = bundled && own && !same_folder(own, bundled);
-	const bool narrow = obs_data_get_bool(settings, "browse_shaders");
-	const char *search = narrow ? obs_data_get_string(settings, "shader_search") : "";
-	const char *category = narrow ? obs_data_get_string(settings, "shader_category") : "";
+	const char *search = obs_data_get_string(settings, "shader_search");
 	shader_list_t list, mine;
-	list_shaders(bundled, transition, search, category, &list);
+	list_shaders(bundled, transition, search, &list);
 	da_init(mine);
 	if (own_folder)
-		list_shaders(own, transition, search, category, &mine);
+		list_shaders(own, transition, search, &mine);
 
 	bool listed = false;
 	bool any_category = false;
@@ -2110,7 +2042,7 @@ static size_t fill_shader_list(obs_property_t *pick, obs_data_t *settings, bool 
 	size_t shown = 0; /* place in the list, for "12 of 160" */
 
 	/* The shaders used last, first, unless the list is narrowed. */
-	if (!(search && *search) && !(category && *category)) {
+	if (!*search) {
 		shader_list_t recent;
 		recent_shaders(transition, has_file ? file : NULL, &list, &mine, &recent);
 		if (recent.num)
@@ -2211,8 +2143,7 @@ static void update_browse_status(obs_properties_t *props, obs_data_t *settings, 
 	if (!status)
 		return;
 	const char *search = obs_data_get_string(settings, "shader_search");
-	const char *category = obs_data_get_string(settings, "shader_category");
-	/* "8 of 11 in Blur & Glow, matching "blur"" / "154 shaders" */
+	/* "Shader 3 of 8 matching "blur"" / "8 shaders matching "blur"" */
 	struct dstr text = {0};
 	if (n == 0) {
 		dstr_copy(&text, obs_module_text("ShaderFilter.BrowseNone"));
@@ -2222,8 +2153,6 @@ static void update_browse_status(obs_properties_t *props, obs_data_t *settings, 
 		else
 			dstr_printf(&text, obs_module_text(n == 1 ? "ShaderFilter.BrowseOne" : "ShaderFilter.BrowseMany"),
 				    (int)n);
-		if (category && *category)
-			dstr_catf(&text, obs_module_text("ShaderFilter.BrowseIn"), category);
 		if (search && *search)
 			dstr_catf(&text, obs_module_text("ShaderFilter.BrowseMatching"), search);
 		if (!pos) {
@@ -2237,15 +2166,14 @@ static void update_browse_status(obs_properties_t *props, obs_data_t *settings, 
 	}
 	obs_property_set_description(status, text.array);
 	obs_property_text_set_info_type(status, n == 0 ? OBS_TEXT_INFO_WARNING : OBS_TEXT_INFO_NORMAL);
-	obs_property_set_visible(status, obs_data_get_bool(settings, "browse_shaders"));
+	/* (Only while searching: the whole list needs no count.) */
+	obs_property_set_visible(status, search && *search);
 	dstr_free(&text);
 }
 
 static bool shader_search_changed(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
 {
-	/* The category narrowed to is kept for every filter, and next time. */
-	if (p && strcmp(obs_property_name(p), "shader_category") == 0)
-		remember_category(obs_data_get_string(settings, "shader_category"));
+	UNUSED_PARAMETER(p);
 	struct shader_filter_data *filter = obs_properties_get_param(props);
 	obs_property_t *pick = obs_properties_get(props, "shader_pick");
 	if (!filter || !pick)
@@ -2254,24 +2182,6 @@ static bool shader_search_changed(obs_properties_t *props, obs_property_t *p, ob
 	size_t n = fill_shader_list(pick, settings, filter->transition, &pos);
 	update_browse_status(props, settings, n, pos);
 	return true;
-}
-
-static bool browse_shaders_changed(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
-{
-	UNUSED_PARAMETER(p);
-	bool show = obs_data_get_bool(settings, "browse_shaders");
-	struct shader_filter_data *bf = obs_properties_get_param(props);
-	if (bf && show != bf->browse_shown) {
-		bf->browse_shown = show;
-		remember_browsing(show);
-	}
-	const char *keys[] = {"shader_category", "shader_search", "browse_status"};
-	for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
-		obs_property_t *q = obs_properties_get(props, keys[i]);
-		if (q)
-			obs_property_set_visible(q, show);
-	}
-	return shader_search_changed(props, p, settings);
 }
 
 static bool shader_pick_changed(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
@@ -4650,62 +4560,20 @@ static obs_properties_t *shader_filter_properties(void *data)
 	if (has_file && filter && path_is_effect(file) && has_shader_neighbour(filter))
 		obs_properties_add_text(props, "effect_note", obs_module_text("ShaderFilter.EffectNote"), OBS_TEXT_INFO);
 
-	/* The browsing tools show on a filter with no shader yet. Once a filter
-	 * has a shader they're as the person last left them, on any filter. */
+	/* Search, always there: it narrows the Shader list by name or
+	 * category, and since it's always shown (with how many match), the list
+	 * is never narrowed without the person seeing why. */
 	const bool refreshing = filter && os_gettime_ns() < filter->props_refresh_until;
 	if (filter && !refreshing) {
 		/* A panel opened afresh: a new go at choosing (see recent_base). */
 		obs_data_array_release(filter->recent_base);
 		filter->recent_base = NULL;
 	}
-	if (has_file || inline_code) {
-		if (!refreshing)
-			obs_data_set_bool(settings, "browse_shaders", remembered_browsing());
-	} else if (!obs_data_has_user_value(settings, "browse_shaders")) {
-		obs_data_set_bool(settings, "browse_shaders", true);
-	}
-	const bool browsing = obs_data_get_bool(settings, "browse_shaders");
-	if (filter)
-		filter->browse_shown = browsing;
-	obs_property_t *browse = obs_properties_add_bool(props, "browse_shaders", obs_module_text("ShaderFilter.Browse"));
-	obs_property_set_long_description(browse, obs_module_text("ShaderFilter.BrowseHelp"));
-	obs_property_set_modified_callback(browse, browse_shaders_changed);
-
-	category_list_t categories;
-	da_init(categories);
-	/* Categories come from the bundled library, which is always listed. */
-	char *bundled_lib = examples_dir();
-	library_categories(bundled_lib, &categories);
-	bfree(bundled_lib);
-	if (categories.num) {
-		/* The category last narrowed to, on any filter. */
-		char *kept = remembered_category();
-		bool known = false;
-		for (size_t i = 0; i < categories.num; i++)
-			known = known || astrcmpi(categories.array[i], kept) == 0;
-		obs_data_set_string(settings, "shader_category", known ? kept : "");
-		bfree(kept);
-		obs_property_t *cat = obs_properties_add_list(props, "shader_category", obs_module_text("ShaderFilter.Category"),
-							      OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
-		obs_property_list_add_string(cat, obs_module_text("ShaderFilter.AllCategories"), "");
-		for (size_t i = 0; i < categories.num; i++)
-			obs_property_list_add_string(cat, categories.array[i], categories.array[i]);
-		obs_property_set_modified_callback(cat, shader_search_changed);
-		obs_property_set_long_description(cat, obs_module_text("ShaderFilter.CategoryHelp"));
-		obs_property_set_visible(cat, browsing);
-	} else if (*obs_data_get_string(settings, "shader_category")) {
-		obs_data_set_string(settings, "shader_category", "");
-	}
-	for (size_t i = 0; i < categories.num; i++)
-		bfree(categories.array[i]);
-	da_free(categories);
 	bfree(lib);
-
 	obs_property_t *search = obs_properties_add_text(props, "shader_search", obs_module_text("ShaderFilter.Search"),
 							 OBS_TEXT_DEFAULT);
 	obs_property_set_long_description(search, obs_module_text("ShaderFilter.SearchHelp"));
 	obs_property_set_modified_callback(search, shader_search_changed);
-	obs_property_set_visible(search, browsing);
 
 	/* Where the shader is in the (narrowed) list. (The arrow keys on the
 	 * Shader list apply the next or previous entry, as in any dropdown.) */

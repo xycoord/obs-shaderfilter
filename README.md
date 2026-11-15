@@ -85,9 +85,9 @@ Add the filter to any source through "Filters" when right-clicking it; it is cal
   shader filters can be told apart; a name you typed yourself is never changed. A filter whose shader fails
   shows "⚠" before its name until it works again.
 - After choosing a shader, **↑/↓ on the Shader list** applies the next or previous one, so you can step
-  through shaders while watching the preview. **Browse Shaders** shows Category and Search, to narrow the
-  list (and so what ↑/↓ steps through), with the shader's place in it ("Shader 8 of 11 in Blur & Glow").
-  Browse Shaders and the category stay as you left them, on every filter and next time OBS starts.
+  through shaders while watching the preview. **Search** narrows the list (and so what ↑/↓ steps through) to
+  shaders whose name or category matches (film, blur, vhs…), with the shader's place among them
+  ("Shader 3 of 8 matching "blur"").
 - The list starts with the shaders you used last (**Recently used**). Shaders few people need (another shader or
   one of OBS's own filters does the job, or they're demos) are at the end, under **More shaders**; they all still
   work, and Search finds them.
