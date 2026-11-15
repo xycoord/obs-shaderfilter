@@ -21,12 +21,12 @@
 
 uniform float Strength<
     string label = "Strength";
-    string tooltip = "How bright the halo is (in percent): the share of the light above the threshold that spreads into it. Just outside a large white area it's about half this.";
+    string tooltip = "How bright the halo is (in percent): the share of the light above the threshold that spreads into it. Just outside a large white area it's about half this. Dark detail inside bright parts, such as thin lines narrower than the halo, fills with it too, as on film: keep it low for detailed logos.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 100.0;
     float step = 1.0;
-> = 35.0;
+> = 15.0;
 uniform float Size<
     string label = "Size";
     string tooltip = "How far the halo reaches from a bright edge (to a tenth of its brightness at the edge), in pixels on a 1080-line picture (it's scaled for other sizes). About 15 for 35mm film, 30 for 16mm, 55 for Super 8.";
