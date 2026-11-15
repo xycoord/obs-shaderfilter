@@ -139,6 +139,18 @@ REF_EQUIVALENTS = {
 }
 
 
+# Shaders that draw a wide glow small, in quarter-size stages, where the
+# reference release (which draws only mainImage) draws it at full size, from
+# a spiral of samples turned at each pixel: the two differ by that spiral's
+# sampling noise, worst in fine, high-contrast detail (a 1-pixel checkerboard).
+STAGED = {"halation.shader", "film.shader", "film_look.shader", "crt_glass.shader", "crt_tv.shader"}
+
+
+def staged_case(name: str) -> bool:
+    """Whether a case is one of STAGED's shaders on its own (f_, fu_, fd_)."""
+    return any(name.split("_", 1)[-1] == case_name(n) for n in STAGED)
+
+
 def filt(name: str, **extra) -> dict:
     s = shader_file(name)
     if name in REF_EQUIVALENTS:
@@ -526,7 +538,7 @@ def cmd_parity(args) -> int:
         print(f"rendered in {time.time() - t0:.1f}s")
         report = []
         fails = 0
-        counts = {"exact": 0, "close": 0, "edge": 0, "amplified": 0, "FAIL": 0}
+        counts = {"exact": 0, "close": 0, "edge": 0, "amplified": 0, "staged": 0, "FAIL": 0}
         diffdir = work / "diffs"
         shutil.rmtree(diffdir, ignore_errors=True)
         diffdir.mkdir()
@@ -547,6 +559,9 @@ def cmd_parity(args) -> int:
                 if v in ("FAIL", "edge") and name in AMPLIFIERS and "psnr" in m and m["psnr"] >= 20 \
                         and m["frac_gt8"] < 0.06:
                     v = "amplified"
+                if v in ("FAIL", "edge") and staged_case(name) and "psnr" in m and m["psnr"] >= 33 \
+                        and m["frac_gt8"] < 0.06:
+                    v = "staged"
                 if args.opaque and v == "edge" and name not in chain_refs:
                     # No translucent edges to excuse: only rounding is allowed
                     # (the same shader compiled into a different program can
@@ -557,7 +572,7 @@ def cmd_parity(args) -> int:
                     v = "FAIL"
                 m["verdict"] = v
                 entry["frames"].append(m)
-                rank = {"exact": 0, "close": 1, "edge": 2, "amplified": 2, "FAIL": 3}
+                rank = {"exact": 0, "close": 1, "edge": 2, "amplified": 2, "staged": 2, "FAIL": 3}
                 if rank[v] > rank[worst]:
                     worst = v
                 if v != "exact" and a.exists() and b.exists():

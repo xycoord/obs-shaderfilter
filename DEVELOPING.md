@@ -95,6 +95,21 @@ float4 mainImage(VertData v_in) : TARGET
 }
 ```
 
+A wide blur is much cheaper at a reduced size: `#define STAGE1_SCALE 4` (at the start of a line) draws stage 1 at a
+quarter of the filter's size each way (1 to 8). Every pass can also read the filter's input as `source_image`, the
+stages drawn before it as `stage1_image` to `stage4_image`, and `stages_drawn` (true whenever stages are drawn), so a
+shader can fall back to doing everything in `mainImage` where a host draws only that, such as release 2.6.1. Declare
+the ones you use:
+```
+uniform texture2d source_image;
+uniform texture2d stage3_image;
+uniform bool stages_drawn;
+```
+[halo_parts.hlsl](data/examples/halo_parts.hlsl) and [glow_parts.hlsl](data/examples/glow_parts.hlsl) are worked
+examples: a glow averaged into a quarter-size picture, blurred across and then down there, and read back at full
+size, with a full-size fallback. (OBS's preprocessor reads `#define NAME (…)`, with a space before the bracket, as a
+macro with arguments: start a macro's body with something other than a bracket.)
+
 ### Defaults
 
 You set default values as a normal assignment ```uniform string notes = 'my note';```, except for `float4` 

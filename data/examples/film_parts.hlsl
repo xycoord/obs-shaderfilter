@@ -293,6 +293,13 @@ float3 film_from_linear(float3 c)
     return lerp(c * 12.92, 1.055 * pow(c, float3(1.0 / 2.4, 1.0 / 2.4, 1.0 / 2.4)) - 0.055, step(0.0031308, c));
 }
 
+// The halo, drawn small where the plugin draws stages (see halo_parts.hlsl):
+// the including shader's stages 1 to 3.
+#define HALO_SIZE Halation_Size
+#define HALO_THRESHOLD Halation_Threshold
+#define HALO_ON Halation_On && Halation_Strength > 0
+#include "halo_parts.hlsl"
+
 // Three uniform random numbers in [0, 1) for a point (hash by Dave Hoskins, MIT).
 float3 film_hash(float3 p3)
 {
@@ -364,13 +371,36 @@ float4 film_at(float2 uv, float a, float frame_count)
     float turn = 6.2831853 * frac(52.9829189 * frac(dot(px, float2(0.06711056, 0.00583715))));
     float3 lw = float3(0.2126, 0.7152, 0.0722);
 
-    // The film's softness: a Gaussian from points on a turned spiral (as Lens
-    // Softness: 24, 48 wider than 2 pixels, 96 wider than 5), in near-linear
-    // light, kept inside the picture.
-    float4 raw = image.Sample(textureSampler, uv);
+    // The film's softness: a Gaussian in near-linear light, kept inside the
+    // picture. Under a pixel (as usual), exactly, from 3 by 3 samples each
+    // between two pixels (so they cover 5 by 5); wider, from points on a turned
+    // spiral (as Lens Softness: 24, 48 wider than 2 pixels, 96 wider than 5).
+    float4 raw = halo_source(uv);
     float4 c = raw;
     float sigma = Softness * a_print * scale;
-    if (sigma >= 0.05) {
+    if (sigma >= 0.05 && sigma <= 0.9) {
+        float2 lo = min(uv, 0.5 * uv_pixel_interval);
+        float2 hi = max(uv, 1.0 - 0.5 * uv_pixel_interval);
+        float k = -0.5 / (sigma * sigma);
+        float g1 = exp(k);
+        float g2 = exp(4.0 * k);
+        float side = g1 + g2;
+        float2 off = (1.0 + g2 / side) * uv_pixel_interval;
+        float3 sum = float3(0.0, 0.0, 0.0);
+        float cover = 0.0;
+        float total = 0.0;
+        for (int j = -1; j <= 1; j++) {
+            float wy = j == 0 ? 1.0 : side;
+            for (int i = -1; i <= 1; i++) {
+                float w = wy * (i == 0 ? 1.0 : side);
+                float4 s = halo_source(clamp(uv + float2(float(i), float(j)) * off, lo, hi));
+                sum += w * s.rgb * s.rgb * s.a;
+                cover += w * s.a;
+                total += w;
+            }
+        }
+        c = cover > 0.0 ? float4(sqrt(max(sum / cover, 0.0)), cover / total) : float4(0.0, 0.0, 0.0, 0.0);
+    } else if (sigma > 0.9) {
         float2 lo = min(uv, 0.5 * uv_pixel_interval);
         float2 hi = max(uv, 1.0 - 0.5 * uv_pixel_interval);
         float2 dir = float2(cos(turn), sin(turn));
@@ -382,7 +412,7 @@ float4 film_at(float2 uv, float a, float frame_count)
         float step_w = exp(-4.5 / float(n));
         float w = sqrt(step_w);
         for (int i = 0; i < n; i++) {
-            float4 s = image.Sample(textureSampler, clamp(uv + dir * reach * sqrt((float(i) + 0.5) / float(n)), lo, hi));
+            float4 s = halo_source_level(clamp(uv + dir * reach * sqrt((float(i) + 0.5) / float(n)), lo, hi));
             sum += w * s.rgb * s.rgb * s.a;
             cover += w * s.a;
             total += w;
@@ -392,28 +422,16 @@ float4 film_at(float2 uv, float a, float frame_count)
         c = cover > 0.0 ? float4(sqrt(max(sum / cover, 0.0)), cover / total) : float4(0.0, 0.0, 0.0, 0.0);
     }
 
-    // The halo: a Gaussian blur of the light above the threshold, from 64
-    // points on a turned spiral (as Halation), less the pixel's own share.
+    // The halo: a Gaussian blur of the light above the threshold (as
+    // Halation, see halo_parts.hlsl), less the pixel's own share.
     float glow = 0.0;
     float strength = Halation_On ? float(Halation_Strength) * 0.01 * a : 0.0;
     if (strength > 0.0) {
-        float t = float(Halation_Threshold) * 0.01;
-        t = t <= 0.04045 ? t / 12.92 : pow((t + 0.055) / 1.055, 2.4);
-        float2 reach = max(Halation_Size, 1.0) / 1.645 * scale * 3.2 * uv_pixel_interval;
-        float2 dir = float2(cos(turn + 1.0), sin(turn + 1.0));
-        float w = 0.96078944;
-        for (int i = 0; i < 64; i++) {
-            float4 s = image.Sample(textureSampler, uv + dir * reach * sqrt((float(i) + 0.5) / 64.0));
-            float3 lin = s.rgb * (s.rgb * (s.rgb * 0.305306011 + 0.682171111) + 0.012522878);
-            glow += w * s.a * max(dot(lin, lw) - t, 0.0);
-            dir = float2(dir.x * -0.73736886 - dir.y * 0.67549032, dir.x * 0.67549032 + dir.y * -0.73736886);
-            w *= 0.92311635;
-        }
-        glow /= 12.421987 * (1.0 - t);
+        float t = halo_threshold();
+        glow = halo_at(uv, t, turn + 1.0) / (1.0 - t);
         // (The pixel's own share from the unsoftened pixel, as the samples
         // are, so a softened bright edge doesn't let the halo in.)
-        float3 raw_lin = raw.rgb * (raw.rgb * (raw.rgb * 0.305306011 + 0.682171111) + 0.012522878);
-        float own = raw.a * max(dot(raw_lin, lw) - t, 0.0) / (1.0 - t);
+        float own = halo_light(raw, t) / (1.0 - t);
         glow = max(glow - own, 0.0) * strength;
     }
 

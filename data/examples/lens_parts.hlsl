@@ -118,7 +118,11 @@ float4 lens_at(float2 uv, float a)
         // evenly from red to blue in a scrambled order. Samples stay half a
         // pixel inside the picture, so its edges keep their colour (no fringe
         // along the frame); the bent edge's fade is applied after.
-        int n = sigma > 2.0 ? 48 : 24;
+        // As many samples as the spread here needs: in the middle of the
+        // picture, where the fringes and the corner softness are a fraction of
+        // a pixel, a few do; towards the corners, more.
+        float shift = length((uv0 - 0.5) * spread * 0.5 / uv_pixel_interval);
+        int n = sigma < 0.25 && shift < 0.35 ? 6 : (sigma < 0.6 && shift < 0.7 ? 12 : (sigma > 2.0 ? 48 : 24));
         float step_w = exp(-4.5 / float(n));
         float w = sqrt(step_w);
         float2 px = uv / uv_pixel_interval;
@@ -135,7 +139,7 @@ float4 lens_at(float2 uv, float a)
             float kk = 3.0 * t - 1.5;
             float3 ws = saturate(float3(-kk, 1.0 - abs(kk), kk)) * w;
             float2 at = uv0 + dir * reach * sqrt((float(i) + 0.5) / float(n));
-            float4 s = image.Sample(textureSampler, clamp(0.5 + (at - 0.5) * (1.0 + spread * (0.5 - t)), lo, hi));
+            float4 s = image.SampleLevel(textureSampler, clamp(0.5 + (at - 0.5) * (1.0 + spread * (0.5 - t)), lo, hi), 0.0);
             // Light added in (near enough) linear light: the square, undone
             // exactly below.
             sum += ws * s.rgb * s.rgb * s.a;

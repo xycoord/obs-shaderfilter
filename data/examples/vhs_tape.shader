@@ -226,14 +226,32 @@ float4 mainImage(VertData v_in) : TARGET
     float ww = 0.0;
     float wa = 0.0;
     float a_s = 0.0;
+    float rc = -1.0;
+    float rs = 0.0;
+    float gw = 0.000109843932;
+    float qw = 4.2891975;
+    float ga = 1.8968172e-25;
+    float qa = 8884.82152;
     for (int i = -12; i <= 12; i++) {
         float u = float(i) / 12.0;
         float4 s = image.Sample(textureSampler, uv + float2(float(i) * step_l * px.x, 0.0));
         float y = dot(s.rgb, float3(0.299, 0.587, 0.114)) * s.a;
-        float sinc = i == 0 ? 1.0 : sin(12.566371 * u) / (12.566371 * u);
-        float kl = sinc * (0.42 + 0.5 * cos(3.1415927 * u) + 0.08 * cos(6.2831853 * u));
-        float kw = exp(-0.5 * (4.27 * u) * (4.27 * u));
-        float ka = exp(-0.5 * (10.67 * u) * (10.67 * u));
+        // (The weights without sines, cosines or exponentials in the loop:
+        // the angle pi u turned a step at a time, and each Gaussian the last
+        // times a ratio that itself shrinks by a constant.)
+        float cos2 = 2.0 * rc * rc - 1.0;
+        float sin4 = 4.0 * rs * rc * cos2;
+        float sinc = i == 0 ? 1.0 : sin4 / (12.566371 * u);
+        float kl = sinc * (0.42 + 0.5 * rc + 0.08 * cos2);
+        float kw = gw;
+        float ka = ga;
+        float rc_next = rc * 0.96592583 - rs * 0.25881905;
+        rs = rs * 0.96592583 + rc * 0.25881905;
+        rc = rc_next;
+        gw *= qw;
+        qw *= 0.88107074;
+        ga *= qa;
+        qa *= 0.45356470;
         y_l += kl * y;
         wl += kl;
         y_w += kw * y;
@@ -265,11 +283,17 @@ float4 mainImage(VertData v_in) : TARGET
     float a_c = 0.0;
     for (int r = 0; r < 2; r++) {
         float dy = -float(r) * line_gap * px.y * min(A, 1.0);
+        // (Each weight the last times a ratio, the ratio shrinking by a constant.)
+        float t0 = -7.0 + jitter;
+        float kj = exp(-0.125 * t0 * t0);
+        float qj = exp(-0.125 * (2.0 * t0 + 1.0));
         for (int j = -7; j <= 7; j++) {
             float tj = float(j) + jitter;
             float o = tj * step_c - Chroma_Delay * A;
             float4 s = image.Sample(textureSampler, uv + float2(o * px.x, dy));
-            float k = exp(-0.5 * (tj * 0.5) * (tj * 0.5));
+            float k = kj;
+            kj *= qj;
+            qj *= 0.77880078;
             yiq_c += k * tape_to_yiq(s.rgb * s.a);
             a_c += k * s.a;
         }

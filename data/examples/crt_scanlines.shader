@@ -65,6 +65,20 @@ float3 scan_cdf(float3 z)
     return 0.5 + 0.5 * tanh(0.7978846 * (z + 0.044715 * z * z * z));
 }
 
+// One line's light over this pixel: the line's colour v (its picture
+// filtered down to it), each colour's beam wider the brighter it is, its
+// light spread over the line's share of height and summed over this pixel;
+// none for a line outside the picture.
+float3 scan_line(float li, float last, float gap, float y0, float y1, float s_dark, float s_bright, float3 v)
+{
+    if (li < 0.0 || li >= last)
+        return float3(0.0, 0.0, 0.0);
+    float yc = (li + 0.5) * gap;
+    float3 sig = lerp(float3(s_dark, s_dark, s_dark), float3(s_bright, s_bright, s_bright), sqrt(saturate(v)));
+    float3 share = scan_cdf((y1 - yc) / sig) - scan_cdf((y0 - yc) / sig);
+    return v * share * gap;
+}
+
 float4 mainImage(VertData v_in) : TARGET
 {
     // Lines down the picture.
@@ -87,31 +101,39 @@ float4 mainImage(VertData v_in) : TARGET
     // The two nearest lines above and below.
     float n = floor(y / gap - 0.5);
     float last = floor(height / gap + 0.5);
+    // The picture filtered down to each of the four lines, in light,
+    // premultiplied by transparency: a Gaussian over half a line either way
+    // (five samples), so detail finer than the lines dims and softens rather
+    // than breaking up. Next lines' samples overlap (each half a line
+    // apart), so the four lines take eleven samples, not twenty.
+    float base = (n - 1.0 + 0.5) * gap - gap;
+    float4 t0 = image.Sample(textureSampler, float2(v_in.uv.x, (base + 0.0 * gap * 0.5) * uv_pixel_interval.y));
+    float3 p0 = scan_to_linear(t0.rgb) * t0.a;
+    float4 t1 = image.Sample(textureSampler, float2(v_in.uv.x, (base + 1.0 * gap * 0.5) * uv_pixel_interval.y));
+    float3 p1 = scan_to_linear(t1.rgb) * t1.a;
+    float4 t2 = image.Sample(textureSampler, float2(v_in.uv.x, (base + 2.0 * gap * 0.5) * uv_pixel_interval.y));
+    float3 p2 = scan_to_linear(t2.rgb) * t2.a;
+    float4 t3 = image.Sample(textureSampler, float2(v_in.uv.x, (base + 3.0 * gap * 0.5) * uv_pixel_interval.y));
+    float3 p3 = scan_to_linear(t3.rgb) * t3.a;
+    float4 t4 = image.Sample(textureSampler, float2(v_in.uv.x, (base + 4.0 * gap * 0.5) * uv_pixel_interval.y));
+    float3 p4 = scan_to_linear(t4.rgb) * t4.a;
+    float4 t5 = image.Sample(textureSampler, float2(v_in.uv.x, (base + 5.0 * gap * 0.5) * uv_pixel_interval.y));
+    float3 p5 = scan_to_linear(t5.rgb) * t5.a;
+    float4 t6 = image.Sample(textureSampler, float2(v_in.uv.x, (base + 6.0 * gap * 0.5) * uv_pixel_interval.y));
+    float3 p6 = scan_to_linear(t6.rgb) * t6.a;
+    float4 t7 = image.Sample(textureSampler, float2(v_in.uv.x, (base + 7.0 * gap * 0.5) * uv_pixel_interval.y));
+    float3 p7 = scan_to_linear(t7.rgb) * t7.a;
+    float4 t8 = image.Sample(textureSampler, float2(v_in.uv.x, (base + 8.0 * gap * 0.5) * uv_pixel_interval.y));
+    float3 p8 = scan_to_linear(t8.rgb) * t8.a;
+    float4 t9 = image.Sample(textureSampler, float2(v_in.uv.x, (base + 9.0 * gap * 0.5) * uv_pixel_interval.y));
+    float3 p9 = scan_to_linear(t9.rgb) * t9.a;
+    float4 t10 = image.Sample(textureSampler, float2(v_in.uv.x, (base + 10.0 * gap * 0.5) * uv_pixel_interval.y));
+    float3 p10 = scan_to_linear(t10.rgb) * t10.a;
     float3 light = float3(0.0, 0.0, 0.0);
-    for (int k = -1; k <= 2; k++) {
-        float li = n + float(k);
-        if (li < 0.0 || li >= last)
-            continue;
-        float yc = (li + 0.5) * gap;
-
-        // The picture filtered down to the lines, in light, premultiplied by
-        // transparency: a Gaussian over half a line either way (five
-        // samples), so detail finer than the lines dims and softens rather
-        // than breaking up.
-        float3 v = float3(0.0, 0.0, 0.0);
-        for (int t = -2; t <= 2; t++) {
-            float4 s = image.Sample(textureSampler, float2(v_in.uv.x, (yc + float(t) * gap * 0.5) * uv_pixel_interval.y));
-            float wt = t == 0 ? 1.0 : (abs(t) == 1 ? 0.60653066 : 0.13533528);
-            v += wt * scan_to_linear(s.rgb) * s.a;
-        }
-        v /= 2.48373188;
-
-        // Each colour's beam, wider the brighter it is, its light spread
-        // over the line's share of height and summed over this pixel.
-        float3 sig = lerp(float3(s_dark, s_dark, s_dark), float3(s_bright, s_bright, s_bright), sqrt(saturate(v)));
-        float3 share = scan_cdf((y1 - yc) / sig) - scan_cdf((y0 - yc) / sig);
-        light += v * share * gap;
-    }
+    light += scan_line(n - 1.0, last, gap, y0, y1, s_dark, s_bright, (0.13533528 * p0 + 0.60653066 * p1 + p2 + 0.60653066 * p3 + 0.13533528 * p4) / 2.48373188);
+    light += scan_line(n, last, gap, y0, y1, s_dark, s_bright, (0.13533528 * p2 + 0.60653066 * p3 + p4 + 0.60653066 * p5 + 0.13533528 * p6) / 2.48373188);
+    light += scan_line(n + 1.0, last, gap, y0, y1, s_dark, s_bright, (0.13533528 * p4 + 0.60653066 * p5 + p6 + 0.60653066 * p7 + 0.13533528 * p8) / 2.48373188);
+    light += scan_line(n + 2.0, last, gap, y0, y1, s_dark, s_bright, (0.13533528 * p6 + 0.60653066 * p7 + p8 + 0.60653066 * p9 + 0.13533528 * p10) / 2.48373188);
 
     // Coverage: the picture's own here (the gaps between lines are dark,
     // not see-through), and wherever a beam's light reaches past it.

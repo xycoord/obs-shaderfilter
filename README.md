@@ -68,7 +68,7 @@ each part as a filter of its own with the same settings and presets.
 | Shader | What it does |
 |---|---|
 | **Film Look** | The whole projected-film look in one filter: film, projector and lens, each part with a tick, and 13 presets. |
-| **Film** | Everything the film adds: Film Print, Halation, softness, Film Grain and Dust & Scratches in one pass. |
+| **Film** | Everything the film adds: Film Print, Halation, softness, Film Grain and Dust & Scratches in one filter. |
 | Film Print | The print's tone and colour: contrast, a soft roll-off to white, fading, and colour, black and white, sepia or tints. |
 | Halation | The warm halo film gives round bright parts. |
 | Film Grain | Film grain that changes with brightness, in colour or not, at a film's frame rate. |

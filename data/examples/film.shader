@@ -45,6 +45,22 @@ uniform int Speed<
 
 #include "film_parts.hlsl"
 
+// The halo, drawn small (see halo_parts.hlsl).
+float4 stage1(VertData v_in) : TARGET
+{
+    return halo_down(v_in.uv);
+}
+
+float4 stage2(VertData v_in) : TARGET
+{
+    return halo_blur(v_in.uv, float2(1.0, 0.0));
+}
+
+float4 stage3(VertData v_in) : TARGET
+{
+    return halo_blur(v_in.uv, float2(0.0, 1.0));
+}
+
 float4 mainImage(VertData v_in) : TARGET
 {
     return film_at(v_in.uv, float(Film_Amount) * 0.01, floor(elapsed_time * float(Speed)));
