@@ -242,15 +242,18 @@ float4 mainImage(VertData v_in) : TARGET
         wa += ka;
         a_s += kl * s.a;
     }
-    // (Brightness is taken out of premultiplied with transparency filtered
-    // the same way, held between half the smooth transparency and 1 so the
-    // filter's ringing can't dim or brighten it; the result's transparency
-    // is that same filtered transparency, so over black an edge against
-    // transparency is as bright as the same picture on black.)
-    a_s = clamp(a_s / wl, a_l / wa * 0.5, 1.0);
     y_l /= wl;
     a_l /= wa;
     y_w /= ww;
+    // Nothing here to see: fully (or all but) transparent.
+    if (a_l < 0.001)
+        return float4(0.0, 0.0, 0.0, 0.0);
+    // Brightness is taken out of premultiplied with transparency filtered
+    // the same way, held between half the smooth transparency and 1 so the
+    // filter's ringing can't dim or brighten it; the result's transparency
+    // is that same filtered transparency, so over black an edge against
+    // transparency is as bright as the same picture on black.
+    a_s = clamp(a_s / wl, max(a_l * 0.5, 0.001), 1.0);
     float y_out = y_l + (Sharpening * A / 24.1) * (y_l - y_w);
 
     float sigma_c = 404.8 / max(Chroma_Resolution, 1.0) * A;
@@ -271,9 +274,7 @@ float4 mainImage(VertData v_in) : TARGET
             a_c += k * s.a;
         }
     }
-    if (a_l <= 0.0)
-        return float4(0.0, 0.0, 0.0, 0.0);
-    float y_here = max(y_out / a_s, 0.0) * (1.0 + (White_Level * 0.01 - 1.0) * A);
+    float y_here = clamp(y_out / a_s, 0.0, 2.0) * (1.0 + (White_Level * 0.01 - 1.0) * A);
     float2 smeared = yiq_c.yz / max(a_c, 0.0001) * smoothstep(0.0, 0.03, yiq_c.x / max(a_c, 0.0001));
     float2 follows = yiq_c.yz / max(yiq_c.x, 0.0001) * y_here;
     float sat = 1.0 + (Saturation * 0.01 - 1.0) * A;

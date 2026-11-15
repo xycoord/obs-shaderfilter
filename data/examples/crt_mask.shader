@@ -66,7 +66,7 @@ float4 mainImage(VertData v_in) : TARGET
     // This pixel's position in units of the pitch: Pitch on a 1080-line
     // picture, rounded to whole pixels of this one, at least 3.
     float p = max(floor(Pitch / (uv_pixel_interval.y * 1080.0) + 0.5), 3.0);
-    float2 q = (floor(v_in.uv / uv_pixel_interval) + 0.5) / p;
+    float2 q = (floor(v_in.uv / uv_pixel_interval) + float2(0.0, 0.5)) / p;
 
     // How much of each colour's phosphor is here, from 0 to 1, smooth.
     float3 phase = float3(0.0, 1.0 / 3.0, 2.0 / 3.0);

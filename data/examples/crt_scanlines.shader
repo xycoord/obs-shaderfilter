@@ -86,7 +86,7 @@ float4 mainImage(VertData v_in) : TARGET
 
     // The two nearest lines above and below.
     float n = floor(y / gap - 0.5);
-    float last = ceil(height / gap - 0.001);
+    float last = floor(height / gap + 0.5);
     float3 light = float3(0.0, 0.0, 0.0);
     for (int k = -1; k <= 2; k++) {
         float li = n + float(k);

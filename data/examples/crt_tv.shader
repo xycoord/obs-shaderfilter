@@ -179,7 +179,7 @@ float4 mainImage(VertData v_in) : TARGET
     float s_bright = bw * 0.01 * gap / 2.3548;
     float s_dark = s_bright / (1.0 + Blooming * 0.01 * max(A, 1.0));
     float n = floor(y / gap - 0.5);
-    float last = ceil(height / gap - 0.001);
+    float last = floor(height / gap + 0.5);
     float3 light = float3(0.0, 0.0, 0.0);
     float cover = 0.0;
     for (int kk = -1; kk <= 2; kk++) {
@@ -218,7 +218,7 @@ float4 mainImage(VertData v_in) : TARGET
     float ms = min(Mask_Strength * A, 100.0) * 0.01;
     if (ms > 0.0) {
         float pitch = max(floor(Pitch / (uv_pixel_interval.y * 1080.0) + 0.5), 3.0);
-        float2 q = (floor(v_in.uv / uv_pixel_interval) + 0.5) / pitch;
+        float2 q = (floor(v_in.uv / uv_pixel_interval) + float2(0.0, 0.5)) / pitch;
         float3 phase = float3(0.0, 1.0 / 3.0, 2.0 / 3.0);
         float3 g;
         if (Mask_Type == 0) {

@@ -98,8 +98,10 @@ float4 mainImage(VertData v_in) : TARGET
     // tenth a third of the way above it, from 25 samples across two of its
     // periods either side. A wider Gaussian of the same samples (standard
     // deviation 1012 / TVL pixels) is the detail circuit's reference, and a
-    // positive Gaussian filters transparency, which can't ring. All the
-    // weights are fixed: only the spacing follows the setting.
+    // positive Gaussian of transparency, which can't ring, bounds it. All the
+    // weights are fixed: only the spacing follows the setting. (The
+    // result's transparency is the sinc-filtered one, held within the
+    // Gaussian's, below.)
     float step_l = 360.0 / max(Luma_Resolution, 1.0);
     float y_l = 0.0;
     float y_w = 0.0;
@@ -124,15 +126,18 @@ float4 mainImage(VertData v_in) : TARGET
         wa += ka;
         a_s += kl * s.a;
     }
-    // (Brightness is taken out of premultiplied with transparency filtered
-    // the same way, held between half the smooth transparency and 1 so the
-    // filter's ringing can't dim or brighten it; the result's transparency
-    // is that same filtered transparency, so over black an edge against
-    // transparency is as bright as the same picture on black.)
-    a_s = clamp(a_s / wl, a_l / wa * 0.5, 1.0);
     y_l /= wl;
     a_l /= wa;
     y_w /= ww;
+    // Nothing here to see: fully (or all but) transparent.
+    if (a_l < 0.001)
+        return float4(0.0, 0.0, 0.0, 0.0);
+    // Brightness is taken out of premultiplied with transparency filtered
+    // the same way, held between half the smooth transparency and 1 so the
+    // filter's ringing can't dim or brighten it; the result's transparency
+    // is that same filtered transparency, so over black an edge against
+    // transparency is as bright as the same picture on black.
+    a_s = clamp(a_s / wl, max(a_l * 0.5, 0.001), 1.0);
     float sigma_c = 404.8 / max(Chroma_Resolution, 1.0);
 
     // The detail circuit: the luma's difference from the wider luma, scaled
@@ -162,9 +167,7 @@ float4 mainImage(VertData v_in) : TARGET
             a_c += k * s.a;
         }
     }
-    if (a_l <= 0.0)
-        return float4(0.0, 0.0, 0.0, 0.0);
-    float y_here = max(y_out / a_s, 0.0) * (White_Level * 0.01);
+    float y_here = clamp(y_out / a_s, 0.0, 2.0) * (White_Level * 0.01);
 
     // The colour, two ways. 30% is tape colour as it is: the
     // smeared average (straight, not premultiplied), kept wherever there's
