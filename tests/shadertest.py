@@ -125,10 +125,46 @@ def is_transition(name: str) -> bool:
     return "image_a" in text and "image_b" in text
 
 
+# Shaders the reference release can't run as written, because they use a
+# plugin feature added since: the reference renders instead what they are
+# built to equal, with the given settings on both sides.
+REF_EQUIVALENTS = {
+    # Multi-stage (stage1 before mainImage): the release draws only
+    # mainImage. Film Look is Film, Projector and Lens chained (to within a
+    # level: it keeps 16 bits between its passes, the chain 8). Their random
+    # parts are off on both sides, since one filter and three draw different
+    # random numbers.
+    "film_look.shader": (["film.shader", "projector.shader", "lens.shader"],
+                         {"Grain_On": False, "Dust_On": False, "Weave_On": False, "Flicker_On": False}),
+}
+
+
 def filt(name: str, **extra) -> dict:
     s = shader_file(name)
+    if name in REF_EQUIVALENTS:
+        s.update(REF_EQUIVALENTS[name][1])
     s.update(extra)
     return {"id": "shader_filter", "settings": s}
+
+
+def ref_equivalent_cases(cases: list[dict]) -> list[dict]:
+    """The cases as the reference renders them (see REF_EQUIVALENTS)."""
+    out = json.loads(json.dumps(cases))
+    for c in out:
+        if "filters" not in c:
+            continue
+        filters = []
+        for f in c["filters"]:
+            path = f.get("settings", {}).get("shader_file_name", "")
+            name = Path(path).name if path else ""
+            if name in REF_EQUIVALENTS:
+                chain, settings = REF_EQUIVALENTS[name]
+                own = {k: v for k, v in f["settings"].items() if k not in shader_file(name)}
+                filters += [dict(f, settings={**shader_file(n), **settings, **own}) for n in chain]
+            else:
+                filters.append(f)
+        c["filters"] = filters
+    return out
 
 
 STEPS = [{"dt": 0.05}, {"dt": 0.45, "capture": True}, {"dt": 1.0, "capture": True}]
@@ -475,11 +511,11 @@ def cmd_parity(args) -> int:
         for d in (ref_out, new_out):
             shutil.rmtree(d, ignore_errors=True)
         t0 = time.time()
-        ref_cases = cases
+        ref_cases = ref_equivalent_cases(cases)
         if args.ref_examples:
             # The reference renders the shader files in another folder (e.g. the
             # originals, to check an optimised shader against them).
-            ref_cases = json.loads(json.dumps(cases).replace(json.dumps(str(EXAMPLES))[1:-1],
+            ref_cases = json.loads(json.dumps(ref_cases).replace(json.dumps(str(EXAMPLES))[1:-1],
                                                               json.dumps(str(Path(args.ref_examples).resolve()))[1:-1]))
         ref = run_sharded(args, args.ref, args.ref_data, base, ref_cases, ref_out, args.jobs)
         new_spec_cases = cases
