@@ -1,81 +1,44 @@
-# obs-shaderfilter
+# obs-shaderfilter (xycoord's fork)
 
-## Introduction
+A shader filter for [OBS Studio](https://obsproject.com/): add it to any source, pick a shader, and adjust it. About
+180 shaders come with it, among them complete looks — film, VHS, CRT — that are quick to get right without knowing
+what every part does, and it runs shaders you write yourself.
 
-The obs-shaderfilter plugin for [OBS Studio](http://obsproject.com/) is intended to allow users to apply 
-their own shaders to OBS sources. This theoretically makes possible some simple effects like drop shadows
-that can be implemented strictly in shader code. 
+> **This is a fork** of [Exeldro's obs-shaderfilter](https://github.com/exeldro/obs-shaderfilter) (release 2.6.1),
+> which grew from [nleseul's original plugin](https://github.com/nleseul/obs-shaderfilter). The plugin, the shader
+> format and most of the bundled shaders are theirs and their contributors'; see [Credits](#credits). The fork isn't
+> theirs: please report problems with it [here](https://github.com/xycoord/obs-shaderfilter/issues), not upstream.
 
-Please note that this plugin may expose a reasonable number of bugs in OBS, as it uses the shader parser and 
-the property system in somewhat unusual ways.
+## What's different in this fork
 
-## Performance
+- **Complete looks, with parts you can switch off.** *Film Look* is one filter for a whole projected-film look: the
+  print's colour, halation, grain, dust and scratches, gate weave, flicker, the frame's edge and the lens. Each part
+  has a tick, so you can have the look without the dust. 13 tuned Looks set everything at once, and each part is also
+  a filter of its own. The *VHS & CRT* pack has all-in-one VHS Tape and CRT TV filters with presets, and each part
+  on its own.
+- **Looks of your own,** for any shader: **Save as a Look…** keeps a filter's settings to use on other filters.
+- **A settings panel you can use without knowing the shader:** a Look list that says when you've changed a Look,
+  and which parts are off, and puts it back; the main settings first and the rest behind **Show All Settings**; units on
+  the numbers; and what the shader costs in GPU time.
+- **Easier to find a shader:** **Recently used** first, categories, shaders few people need kept at the end, a
+  remembered category, and ↑/↓ to step through shaders while watching the preview. Filters are named after their
+  shader.
+- **Faster stacks of shader filters**, with the same output (see [Performance](#performance)).
+- **More for shader authors:** sections with ticks, settings shown only on request, units, several passes in one
+  shader, buttons that switch a filter to a larger shader keeping its settings, and Look files (see
+  [Writing shaders](#writing-shaders)).
+- **Tested against release 2.6.1** in a headless OBS: every bundled shader, chains of filters, transitions and the
+  settings panel (see [Testing](#testing)).
 
-Several shader filters stacked on one source render much faster than they used to, with no change to
-your scenes or shaders:
-
-* **Consecutive shader filters hand their output straight to each other.** Previously every filter made
-  OBS render its input into a texture, copied it, ran its shader, and copied the result into the next
-  filter's texture: three full-screen passes per filter. Now a run of N shader filters costs N + 2 passes.
-  The first filter also lets a plain source (image, text, colour…) draw itself straight into its input.
-* **Filters that only read the pixel they are drawing are merged into the filter before them.** Colour
-  grading, invert, opacity, gamma, hue, vignette and many more only ever call
-  `image.Sample(textureSampler, v_in.uv)`; such a filter is compiled together with the one upstream of it
-  into a single shader, so a run of them costs one pass.
-* Output is the same as before: the plugin reproduces, inside the shaders, exactly what the removed passes
-  did to the pixels (8-bit storage, premultiplying and un-premultiplying alpha in linear light), so even
-  translucent pixels match to within a rounding step.
-
-Anything that can't be reproduced exactly keeps the old path for that link: full `.effect` files upstream,
-a `.shader` containing its own `technique`, `previous_output` or `#define USE_PM_ALPHA 1` upstream, and
-HDR colour spaces. Set the environment variable `SHADERFILTER_NO_FUSION=1` to turn merging off.
-
-Each filter's own effect is compiled exactly as before; the linked and merged versions are separate effects,
-so if one of them fails to compile the filters simply render the old way (the OBS log says so). Compiling
-stalls OBS's graphics thread, so they are only compiled when that happens anyway: when a scene collection
-loads, a filter is added, a shader is edited or "Reload effect" is pressed. Toggling, reordering or removing
-filters during a show never causes a stall; until the new arrangement's effect has been prepared (at the
-next of those moments), the filters render linked or the old way.
-
-Measured on a software GPU at 1080p. These are relative, not absolute, numbers; a real GPU should gain at
-least as much, since the passes removed are memory-bandwidth-bound copies:
-
-| Filters on one source | before | after | full-screen draws |
-|---|---|---|---|
-| 5 colour filters (grade, invert, opacity, gamma, luminance) | 123 ms | 36 ms | 17 → 4 |
-| 5 effects (hue, chromatic aberration, VHS, glow, vignette) | 167 ms | 99 ms | 17 → 7 |
-| the same with glow expanded by 16 px | 170 ms | 97 ms | 17 → 7 |
-| 1 filter | 29 ms | 23 ms | 5 → 4 |
+Scenes saved with 2.6.1 keep working, including filters with their shader code typed in.
 
 ## Installation
 
-The binary package mirrors the structure of the OBS Studio installation directory, so you should be able to
-just drop its contents alongside an OBS Studio install (usually at C:\Program Files\obs-studio\). The 
-necessary files should look like this: 
+The package mirrors OBS Studio's installation folder: copy its contents over an OBS Studio install (on Windows,
+usually `C:\Program Files\obs-studio\`). The plugin goes in `obs-plugins/64bit/`, and its shaders and translations in
+`data/obs-plugins/obs-shaderfilter/` (`examples/` and `locale/`).
 
-    obs-studio
-    |---data
-    |   |---obs-plugins
-    |       |---obs-shaderfilter
-    |           |---examples
-    |               |---blink.shader
-    |               |---border.shader
-    |               |---drop_shadow.shader
-    |               |---filter-template.effect
-    |               |---multiply.shader
-    |               |---pulse.effect
-    |               |---rectangular_drop_shadow.shader
-    |               |---rounded_rect.shader
-    |               |---many more...
-    |           |---locale
-    |               |---en-US.ini
-    |---obs-plugins
-        |---32bit
-        |   |---obs-shaderfilter.dll
-        |---64bit
-            |---obs-shaderfilter.dll
-
-## Usage
+## Using it
 
 Add the filter to any source through "Filters" when right-clicking it; it is called "Shader".
 
@@ -91,9 +54,11 @@ Add the filter to any source through "Filters" when right-clicking it; it is cal
 - The list starts with the shaders you used last (**Recently used**). Shaders few people need (another shader or
   one of OBS's own filters does the job, or they're demos) are at the end, under **More shaders**; they all still
   work, and Search finds them.
-- The shader's parameters follow, in a "*Shader* Settings" group. Shaders with a `<name>.presets.ini`
-  next to them start the group with a **Preset** list: choosing a preset sets the
-  sliders, which you can then adjust.
+- The shader's settings follow. Shaders with presets start with a **Look** (or **Preset**) list: choosing one sets
+  every setting, which you can then adjust. After a change the list says so ("Classic Film (16mm) — changed"), and
+  **Back to** puts the Look back. A shader made of parts, such as Film Look, shows each part in a box with a tick on
+  its heading: untick it to leave that part out (its settings are kept). Settings most people won't need are behind
+  **Show All Settings**.
 - **Your own Looks:** **Save as a Look…** keeps a filter's settings (part ticks included) as a Look of your own, for
   every filter using that shader; it's listed under **Your Looks** after the shader's own presets, and works for any
   shader, with presets or without. Picking one sets everything it saved; after a change, **Update** saves the change
@@ -106,6 +71,8 @@ Add the filter to any source through "Filters" when right-clicking it; it is cal
   effects such as shadows that draw outside the source; shown next to the settings of shaders that need it),
   "Reload Shader File" for after editing the file in a text editor, and, for filters saved by older versions
   with their shader code typed in, that code. Such filters keep working.
+
+## Writing shaders
 
 The shader list for a folder can be given categories, display names, cost ratings and the `more` flag with a `library.ini`
 next to the shaders; see [data/examples/library.ini](data/examples/library.ini). Presets go in a
@@ -128,9 +95,7 @@ in the properties window to have their values set. Currently, only `int`, `float
 parameters are supported. (`float4` parameters will be interpreted by the properties window as colors.) `string` is used for 
 notes and instructions, but could be used in an effect or shader. Variable names are displayed in the GUI with underscore replaced with space `uniform float Variable_Name` becomes `Variable Name`.
 
-Version 2.0 and up support setting label, widget_type, minimum, maximum, step using annotations.
-Version 2.1 and up support setting group using annotations.
-A slider that has a minimum of -1.0, maximum of 1.0, and a step size of 0.01:
+Annotations set a setting's label, widget, range, step and group. A slider from -1.0 to 1.0 in steps of 0.01:
 ```
 // Contrast from -1.0 to 1.0
 uniform float Contrast<
@@ -182,7 +147,7 @@ name, or of a name its `string from = "film_grain:Amount, halation:Strength";` a
 rest take the Look this filter had (or their defaults). The film pack's filters use it for **Switch to Film Look**,
 and a run of Film, Projector and Lens filters can be combined into one Film Look the same way.
 
-#### Several passes
+### Several passes
 
 A shader that needs a pass's result around each pixel (a blur of an earlier effect, say) can do it in stages:
 `float4 stage1(VertData v_in) : TARGET`, then `stage2` and so on (up to 4), before `mainImage`. Each stage is drawn
@@ -198,7 +163,7 @@ float4 mainImage(VertData v_in) : TARGET
 }
 ```
 
-#### Defaults
+### Defaults
 
 You set default values as a normal assignment ```uniform string notes = 'my note';```, except for `float4` 
 which requires bracket \{\} notation like ```uniform float4 mycolor = { 0.75, 0.75, 0.75, 1.0};``` 
@@ -211,7 +176,8 @@ the OBS log file (Help -> Log Files).
 
 The plugin automatically populates a few parameters which your shader can use. If you choose to override the entire
 effect, be sure to define these as `uniform` variables and use them where necessary. (The filter should gracefully 
-handle these variables being missing, but the shader may malfunction.)
+handle these variables being missing, but the shader may malfunction.) A version in brackets is the release of
+the original plugin that added it.
 
 * **`ViewProj`** (`float4x4`)&mdash;The view/projection matrix. (Standard for all OBS filters.)
 * **`image`** (`texture2d`)&mdash;The image to which the filter is being applied, either the original output of 
@@ -260,92 +226,61 @@ The plugin provides some optional pre-processing macros.
 * **`#define <NAME> <value>`** This allows you to define constants to be used throughout your shader. Constants can be values or even simple functions. Anywhere the value in `<NAME>` is found in your shader, it will be replaced with whatever is in `<value>`.  For example, after putting `#define PI 3.14159` near the top of your shader file, you can use code like: `float circle_area = PI * radius * radius;`.  Note, the `#define` line should NOT be ended with a semicolon.
 * **`#define USE_PM_ALPHA 1`** By default, OBS will pass through pre-multiplied alpha color values. This can cause issues if the source being filtered has opacity values that are not zero or one. By default, shaderfilter now corrects internally for premultipled alpha, but if you have written an older shader that does the correction itself, you can turn off the correction by placing `#define USE_PM_ALPHA 1` near the top of your shader file.
 
-### Example shaders
+## Bundled shaders
 
-Several examples are provided in the plugin's *data/examples* folder. These can be used as-is for some hopefully
-useful common tasks, or used as a reference in developing your own shaders. Note that the *.shader* and *.effect* 
-extensions are for clarity only, and have no specific meaning to the plugin. Text files with any extension can be
-loaded. In a standard, *.effect* files include a vertex shader and *.shader* only has a pixel shader.
+The shaders that come with the plugin are in [data/examples](data/examples), listed by category in the Shader
+list as [library.ini](data/examples/library.ini) says: Film & Lens, VHS & CRT, Retro & Glitch, Color, Blur & Glow,
+Light, Distort, Stylize, Shapes & Masks, Backgrounds & Patterns, Motion, Clocks & Meters and Utility. 44 that few
+people need are listed last, under **More shaders**: near-copies of another shader, jobs one of OBS's own filters
+does (Opacity, Flip, Color Key, Luma Key), and demos. They all still work.
 
-I recommend *.shader* as they do not require `Use Effect File (.effect)` as pixel shaders, while *.effect* signifies vertex shaders with `Use Effect File (.effect)` required.
-| File                            | Description                                                                                                                                                                                                                                                                                                                                                                                             | Example                                                                                                   |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| 3d-panel.shader                 |                                                                                                                                                                                                                                                                                                                                                                                                         | ![image](https://github.com/user-attachments/assets/c8486d30-2ee2-46e8-bb57-fe8491b469b3)                 |
-| animated_texture.effect         | Animates a texture with polar sizing and color options                                                                                                                                                                                                                                                                                                                                                  |                                                                                                           |
-| alpha-gaming-bent-camera.shader |                                                                                                                                                                                                                                                                                                                                                                                                         | ![image](https://github.com/exeldro/obs-shaderfilter/assets/5457024/5fb6fec8-fc1b-46eb-96aa-17ce37a7ca20) |
-| ascii.shader                    | a little example of ascii art                                                                                                                                                                                                                                                                                                                                                                           | ![image](https://github.com/exeldro/obs-shaderfilter/assets/5457024/682ad2d3-d32a-464e-a3af-0791ba0fc829) |
-| audio.shader                    | An example of a shader that reacts to real audio monitoring.
-| background_removal.effect       | simple implementation of background removal. Optional color space corrections                                                                                                                                                                                                                                                                                                                           |                                                                                                           |
-| blink.shader                    | A shader that fades the opacity of the output in and out over time, with a configurable speed multiplier. Demonstrates the user of the `elapsed_time` parameter.                                                                                                                                                                                                                                        |                                                                                                           |
-| bloom.shader                    | simple shaders to add bloom effects                                                                                                                                                                                                                                                                                                                                                                     | ![image](https://github.com/exeldro/obs-shaderfilter/assets/5457024/567e5dc4-ec20-42fa-a344-2be1e6516b01) |
-| border.shader                   | A shader that adds a solid border to all extra pixels outside the bounds of the input.                                                                                                                                                                                                                                                                                                                  |                                                                                                           |
-| box-blur.shader                 |                                                                                                                                                                                                                                                                                                                                                                                                         | ![image](https://github.com/exeldro/obs-shaderfilter/assets/5457024/076efaca-c8fa-4e08-8906-46fde354dbb8) |
-| burn.shader                     |                                                                                                                                                                                                                                                                                                                                                                                                         | ![image](https://github.com/exeldro/obs-shaderfilter/assets/5457024/8d703243-2db3-4fc1-8c2f-836d61fcee13) |
-| cartoon.effect                  | Simple Cartooning based on hue and steps of detail value.                                                                                                                                                                                                                                                                                                                                               | ![image](https://github.com/exeldro/obs-shaderfilter/assets/5457024/17d272f0-b692-4452-b982-522a98d7a1f5) |
-| cell_shaded.shader              |                                                                                                                                                                                                                                                                                                                                                                                                         | ![image](https://github.com/exeldro/obs-shaderfilter/assets/5457024/d07aa2ef-05fc-407f-82ab-448f0aca8730) |
-| Chroma+UV-Distortion.shader     |                                                                                                                                                                                                                                                                                                                                                                                                         | ![image](https://github.com/exeldro/obs-shaderfilter/assets/5457024/c0db01c3-1e87-450c-9b4f-56a6e61a07b1) |
-| chromatic-aberration.shader     |                                                                                                                                                                                                                                                                                                                                                                                                         | ![image](https://github.com/exeldro/obs-shaderfilter/assets/5457024/ab99dc36-b9c2-405d-b9ca-3216866003fa) |
-| drop_shadow.shader              | A shader that adds a basic drop shadow to the input. Note that this is done with a simple uniform blur, so it won't look quite as good as a proper Gaussian blur. This is also an O(N&sup2;) blur on the size of the blur, so be very conscious of your GPU usage with a large blur size.                                                                                                               |                                                                                                           |
-| dynamic-mask.shader             |                                                                                                                                                                                                                                                                                                                                                                                                         | ![image](https://github.com/exeldro/obs-shaderfilter/assets/5457024/60bac8ea-f5be-4122-8ac7-542faf051c9f) |
-| edge_detection.shader           | A shader that detects edges of color. Includes support for alpha channels.                                                                                                                                                                                                                                                                                                                              |                                                                                                           |
-| filter_template.effect          | A copy of the default effect used by the plugin, which simply renders the input directly to the output after scaling UVs to reflect any extra border pixels. This is useful as a starting point for developing new effects, especially those that might need a custom vertex shader. (Note that modifying this file will  not affect the internal effect template used by the plugin.)                  |                                                                                                           |
-| filter_template.shader          | A copy of the default shader used by the plugin, which simply renders the input directly to the output after scaling UVs to reflect any extra border pixels. This is useful as a starting point for developing new pixel shaders. (Note that modifying this file will not affect the internal effect template used by the plugin.)                                                                      |                                                                                                           |
-| fire.shader                     | A fire example converted from shadertoy with lots of added options.                                                                                                                                                                                                                                                                                                                                     | [youtube example](https://youtu.be/jcTsC0zSNAs)                                                           |
-| glow.shader                     | simple shaders to add glow effects, with some additional options for animation                                                                                                                                                                                                                                                                                                                          |                                                                                                           |
-| glitch_analog.shader            | A shader that creates glitch effects similar to analog signal issues. Includes support for alpha channel.                                                                                                                                                                                                                                                                                               |                                                                                                           |
-| gb-camera.shader                |                                                                                                                                                                                                                                                                                                                                                                                                         | ![image](https://github.com/exeldro/obs-shaderfilter/assets/5457024/b8b85e0c-918b-4fd4-bc0c-6161569b6610) |
-| gradient.shader                 | This shader has a little brother *simple_gradient.shader*, but lets you choose three colors and animate gradients.                                                                                                                                                                                                                                                                                      |                                                                                                           |
-| halftone.shader                 |                                                                                                                                                                                                                                                                                                                                                                                                         | ![image](https://github.com/exeldro/obs-shaderfilter/assets/5457024/e7a555ec-ae7c-4580-b9d2-14fde0b4992d) |
-| hexagon.shader                  | A shader that creates a grid of hexagons with several options for you to set. This is an example of making shapes.                                                                                                                                                                                                                                                                                      |                                                                                                           |
-| hard_blink.shader               | Blinks the source on and off at configurable intervals.                                                                                                                                                                                                                                                                                                                                                 |                                                                                                           |
-| intensity-scope.shader          |                                                                                                                                                                                                                                                                                                                                                                                                         | ![image](https://github.com/exeldro/obs-shaderfilter/assets/5457024/c4fd64ab-64d1-42b0-9929-ba1e3d7a6466) |
-| gaussian-simple.shader          | A simple gaussian shader for bluring. Really implements closer to a box shader.                                                                                                                                                                                                                                                                                                                         |                                                                                                           |
-| luminance.shader                | A shader that adds an alpha layer based on brightness instead of color. Extremely useful for making live video special effects, like replacing backgrounds or foregrounds.                                                                                                                                                                                                                              |                                                                                                           |
-| matrix.effect                   | The cat is a glitch conversion from shadertoy. Updated with several configurable options.(1.2)                                                                                                                                                                                                                                                                                                          | ![image](https://github.com/exeldro/obs-shaderfilter/assets/5457024/79d2b028-4ea8-405d-a560-846f3ea78357) |
-| multiply.shader                 | A shader that multiplies the input by another image specified in the parameters. Demonstrates the use of user-defined `texture2d` parameters.                                                                                                                                                                                                                                                           |                                                                                                           |
-| night_sky.shader                | Animated moon, clouds, stars background(1.2)                                                                                                                                                                                                                                                                                                                                                            | ![image](https://github.com/exeldro/obs-shaderfilter/assets/5457024/8202deaa-7b60-417f-abd6-30c97b617b14) |
-| page-peel.shader                |                                                                                                                                                                                                                                                                                                                                                                                                         | ![image](https://github.com/exeldro/obs-shaderfilter/assets/5457024/9ebb8c1a-4a6d-4425-a344-36dd05533db2) |
-| perlin_noise.effect             | An effect generates perlin_noise, used to make water, clouds and glitch effects.                                                                                                                                                                                                                                                                                                                        | ![image](https://github.com/exeldro/obs-shaderfilter/assets/5457024/62f3c4eb-74b5-4dbf-9e6e-e726c8734861) |
-| pie-chart.shader                |                                                                                                                                                                                                                                                                                                                                                                                                         | ![image](https://github.com/exeldro/obs-shaderfilter/assets/5457024/bf44b9aa-23e5-4261-a0f8-b287d3012db7) |
-| pixelation.shader               |                                                                                                                                                                                                                                                                                                                                                                                                         | ![image](https://github.com/exeldro/obs-shaderfilter/assets/5457024/88b9db62-9fc7-4a1a-b7a2-cf22355be390) |
-| pulse.effect                    | An effect that varies the size of the output over time. This demonstrates a custom vertex shader that manipulates the position of the rendered vertices based on user data. Note that moving the vertices in the vertex shader will not affect the logical size of the source in OBS, and this may mean that pixels outside the source's  bounds will get cut off by later filters in the filter chain. |                                                                                                           |
-| rainbow.shader                  | Creates Rainbow effects, animated, rotating, horizontal or vertical. This is an expensive process and limiters are implemented.                                                                                                                                                                                                                                                                         | ![image](https://github.com/exeldro/obs-shaderfilter/assets/5457024/3aa68f8f-ea24-4e9d-a813-1769d9aaf507) |
-| rain-window.shader              |                                                                                                                                                                                                                                                                                                                                                                                                         | ![image](https://github.com/exeldro/obs-shaderfilter/assets/5457024/a5c60cfc-e98e-41cd-9e9a-e10367d7e1e0) |
-| rectangular_drop_shadow.shader  | A shader that renders an optimized drop shadow for sources that are opaque and rectangular. Pixels inside the bounds of the input are treated as solid; pixels outside are treated as opaque. The complexity of the blur does not increase with its size, so you should be able to make your blur size as large as you like wtihout affecting GPU load.                                                 |                                                                                                           |
-| remove_partial_pixels.shader    | A shader that removes pixels with partial alpha, excellent for cleaning up green screens.                                                                                                                                                                                                                                                                                                               |                                                                                                           |
-| repeat.effect                   | Duplicates the input video as many times as you like and organizes on the screen.                                                                                                                                                                                                                                                                                                                       | ![image](https://github.com/exeldro/obs-shaderfilter/assets/5457024/19ba6e94-af2a-472a-954d-3d9bdebde99e) |
-| repeat_texture.effect           | As above, but add a texture input to repeat instead of the input source.                                                                                                                                                                                                                                                                                                                                | ![image](https://github.com/exeldro/obs-shaderfilter/assets/5457024/08b3d442-7705-4674-9e70-12b727150947) |
-| rgb_color_wheel.shader          | A rotatable RGB color wheel!                                                                                                                                                                                                                                                                                                                                                                            | ![image](https://github.com/exeldro/obs-shaderfilter/assets/5457024/b087379c-7aca-40b1-9f2d-d55343b7eb4d) |
-| rgb_split.shader                |                                                                                                                                                                                                                                                                                                                                                                                                        | ![image](https://github.com/exeldro/obs-shaderfilter/assets/5457024/ddca6372-1ee6-495a-be52-4b6cc27be89e) |
-| RGSSAA.shader                   | Performs RGSSAA (Rotated Grid Super Sampling Anti-aliasing), a form of anti-aliasing. Useful to apply before a sharpen pass (e.g on a webcam feed).                                                                                                                                                                                                                                                     |                                                                                                           |
-| rotatoe.effect                  | A test rotation effect                                                                                                                                                                                                                                                                                                                                                                                  |                                                                                                           |
-| rounded_rect.shader             | A shader that rounds the corners of the input, optionally adding a border outside the rounded edges.                                                                                                                                                                                                                                                                                                    |                                                                                                           |
-| rounded_stroke.shader           | A shader that rounds the corners of the input, optionally adding a border outside the rounded edges. Updated by Exeldro. Several shaders have been upgraded with Apply To Specific Color for you to animate borders.                                                                                                                                                                                    | [https://youtu.be/J8mQIEKvWt0](https://youtu.be/J8mQIEKvWt0)                                              |
-| scan_line.shader                | An effect that creates old style tv scan lines, for glitch style effects.                                                                                                                                                                                                                                                                                                                               | ![image](https://github.com/exeldro/obs-shaderfilter/assets/5457024/d5913e00-ff88-4276-8b12-e13305e5c2bd) |
-| seasick.shader                  |                                                                                                                                                                                                                                                                                                                                                                                                         |                                                                                                           |
-| selective_color.shader          | Create black and white effects with some colorization. (defaults: .4,.03,.25,.25, 5.0, true,true, true, true. cuttoff higher = less color, 0 = all 1 = none)                                                                                                                                                                                                                                            | ![image](https://github.com/exeldro/obs-shaderfilter/assets/5457024/868780e9-aa88-4546-a1cb-d7fcc23a18ca) |
-| shake.effect                    | creates random screen glitch style shake. Keep the random_scale low for small (0.2-1) for small  jerky movements and larger for less often big jumps.                                                                                                                                                                                                                                                   |                                                                                                           |
-| shine.shader                    | Add shine / glow to any element, use the transition luma wipes (obs-studio\plugins\obs-transitions\data\luma_wipes *SOME NEW WIPES INCLUDED IN THIS RELEASE ZIP*) or create your own, also includes a glitch (using rand_f), hide/reveal, reverse and ease, start adjustment and stop adjustment                                                                                                        |                                                                                                           |
-| smart_denoise.shader            | A shader that denoise your noisy video input, based on the GLSL implementation in [BrutPitt/glslSmartDeNoise](https://github.com/BrutPitt/glslSmartDeNoise)                                                                                                                                                                                                                                             |                                                                                                           |
-| spotlight.shader                | Creates a stationary or animated spotlight effect with color options, speed of animation and glitch                                                                                                                                                                                                                                                                                                     | ![image](https://github.com/exeldro/obs-shaderfilter/assets/5457024/f9aebc02-4da5-4d30-b2f3-a9d9d7511f9f) |
-| Swirl.shader                    |                                                                                                                                                                                                                                                                                                                                                                                                         | ![image](https://github.com/exeldro/obs-shaderfilter/assets/5457024/722bc6fc-7c75-455f-a3bd-94607e621e74) |
-| thermal.shader                  |                                                                                                                                                                                                                                                                                                                                                                                                         | ![image](https://github.com/exeldro/obs-shaderfilter/assets/5457024/f12e1040-51a6-4401-a84b-160f19c8f907) |
-| tv-crt-subpixel.shader          |                                                                                                                                                                                                                                                                                                                                                                                                         | ![image](https://github.com/exeldro/obs-shaderfilter/assets/5457024/38d06b91-e75b-4d76-82ee-e116d306a247) |
-| twist.shader                    |                                                                                                                                                                                                                                                                                                                                                                                                         | ![image](https://github.com/exeldro/obs-shaderfilter/assets/5457024/6998bbee-8a44-4a5d-82b4-ca92f246e826) |
-| VCR.shader                      |                                                                                                                                                                                                                                                                                                                                                                                                         | ![image](https://github.com/exeldro/obs-shaderfilter/assets/5457024/8e4b5663-2135-4a4e-b912-6e58a6c29628) |
-| VHS.shader                      |                                                                                                                                                                                                                                                                                                                                                                                                         | ![image](https://github.com/exeldro/obs-shaderfilter/assets/5457024/c61ca22f-c62c-4b38-9c28-555e57e3951b) |
-| vignetting.shader               | A shader that reduces opacity further from the center of the image. inner radius is the start and outer radius is the end. suggested default settings is opacity 0.5, innerRadius = 0.5, outerRadius = 1.2                                                                                                                                                                                              | ![image](https://github.com/exeldro/obs-shaderfilter/assets/5457024/b7d32bb9-014d-4152-9be1-8bdb498121f0) |
-| voronoi-pixelation.shader       |                                                                                                                                                                                                                                                                                                                                                                                                         | ![image](https://github.com/exeldro/obs-shaderfilter/assets/5457024/102317d5-ba5f-48bf-8666-c1d2b5850813) |
-| ZigZag.shader                   |                                                                                                                                                                                                                                                                                                                                                                                                         | ![image](https://github.com/exeldro/obs-shaderfilter/assets/5457024/3e3006cd-9f2a-4a7e-905c-50d80173e861) |
-| zoom_blur.shader                | A shader that creates a zoom with blur effect based on a number of samples and magnitude of each sample. It also includes an animation with or without easing and a glitch option. Set speed to zero to not use animation. Suggested values are 15 samples and 30-50 magnitude.                                                                                                                         |                                                                                                           |
+Many shaders say at the top who wrote them or where they're adapted from (often Shadertoy). `filter_template.shader` and
+`filter_template.effect` are starting points for your own.
 
+## Performance
+
+Several shader filters stacked on one source render much faster than in release 2.6.1, with no change to
+your scenes or shaders:
+
+* **Consecutive shader filters hand their output straight to each other.** Previously every filter made
+  OBS render its input into a texture, copied it, ran its shader, and copied the result into the next
+  filter's texture: three full-screen passes per filter. Now a run of N shader filters costs N + 2 passes.
+  The first filter also lets a plain source (image, text, colour…) draw itself straight into its input.
+* **Filters that only read the pixel they are drawing are merged into the filter before them.** Colour
+  grading, invert, opacity, gamma, hue, vignette and many more only ever call
+  `image.Sample(textureSampler, v_in.uv)`; such a filter is compiled together with the one upstream of it
+  into a single shader, so a run of them costs one pass.
+* Output is the same as before: the plugin reproduces, inside the shaders, exactly what the removed passes
+  did to the pixels (8-bit storage, premultiplying and un-premultiplying alpha in linear light), so even
+  translucent pixels match to within a rounding step.
+
+Anything that can't be reproduced exactly keeps the old path for that link: full `.effect` files upstream,
+a `.shader` containing its own `technique`, `previous_output` or `#define USE_PM_ALPHA 1` upstream, and
+HDR colour spaces. Set the environment variable `SHADERFILTER_NO_FUSION=1` to turn merging off.
+
+Each filter's own effect is compiled exactly as before; the linked and merged versions are separate effects,
+so if one of them fails to compile the filters simply render the old way (the OBS log says so). Compiling
+stalls OBS's graphics thread, so they are only compiled when that happens anyway: when a scene collection
+loads, a filter is added, a shader is edited or "Reload effect" is pressed. Toggling, reordering or removing
+filters during a show never causes a stall; until the new arrangement's effect has been prepared (at the
+next of those moments), the filters render linked or the old way.
+
+Measured on a software GPU at 1080p. These are relative, not absolute, numbers; a real GPU should gain at
+least as much, since the passes removed are memory-bandwidth-bound copies:
+
+| Filters on one source | before | after | full-screen draws |
+|---|---|---|---|
+| 5 colour filters (grade, invert, opacity, gamma, luminance) | 123 ms | 36 ms | 17 → 4 |
+| 5 effects (hue, chromatic aberration, VHS, glow, vignette) | 167 ms | 99 ms | 17 → 7 |
+| the same with glow expanded by 16 px | 170 ms | 97 ms | 17 → 7 |
+| 1 filter | 29 ms | 23 ms | 5 → 4 |
 
 ## Building
 
 If you wish to build the obs-shaderfilter plugin from source, you should just need [CMake](https://cmake.org/) 
 and the OBS Studio libraries and headers.
 
-* [obs-shaderfilter source repository](https://github.com/exeldro/obs-shaderfilter)
+* [This fork's source repository](https://github.com/xycoord/obs-shaderfilter)
 * [OBS Studio source repository](https://github.com/obsproject/obs-studio)
 
 1. In-tree build
@@ -379,5 +314,15 @@ scenarios (`tests/ui/shots.py`), for reviewing the UI. Pass `--theme` one of OBS
 `themes/Yami.qss` is its default) so group boxes, ticks and spacing are drawn as OBS draws them; without it a rough
 stand-in style is used, whose group boxes look like no OBS theme's.
 
-## Donations
-https://www.paypal.me/exeldro
+## Credits
+
+- **[nleseul](https://github.com/nleseul/obs-shaderfilter)** wrote the original obs-shaderfilter.
+- **[Exeldro](https://github.com/exeldro/obs-shaderfilter)** took it on from version 2 and built it into the plugin
+  this fork starts from (setting annotations and groups, many of the standard parameters, and the bundled shader
+  collection, gathered with their authors). If the plugin is useful to you, consider supporting Exeldro:
+  [paypal.me/exeldro](https://www.paypal.me/exeldro).
+- **Everyone who contributed upstream:** shaders, fixes and translations; see the
+  [contributors](https://github.com/exeldro/obs-shaderfilter/graphs/contributors) and each shader's header.
+- **This fork's changes** (listed [above](#whats-different-in-this-fork)) are xycoord's.
+
+The plugin is under the GNU General Public License, version 2; see [LICENSE](LICENSE).
