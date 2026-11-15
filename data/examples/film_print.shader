@@ -28,7 +28,7 @@ uniform int Stock<
 > = 0;
 uniform float Contrast<
     string label = "Contrast";
-    string tooltip = "How strong the print's S-curve is, in percent: shadows pressed down and midtones filled out. 0 leaves the tones as they are.";
+    string tooltip = "How strong the print's S-curve is, in percent: shadows pressed down and midtones filled out. 0 leaves them as they are.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 100.0;
@@ -42,6 +42,14 @@ uniform float White<
     float maximum = 100.0;
     float step = 0.5;
 > = 96.0;
+uniform float Roll_Off<
+    string label = "Highlight Roll-off";
+    string tooltip = "How softly the brightest parts roll off into White (the print's shoulder), in percent: 0 is a straight line up to White; more compresses the highlights and lifts the midtones a little.";
+    string widget_type = "slider";
+    float minimum = 0.0;
+    float maximum = 100.0;
+    float step = 1.0;
+> = 40.0;
 uniform float Fade<
     string label = "Fade";
     string tooltip = "How much colour has faded out of the print, in percent: 0 is a new print, 100 has no colour left.";
@@ -77,8 +85,10 @@ float4 mainImage(VertData v_in) : TARGET
     float3 s = xs * xs * (3.0 - 2.0 * xs) + (x - xs);
     float3 rgb = lerp(x, s, Contrast * 0.01);
 
-    // The shoulder: rolls off smoothly into White (exactly White at 1).
-    rgb = (1.0 - exp(-0.8 * rgb)) / (1.0 - exp(-0.8)) * (White * 0.01);
+    // The shoulder: rolls off smoothly into White (exactly White at 1; a
+    // straight line at a Roll-off of 0).
+    float k = max(Roll_Off * 0.02, 0.0001);
+    rgb = (1.0 - exp(-k * rgb)) / (1.0 - exp(-k)) * (White * 0.01);
 
     // The stock.
     float l = dot(rgb, float3(0.2126, 0.7152, 0.0722));
