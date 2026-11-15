@@ -102,7 +102,10 @@ The shader list for a folder can be given categories, display names and cost rat
 next to the shaders; see [data/examples/library.ini](data/examples/library.ini). Presets go in a
 `<shader name>.presets.ini` beside the shader: one `[section]` per preset with `parameter = value` lines
 (`;` starts a comment); see
-[data/examples/film_grain.presets.ini](data/examples/film_grain.presets.ini).
+[data/examples/film_grain.presets.ini](data/examples/film_grain.presets.ini). A `label = Look` line before the first
+preset makes them a list of Looks: the list takes that name, remembers the one picked, and after a change shows
+"*Look* (changed)" rather than Custom (picking the Look again puts it back), naming any sections that are unticked.
+The film pack's presets are all written from one table by [tools/film_looks.py](tools/film_looks.py).
 
 Normally all that's required for OBS purposes is a pixel shader (a `.shader` file), and the plugin wraps it
 with a standard template that adds a basic vertex shader and other boilerplate. A full `.effect` file lets

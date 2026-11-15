@@ -2111,9 +2111,14 @@ static void presets_free(preset_list_t *list)
 	da_free((*list));
 }
 
-static void presets_load(const char *shader_path, preset_list_t *out)
+/* label (if given) gets the file's "label = ..." line before its first
+ * preset, if it has one (NULL if not): the list's name, which also makes it
+ * a list of Looks (see the shader's settings). */
+static void presets_load_labelled(const char *shader_path, preset_list_t *out, char **label)
 {
 	da_init((*out));
+	if (label)
+		*label = NULL;
 	if (!shader_path || !*shader_path)
 		return;
 	struct dstr path = {0};
@@ -2146,8 +2151,19 @@ static void presets_load(const char *shader_path, preset_list_t *out)
 			continue;
 		}
 		const char *eq = strchr(line, '=');
-		if (!eq || !out->num)
+		if (!eq)
 			continue;
+		if (!out->num) {
+			char *key = trimmed(line, eq - line);
+			if (label && !*label && strcmp(key, "label") == 0) {
+				*label = trimmed(eq + 1, strlen(eq + 1));
+				size_t n = strlen(*label);
+				while (n && ((*label)[n - 1] == '\r' || (*label)[n - 1] == ' '))
+					(*label)[--n] = 0;
+			}
+			bfree(key);
+			continue;
+		}
 		char *key = trimmed(line, eq - line);
 		char *value = trimmed(eq + 1, strlen(eq + 1));
 		size_t vlen = strlen(value);
@@ -2159,6 +2175,11 @@ static void presets_load(const char *shader_path, preset_list_t *out)
 	}
 	strlist_free(lines);
 	bfree(text);
+}
+
+static void presets_load(const char *shader_path, preset_list_t *out)
+{
+	presets_load_labelled(shader_path, out, NULL);
 }
 
 static struct effect_param_data *find_param(struct shader_filter_data *filter, const char *name)
@@ -2299,8 +2320,9 @@ static bool shader_preset_changed(obs_properties_t *props, obs_property_t *p, ob
 	UNUSED_PARAMETER(p);
 	struct shader_filter_data *filter = props_filter(props);
 	const char *name = obs_data_get_string(settings, "shader_preset");
-	if (!filter || !name || !*name || !obs_data_get_bool(settings, "from_file"))
+	if (!filter || !name || !*name || *name == '~' || !obs_data_get_bool(settings, "from_file"))
 		return false;
+	obs_data_set_string(settings, "shader_look", name);
 	preset_list_t presets;
 	presets_load(obs_data_get_string(settings, "shader_file_name"), &presets);
 	bool applied = false;
@@ -3919,21 +3941,77 @@ static obs_properties_t *shader_filter_properties(void *data)
 		/* Presets first: choosing one sets the sliders below. The list shows
 		 * the preset the values match, or Custom. */
 		preset_list_t presets;
-		presets_load(file, &presets);
+		char *look_label = NULL;
+		presets_load_labelled(file, &presets, &look_label);
 		if (presets.num) {
-			obs_property_t *pl = obs_properties_add_list(params, "shader_preset", obs_module_text("ShaderFilter.Preset"),
+			/* A presets file with a "label" line is a list of Looks: the
+			 * list is named by it, remembers the Look last picked (shown
+			 * when several match), and after a change shows that Look
+			 * "(changed)" rather than Custom, with picking the Look itself
+			 * putting it back. Either way it says which sections are off,
+			 * since a Look doesn't set the ticks. */
+			const bool looks = look_label && *look_label;
+			obs_property_t *pl = obs_properties_add_list(params, "shader_preset",
+								     looks ? look_label : obs_module_text("ShaderFilter.Preset"),
 								     OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
-			obs_property_set_long_description(pl, obs_module_text("ShaderFilter.PresetHelp"));
-			obs_property_list_add_string(pl, obs_module_text("ShaderFilter.PresetCustom"), "");
+			obs_property_set_long_description(pl, obs_module_text(looks ? "ShaderFilter.LookHelp"
+										    : "ShaderFilter.PresetHelp"));
+			const char *last = looks ? obs_data_get_string(settings, "shader_look") : "";
 			const char *current = "";
-			for (size_t i = 0; i < presets.num; i++) {
-				obs_property_list_add_string(pl, presets.array[i].name, presets.array[i].name);
-				if (!*current && preset_matches(filter, settings, &presets.array[i]))
+			for (size_t i = 0; i < presets.num && !*current && *last; i++)
+				if (strcmp(presets.array[i].name, last) == 0 && preset_matches(filter, settings, &presets.array[i]))
 					current = presets.array[i].name;
+			for (size_t i = 0; i < presets.num && !*current; i++)
+				if (preset_matches(filter, settings, &presets.array[i]))
+					current = presets.array[i].name;
+			const char *base = current;
+			for (size_t i = 0; i < presets.num && looks && !*base && *last; i++)
+				if (strcmp(presets.array[i].name, last) == 0)
+					base = presets.array[i].name;
+			struct dstr offs = {0};
+			for (size_t i = 0; looks && i < filter->stored_param_list.num; i++) {
+				const struct effect_param_data *q = filter->stored_param_list.array + i;
+				if (param_is_section(q) && !obs_data_get_bool(settings, q->name.array)) {
+					if (offs.len)
+						dstr_cat(&offs, ", ");
+					dstr_cat(&offs, q->group.array);
+				}
 			}
-			obs_data_set_string(settings, "shader_preset", current);
+			if (!*base)
+				obs_property_list_add_string(pl, obs_module_text("ShaderFilter.PresetCustom"), "");
+			const char *selected = current;
+			struct dstr marker = {0};
+			for (size_t i = 0; i < presets.num; i++) {
+				const char *name = presets.array[i].name;
+				const bool here = *base && strcmp(name, base) == 0;
+				if (!here || (*current && !offs.len)) {
+					obs_property_list_add_string(pl, name, name);
+					continue;
+				}
+				/* This Look as it is now: changed, and/or with parts off. */
+				struct dstr text = {0};
+				if (!*current) {
+					obs_property_list_add_string(pl, name, name);
+					dstr_printf(&marker, "~%s", name);
+					dstr_printf(&text, obs_module_text(offs.len ? "ShaderFilter.LookChangedOff"
+										    : "ShaderFilter.LookChanged"),
+						    name, offs.array);
+					obs_property_list_add_string(pl, text.array, marker.array);
+					selected = marker.array;
+				} else {
+					dstr_printf(&text, obs_module_text("ShaderFilter.LookOff"), name, offs.array);
+					obs_property_list_add_string(pl, text.array, name);
+				}
+				dstr_free(&text);
+			}
+			if (*current && looks)
+				obs_data_set_string(settings, "shader_look", current);
+			obs_data_set_string(settings, "shader_preset", selected);
 			obs_property_set_modified_callback(pl, shader_preset_changed);
+			dstr_free(&marker);
+			dstr_free(&offs);
 		}
+		bfree(look_label);
 		presets_free(&presets);
 	}
 	if (filter && (filter->param_audio_magnitude || filter->param_audio_peak)) {
