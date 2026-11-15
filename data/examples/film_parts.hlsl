@@ -229,21 +229,19 @@ uniform bool Dust_On<
     string tooltip = "Specks of dust and hair, and scratches, on the film.";
 > = true;
 uniform float Dust<
-    string label = "Dust";
+    string label = "Specks per Frame";
     string group = "Dust & Scratches";
     string tooltip = "How many specks of dust or hair are on each frame, on average.";
     string widget_type = "slider";
-    string suffix = " per frame";
     float minimum = 0.0;
     float maximum = 16.0;
     float step = 0.05;
 > = 0.5;
 uniform float Scratches<
-    string label = "Scratches";
+    string label = "Scratches at Once";
     string group = "Dust & Scratches";
     string tooltip = "How many scratches are on screen at once, on average (up to 3).";
     string widget_type = "slider";
-    string suffix = " at once";
     float minimum = 0.0;
     float maximum = 3.0;
     float step = 0.05;

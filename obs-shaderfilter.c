@@ -2382,7 +2382,10 @@ static void apply_param_visibility(const struct shader_filter_data *filter, obs_
 	/* A group shows when it has a setting to show. (An unticked section's
 	 * settings show greyed, as OBS shows them, so it's clear what's off.) */
 	for (obs_property_t *g = obs_properties_first(params); g; obs_property_next(&g)) {
-		if (obs_property_get_type(g) != OBS_PROPERTY_GROUP)
+		/* (Only the shader's own groups: the panel's are its business.) */
+		if (obs_property_get_type(g) != OBS_PROPERTY_GROUP ||
+		    (strncmp(obs_property_name(g), "shader_group:", 13) != 0 &&
+		     !find_param((struct shader_filter_data *)filter, obs_property_name(g))))
 			continue;
 		bool any = false;
 		for (obs_property_t *c = obs_properties_first(obs_property_group_content(g)); c; obs_property_next(&c))
@@ -2395,11 +2398,12 @@ static bool param_visibility_changed(obs_properties_t *props, obs_property_t *p,
 {
 	UNUSED_PARAMETER(p);
 	struct shader_filter_data *filter = props_filter(props);
-	/* (OBS passes the whole panel; the shader's settings are in its group.) */
+	/* (OBS passes the whole panel; the shader's settings are in its group,
+	 * or in the panel itself when it has sections.) */
 	obs_property_t *group = obs_properties_get(props, "shader_params");
-	if (!filter || !group)
+	if (!filter)
 		return false;
-	apply_param_visibility(filter, obs_property_group_content(group), settings);
+	apply_param_visibility(filter, group ? obs_property_group_content(group) : props, settings);
 	return true;
 }
 
@@ -4407,7 +4411,14 @@ static obs_properties_t *shader_filter_properties(void *data)
 	update_browse_status(props, settings, n_listed, pos);
 
 	/* ---- the shader's own settings ---- */
-	obs_properties_t *params = obs_properties_create();
+	/* A shader whose settings are in sections shows them straight in the
+	 * panel: its sections are boxes already, and a box round them doubled
+	 * the margins and put their sliders out of line with the rest. Others
+	 * keep theirs in one "<shader> Settings" box. */
+	bool flat = false;
+	for (size_t i = 0; filter && has_file && i < filter->stored_param_list.num && !flat; i++)
+		flat = param_is_section(filter->stored_param_list.array + i);
+	obs_properties_t *params = flat ? props : obs_properties_create();
 	/* What a switch to this shader did, and how to undo it (above the Look,
 	 * so the Look and Amount stay together). */
 	if (filter && filter->switch_note && has_file) {
@@ -4829,9 +4840,10 @@ static obs_properties_t *shader_filter_properties(void *data)
 		section_ticks(filter, settings, &filter->built_ticks);
 	}
 
-	obs_property_t *first_param = obs_properties_first(params);
-	obs_properties_t *params_group = first_param ? params : NULL;
-	if (first_param) {
+	obs_property_t *first_param = flat ? NULL : obs_properties_first(params);
+	obs_properties_t *params_group = flat ? props : first_param ? params : NULL;
+	if (flat) {
+	} else if (first_param) {
 		struct dstr title = {0};
 		if (has_file || inline_code) {
 			char *name = has_file ? shader_display_name(file) : bstrdup(obs_module_text("ShaderFilter.SavedCodeName"));
