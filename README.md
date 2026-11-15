@@ -94,6 +94,11 @@ Add the filter to any source through "Filters" when right-clicking it; it is cal
 - The shader's parameters follow, in a "*Shader* Settings" group. Shaders with a `<name>.presets.ini`
   next to them start the group with a **Preset** list: choosing a preset sets the
   sliders, which you can then adjust.
+- **Your own presets:** **Save as a Preset…** keeps a filter's settings (part ticks included) as a preset of your own,
+  for every filter using that shader; it's listed under **Your presets** after the shader's own, and works for any
+  shader, with presets or without. Picking one sets everything it saved; after a change, **Save as a Preset…**
+  offers its name, so saving updates it (type another name for a new one), and **Delete** removes it. They're kept in
+  OBS's plugin settings folder (`obs-shaderfilter/presets/`), one file per shader name.
 - **How much it costs:** the Shader list marks shaders that take noticeably more GPU time than a simple
   color filter (Medium, Heavy, Very Heavy), and a chosen shader's settings show the GPU time it actually
   takes on this computer, per frame and as a share of a frame.
@@ -107,8 +112,8 @@ next to the shaders; see [data/examples/library.ini](data/examples/library.ini).
 `<shader name>.presets.ini` beside the shader: one `[section]` per preset with `parameter = value` lines
 (`;` starts a comment); see
 [data/examples/film_grain.presets.ini](data/examples/film_grain.presets.ini). The Preset list remembers the one
-picked, and after a change shows "*preset* — changed" rather than Custom (picking it again, or Back to, puts it back),
-naming any sections that are unticked. Before the first preset, a `default = <name>` line names the preset the
+picked, and after a change shows "*preset* — changed" rather than Custom, naming any sections that are unticked
+(picking the preset again puts it back, with every section ticked). Before the first preset, a `default = <name>` line names the preset the
 shader's defaults are, shown (of several with the same values) until another is picked, and a `label = ...` line
 renames the list; a `description = ...` line in a preset is shown under the list.
 The film pack's presets are all written from one table by [tools/film_looks.py](tools/film_looks.py).
