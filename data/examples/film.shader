@@ -140,7 +140,7 @@ uniform float Softness<
     float step = 0.05;
 > = 1.0;
 uniform float Grain<
-    string label = "Amount";
+    string label = "Grain Amount";
     string group = "Grain";
     string tooltip = "How strong the grain is (as Film Grain's Amount).";
     string widget_type = "slider";
@@ -396,6 +396,8 @@ float4 mainImage(VertData v_in) : TARGET
         float luma = dot(c.rgb, lw);
         float response = luma < 0.5 ? lerp(Grain_Shadows * 0.01, 1.0, smoothstep(0.0, 0.5, luma))
                                     : lerp(1.0, Grain_Highlights * 0.01, smoothstep(0.5, 1.0, luma));
+        // Fading to nothing below about 3% brightness, so black stays black.
+        response *= smoothstep(0.005, 0.03, luma);
         c.rgb = max(c.rgb + gr * (grain_amount * 0.0015 * response * fine), 0.0);
     }
 

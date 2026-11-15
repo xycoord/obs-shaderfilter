@@ -97,7 +97,7 @@ uniform float Dark_Frame_Depth<
 uniform float Uneven_Illumination<
     string label = "Uneven Illumination";
     string group = "Flicker";
-    string tooltip = "How much brighter one side, or the middle, of the picture is than the rest (in percent), moving from frame to frame.";
+    string tooltip = "How much brighter one side, or the middle, of the picture is than the rest (in percent), moving from frame to frame: the lamp's, unlike Lens's steady Corner Falloff.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 10.0;

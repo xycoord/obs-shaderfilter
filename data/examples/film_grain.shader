@@ -124,7 +124,11 @@ float4 mainImage(VertData v_in) : TARGET
     float response = luma < 0.5 ? lerp(Shadows * 0.01, 1.0, smoothstep(0.0, 0.5, luma))
                                 : lerp(1.0, Highlights * 0.01, smoothstep(0.5, 1.0, luma));
 
-    // Kept above 0 but not clipped at 1, so HDR highlights survive.
+    // Fading to nothing below about 3% brightness, so black stays exactly
+    // black (grain clipped at 0 would lift it, and show a projector's picture
+    // edge on the wall). Kept above 0 but not clipped at 1, so HDR highlights
+    // survive.
+    response *= smoothstep(0.005, 0.03, luma);
     c.rgb = max(c.rgb + grain * (Amount * 0.0015 * response * fine), 0.0);
     return c;
 }
