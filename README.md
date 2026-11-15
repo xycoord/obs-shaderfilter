@@ -87,6 +87,10 @@ Add the filter to any source through "Filters" when right-clicking it; it is cal
 - After choosing a shader, **↑/↓ on the Shader list** applies the next or previous one, so you can step
   through shaders while watching the preview. **Browse Shaders** shows Category and Search, to narrow the
   list (and so what ↑/↓ steps through), with the shader's place in it ("Shader 8 of 11 in Blur & Glow").
+  Browse Shaders and the category stay as you left them, on every filter and next time OBS starts.
+- The list starts with the shaders you used last (**Recently used**). Shaders few people need (another shader or
+  one of OBS's own filters does the job, or they're demos) are at the end, under **More shaders**; they all still
+  work, and Search finds them.
 - The shader's parameters follow, in a "*Shader* Settings" group. Shaders with a `<name>.presets.ini`
   next to them start the group with a **Preset** list: choosing a preset sets the
   sliders, which you can then adjust.
@@ -98,7 +102,7 @@ Add the filter to any source through "Filters" when right-clicking it; it is cal
   "Reload Shader File" for after editing the file in a text editor, and, for filters saved by older versions
   with their shader code typed in, that code. Such filters keep working.
 
-The shader list for a folder can be given categories, display names and cost ratings with a `library.ini`
+The shader list for a folder can be given categories, display names, cost ratings and the `more` flag with a `library.ini`
 next to the shaders; see [data/examples/library.ini](data/examples/library.ini). Presets go in a
 `<shader name>.presets.ini` beside the shader: one `[section]` per preset with `parameter = value` lines
 (`;` starts a comment); see
