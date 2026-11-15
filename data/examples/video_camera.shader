@@ -25,7 +25,7 @@ uniform float Detail_Size<
     string tooltip = "How wide the outlines are, in pixels on a 1080-line picture (the detail circuit's reach, as a blur's standard deviation).";
     string widget_type = "slider";
     float minimum = 0.5;
-    float maximum = 6.0;
+    float maximum = 4.0;
     float step = 0.1;
 > = 2.0;
 uniform float Coring<
@@ -68,20 +68,21 @@ float4 mainImage(VertData v_in) : TARGET
     float y = dot(c.rgb, lw);
 
     // The detail signal: brightness minus a Gaussian blur of it, from the
-    // pixel and two rings of eight (at 1 and 2 standard deviations), fixed, so
-    // the blur adds no noise of its own to sharpen.
+    // pixel and two rings of eight (at 1 and 2 standard deviations, the outer
+    // turned half a step so together they look sixteen ways), fixed, so the
+    // blur adds no noise of its own to sharpen. Weighted by transparency, so
+    // a transparent neighbour's stored colour doesn't count as picture.
     float2 r = Detail_Size / (uv_pixel_interval.y * 1080.0) * uv_pixel_interval;
-    float blur = y;
-    float total = 1.0;
+    float blur = y * c.a;
+    float total = c.a;
     for (int i = 0; i < 8; i++) {
         float ang = float(i) * 0.7853982;
-        float2 dir = float2(cos(ang), sin(ang));
-        float a = dot(image.Sample(textureSampler, v_in.uv + dir * r).rgb, lw);
-        float b = dot(image.Sample(textureSampler, v_in.uv + dir * r * 2.0).rgb, lw);
-        blur += 0.6065307 * a + 0.1353353 * b;
-        total += 0.6065307 + 0.1353353;
+        float4 sa = image.Sample(textureSampler, v_in.uv + float2(cos(ang), sin(ang)) * r);
+        float4 sb = image.Sample(textureSampler, v_in.uv + float2(cos(ang + 0.3926991), sin(ang + 0.3926991)) * r * 2.0);
+        blur += 0.6065307 * dot(sa.rgb, lw) * sa.a + 0.1353353 * dot(sb.rgb, lw) * sb.a;
+        total += 0.6065307 * sa.a + 0.1353353 * sb.a;
     }
-    blur /= total;
+    blur = total > 0.0 ? blur / total : y;
     float detail = y - blur;
     detail = sign(detail) * max(abs(detail) - Coring * 0.01, 0.0);
     float y2 = max(y + detail * Detail * 0.01, 0.0);
