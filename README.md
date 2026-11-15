@@ -148,6 +148,35 @@ uniform string notes<
 > = "add notes here";
 ```
 
+A group with a tick on its heading, to switch a part of the shader on and off: a `bool` with `widget_type = "section"`
+and the group's name. The group folds to its heading when unticked; its settings keep their values.
+```
+uniform bool Dust_On<
+  string label = "Dust & Scratches";
+  string widget_type = "section";
+  string group = "Dust & Scratches";
+> = true;
+```
+Settings most people won't need can be marked `string show = "more";`: they're shown only when the filter's
+**Show All Settings** is ticked (which appears only for shaders that mark something), and still apply while hidden.
+`string suffix = " %";` puts units after a number.
+
+#### Several passes
+
+A shader that needs a pass's result around each pixel (a blur of an earlier effect, say) can do it in stages:
+`float4 stage1(VertData v_in) : TARGET`, then `stage2` and so on (up to 4), before `mainImage`. Each stage is drawn
+in full, at 16 bits a channel, and is the next one's `image`; all of them share the shader's parameters.
+```
+float4 stage1(VertData v_in) : TARGET
+{
+    return image.Sample(textureSampler, v_in.uv) * 0.5; // the first pass
+}
+float4 mainImage(VertData v_in) : TARGET
+{
+    return image.Sample(textureSampler, v_in.uv + float2(4.0 * uv_pixel_interval.x, 0.0)); // sees stage1's result
+}
+```
+
 #### Defaults
 
 You set default values as a normal assignment ```uniform string notes = 'my note';```, except for `float4` 

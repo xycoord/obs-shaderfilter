@@ -231,11 +231,16 @@ technique DrawPremul\n\
 	}\n\
 }\n";
 
+/* The most stages (stage1 ... stageN before mainImage) a shader can have. */
+#define SF_MAX_STAGES 4
+
 struct effect_param_data {
 	struct dstr name;
 	struct dstr display_name;
 	struct dstr widget_type;
 	struct dstr group;
+	struct dstr show;   /* "more": only shown with "Show every setting" */
+	struct dstr suffix; /* units after a number, e.g. " %" */
 	struct dstr path;
 	struct dstr tooltip;
 	DARRAY(int) option_values;
@@ -421,6 +426,10 @@ struct shader_filter_data {
 	bool pointwise;
 	bool can_feed;
 	bool own_technique;
+	/* A multi-stage shader: stage1 ... stageN run in turn before mainImage,
+	 * each into its own texture, which is the next one's `image`. */
+	int n_stages;
+	gs_texrender_t *stage_render[SF_MAX_STAGES];
 	long effect_gen;
 	/* Ticks left in which derived effects may be compiled while showing,
 	 * after this filter's own effect was (re)built (a stall then anyway). */
@@ -621,6 +630,8 @@ static void shader_filter_clear_params(struct shader_filter_data *filter)
 		dstr_free(&param->display_name);
 		dstr_free(&param->widget_type);
 		dstr_free(&param->group);
+		dstr_free(&param->show);
+		dstr_free(&param->suffix);
 		dstr_free(&param->path);
 		dstr_free(&param->tooltip);
 		da_free(param->option_values);
@@ -832,6 +843,7 @@ static void shader_filter_reload_effect(struct shader_filter_data *filter)
 	filter->pointwise = false;
 	filter->can_feed = false;
 	filter->own_technique = false;
+	filter->n_stages = 0;
 	filter->effect_gen = os_atomic_inc_long(&effect_generation);
 	filter->fresh_ticks = 3;
 
@@ -876,7 +888,16 @@ static void shader_filter_reload_effect(struct shader_filter_data *filter)
 		 * (the first "Draw" wins), not necessarily through mainImage, so
 		 * it can't be linked from or fused. */
 		filter->own_technique = use_template && strstr(shader_text, "technique") != NULL;
-		if (use_template && !filter->own_technique && !filter->transition && !strstr(shader_text, "USE_PM_ALPHA")) {
+		filter->n_stages = 0;
+		while (use_template && !filter->own_technique && !filter->transition && filter->n_stages < SF_MAX_STAGES) {
+			char fn[32];
+			snprintf(fn, sizeof(fn), "float4 stage%d(", filter->n_stages + 1);
+			if (!strstr(shader_text, fn))
+				break;
+			filter->n_stages++;
+		}
+		if (use_template && !filter->own_technique && !filter->transition && !filter->n_stages &&
+		    !strstr(shader_text, "USE_PM_ALPHA")) {
 			filter->shader_body = shader_text;
 			filter->pointwise = sf_fusion_is_pointwise(shader_text);
 			filter->can_feed = sf_fusion_can_feed(shader_text);
@@ -887,6 +908,11 @@ static void shader_filter_reload_effect(struct shader_filter_data *filter)
 
 	if (use_template) {
 		dstr_cat(&effect_text, effect_template_end);
+		for (int i = 1; i <= filter->n_stages; i++)
+			dstr_catf(&effect_text,
+				  "\ntechnique Stage%d\n{\n\tpass\n\t{\n\t\tvertex_shader = mainTransform(v_in);\n"
+				  "\t\tpixel_shader = stage%d(v_in);\n\t}\n}\n",
+				  i, i);
 	}
 
 	// Create the effect.
@@ -1040,6 +1066,10 @@ static void shader_filter_reload_effect(struct shader_filter_data *filter)
 					dstr_copy(&cached_data->widget_type, (const char *)annotation_default);
 				} else if (strcmp(info.name, "group") == 0 && info.type == GS_SHADER_PARAM_STRING) {
 					dstr_copy(&cached_data->group, (const char *)annotation_default);
+				} else if (strcmp(info.name, "show") == 0 && info.type == GS_SHADER_PARAM_STRING) {
+					dstr_copy(&cached_data->show, (const char *)annotation_default);
+				} else if (strcmp(info.name, "suffix") == 0 && info.type == GS_SHADER_PARAM_STRING) {
+					dstr_copy(&cached_data->suffix, (const char *)annotation_default);
 				} else if (strcmp(info.name, "tooltip") == 0 && info.type == GS_SHADER_PARAM_STRING) {
 					dstr_copy(&cached_data->tooltip, (const char *)annotation_default);
 				} else if (strcmp(info.name, "minimum") == 0) {
@@ -1139,6 +1169,8 @@ static void shader_filter_destroy(void *data)
 		gs_texrender_destroy(filter->previous_output_texrender);
 	if (filter->sprite_buffer)
 		gs_vertexbuffer_destroy(filter->sprite_buffer);
+	for (size_t i = 0; i < SF_MAX_STAGES; i++)
+		gs_texrender_destroy(filter->stage_render[i]);
 	for (size_t i = 0; i < GPU_TIMER_SLOTS; i++) {
 		gs_timer_destroy(filter->gpu_slots[i].timer);
 		gs_timer_range_destroy(filter->gpu_slots[i].range);
@@ -2194,6 +2226,83 @@ static struct shader_filter_data *props_filter(obs_properties_t *props)
 			return param;
 	}
 	return NULL;
+}
+
+/* ---- Sections and "Show every setting" ----
+ * A bool setting with widget_type "section" and a group puts a tick on that
+ * group's heading: the group is then named after the bool (OBS keeps a
+ * checkable group's tick under the group's name), and when it's unticked
+ * the group folds to its heading. A setting with show = "more" is shown only
+ * when the filter's "Show every setting" is ticked, which appears only for
+ * shaders that mark something. Neither changes any value: hidden and folded
+ * settings keep theirs. */
+static bool param_is_section(const struct effect_param_data *param)
+{
+	return param->type == GS_SHADER_PARAM_BOOL && param->widget_type.array &&
+	       strcmp(param->widget_type.array, "section") == 0 && param->group.len;
+}
+
+static bool param_is_more(const struct effect_param_data *param)
+{
+	return param->show.array && strcmp(param->show.array, "more") == 0;
+}
+
+static const struct effect_param_data *section_of(const struct shader_filter_data *filter, const char *group)
+{
+	for (size_t i = 0; i < filter->stored_param_list.num; i++) {
+		const struct effect_param_data *q = filter->stored_param_list.array + i;
+		if (param_is_section(q) && strcmp(q->group.array, group) == 0)
+			return q;
+	}
+	return NULL;
+}
+
+/* Show or hide the shader's settings and groups for the ticks as they are. */
+static void apply_param_visibility(const struct shader_filter_data *filter, obs_properties_t *params, obs_data_t *settings)
+{
+	const bool all = obs_data_get_bool(settings, "show_all_settings");
+	for (size_t i = 0; i < filter->stored_param_list.num; i++) {
+		const struct effect_param_data *q = filter->stored_param_list.array + i;
+		if (param_is_section(q))
+			continue;
+		obs_property_t *p = obs_properties_get(params, q->name.array);
+		if (!p)
+			continue;
+		bool visible = all || !param_is_more(q);
+		const struct effect_param_data *sec = q->group.len ? section_of(filter, q->group.array) : NULL;
+		if (sec && !obs_data_get_bool(settings, sec->name.array))
+			visible = false;
+		obs_property_set_visible(p, visible);
+	}
+	/* A group shows when it has a setting to show; a section also shows,
+	 * folded, when unticked, unless everything in it is behind "more". */
+	for (obs_property_t *g = obs_properties_first(params); g; obs_property_next(&g)) {
+		if (obs_property_get_type(g) != OBS_PROPERTY_GROUP)
+			continue;
+		obs_properties_t *content = obs_property_group_content(g);
+		bool any = false;
+		bool any_main = false;
+		for (obs_property_t *c = obs_properties_first(content); c; obs_property_next(&c)) {
+			any = any || obs_property_visible(c);
+			const struct effect_param_data *q = NULL;
+			for (size_t i = 0; i < filter->stored_param_list.num && !q; i++)
+				if (strcmp(filter->stored_param_list.array[i].name.array, obs_property_name(c)) == 0)
+					q = filter->stored_param_list.array + i;
+			any_main = any_main || !q || !param_is_more(q);
+		}
+		const bool checkable = obs_property_group_type(g) == OBS_GROUP_CHECKABLE;
+		obs_property_set_visible(g, any || (checkable && (all || any_main)));
+	}
+}
+
+static bool param_visibility_changed(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
+{
+	UNUSED_PARAMETER(p);
+	struct shader_filter_data *filter = props_filter(props);
+	if (!filter)
+		return false;
+	apply_param_visibility(filter, props, settings);
+	return true;
 }
 
 static bool shader_preset_changed(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
@@ -3847,6 +3956,10 @@ static obs_properties_t *shader_filter_properties(void *data)
 
 	DARRAY(obs_property_t *) groups;
 	da_init(groups);
+	bool has_more = false;
+	bool all_added = false;
+	for (size_t i = 0; filter && i < filter->stored_param_list.num; i++)
+		has_more = has_more || param_is_more(filter->stored_param_list.array + i);
 
 	/* The shader's description (its "info" text) goes first, then its
 	 * parameters in the order it declares them. */
@@ -3856,7 +3969,7 @@ static obs_properties_t *shader_filter_properties(void *data)
 		struct effect_param_data *param = (filter->stored_param_list.array + param_index);
 		const bool is_info = param->type == GS_SHADER_PARAM_STRING && param->widget_type.array &&
 				     strcmp(param->widget_type.array, "info") == 0;
-		if (is_info != (pass == 0))
+		if (is_info != (pass == 0) || param_is_section(param))
 			continue;
 		const char *param_name = param->name.array;
 		const char *label = param->display_name.array;
@@ -3882,7 +3995,11 @@ static obs_properties_t *shader_filter_properties(void *data)
 			 * group called "Grain" beside a setting called Grain), and its
 			 * title shows an & as itself rather than as a shortcut key. */
 			struct dstr gname = {0};
-			dstr_printf(&gname, "shader_group:%s", group_name);
+			const struct effect_param_data *sec = section_of(filter, group_name);
+			if (sec)
+				dstr_copy(&gname, sec->name.array);
+			else
+				dstr_printf(&gname, "shader_group:%s", group_name);
 			for (size_t i = 0; i < groups.num; i++) {
 				const char *n = obs_property_name(groups.array[i]);
 				if (strcmp(n, gname.array) == 0) {
@@ -3893,9 +4010,20 @@ static obs_properties_t *shader_filter_properties(void *data)
 				struct dstr title = {0};
 				dstr_copy(&title, group_name);
 				dstr_replace(&title, "&", "&&");
+				if (!groups.num && has_more) {
+					obs_property_t *all = obs_properties_add_bool(params, "show_all_settings",
+										      obs_module_text("ShaderFilter.ShowAll"));
+					obs_property_set_long_description(all, obs_module_text("ShaderFilter.ShowAllHelp"));
+					obs_property_set_modified_callback(all, param_visibility_changed);
+					all_added = true;
+				}
 				group = obs_properties_create();
-				obs_property_t *p =
-					obs_properties_add_group(params, gname.array, title.array, OBS_GROUP_NORMAL, group);
+				obs_property_t *p = obs_properties_add_group(params, gname.array, title.array,
+									    sec ? OBS_GROUP_CHECKABLE : OBS_GROUP_NORMAL, group);
+				if (sec) {
+					shader_filter_set_tooltip(p, &sec->tooltip);
+					obs_property_set_modified_callback(p, param_visibility_changed);
+				}
 				da_push_back(groups, &p);
 				dstr_free(&title);
 			}
@@ -4092,10 +4220,23 @@ static obs_properties_t *shader_filter_properties(void *data)
 			break;
 		default:;
 		}
+		if (p && param->suffix.len) {
+			if (obs_property_get_type(p) == OBS_PROPERTY_FLOAT)
+				obs_property_float_set_suffix(p, param->suffix.array);
+			else if (obs_property_get_type(p) == OBS_PROPERTY_INT)
+				obs_property_int_set_suffix(p, param->suffix.array);
+		}
 		shader_filter_set_tooltip(p, &param->tooltip);
 		dstr_free(&display_name);
 	}
 	da_free(groups);
+	if (has_more && !all_added) {
+		obs_property_t *all = obs_properties_add_bool(params, "show_all_settings", obs_module_text("ShaderFilter.ShowAll"));
+		obs_property_set_long_description(all, obs_module_text("ShaderFilter.ShowAllHelp"));
+		obs_property_set_modified_callback(all, param_visibility_changed);
+	}
+	if (filter)
+		apply_param_visibility(filter, params, settings);
 
 	obs_property_t *first_param = obs_properties_first(params);
 	obs_properties_t *params_group = first_param ? params : NULL;
@@ -5108,11 +5249,34 @@ static void gpu_timer_end(struct shader_filter_data *filter, struct gpu_timer_sl
 	filter->gpu_slot = (filter->gpu_slot + 1) % GPU_TIMER_SLOTS;
 }
 
-static void draw_shader(struct shader_filter_data *filter, gs_effect_t *effect, gs_texture_t *texture, enum out_form form)
+/* Stage `i` of a multi-stage shader (its parameters bound, `image` its
+ * input), drawn into its own 16-bit texture so nothing bands between stages;
+ * returns that texture, the next stage's input. */
+static gs_texture_t *draw_stage(struct shader_filter_data *filter, int i, gs_texture_t *texture)
+{
+	filter->stage_render[i] = create_or_reset_texrender(filter->stage_render[i], GS_RGBA16F);
+	char tech[16];
+	snprintf(tech, sizeof(tech), "Stage%d", i + 1);
+	gs_blend_state_push();
+	gs_reset_blend_state();
+	gs_enable_blending(false);
+	gs_blend_function(GS_BLEND_ONE, GS_BLEND_ZERO);
+	if (gs_texrender_begin(filter->stage_render[i], filter->total_width, filter->total_height)) {
+		gs_ortho(0.0f, (float)filter->total_width, 0.0f, (float)filter->total_height, -100.0f, 100.0f);
+		while (gs_effect_loop(filter->effect, tech))
+			gs_draw_sprite(texture, 0, filter->total_width, filter->total_height);
+		gs_texrender_end(filter->stage_render[i]);
+	}
+	gs_blend_state_pop();
+	return gs_texrender_get_texture(filter->stage_render[i]);
+}
+
+static void draw_shader(struct shader_filter_data *filter, gs_effect_t *effect, gs_texture_t *texture, enum out_form form,
+			bool timed)
 {
 	/* This is the filter's own pass (with any filters merged into it); the
 	 * passes of filters before it happen before this, so aren't counted. */
-	struct gpu_timer_slot *timing = gpu_timer_begin(filter);
+	struct gpu_timer_slot *timing = timed ? gpu_timer_begin(filter) : NULL;
 
 	gs_blend_state_push();
 	gs_reset_blend_state();
@@ -5150,8 +5314,17 @@ static void render_shader(struct shader_filter_data *filter, gs_texture_t *textu
 	if (!texture)
 		return;
 	prepare_output(filter);
+	/* A multi-stage shader's stages first, all timed together with its
+	 * last pass. Every pass binds the parameters afresh: ending a technique
+	 * clears an effect's parameter values. */
+	struct gpu_timer_slot *timing = filter->n_stages ? gpu_timer_begin(filter) : NULL;
+	for (int i = 0; i < filter->n_stages && texture; i++) {
+		bind_shader_params(filter, texture, f, filter_to);
+		texture = draw_stage(filter, i, texture);
+	}
 	bind_shader_params(filter, texture, f, filter_to);
-	draw_shader(filter, filter->effect, texture, form);
+	draw_shader(filter, filter->effect, texture, form, !filter->n_stages);
+	gpu_timer_end(filter, timing);
 }
 
 /* ------------------------------------------------------------------------
@@ -5506,7 +5679,7 @@ static void render_derived(struct shader_filter_data **stages, size_t n, struct 
 				bfree(val);
 			}
 		}
-		draw_shader(last, de->effect, input, form);
+		draw_shader(last, de->effect, input, form, true);
 		last->group_n = (uint32_t)n;
 		last->group_tick = last->gpu_tick;
 		for (size_t i = 0; i + 1 < n; i++)
