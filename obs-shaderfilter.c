@@ -3878,18 +3878,28 @@ static obs_properties_t *shader_filter_properties(void *data)
 		}
 		obs_properties_t *group = NULL;
 		if (group_name && strlen(group_name)) {
+			/* A group's own name is kept apart from the settings' names (a
+			 * group called "Grain" beside a setting called Grain), and its
+			 * title shows an & as itself rather than as a shortcut key. */
+			struct dstr gname = {0};
+			dstr_printf(&gname, "shader_group:%s", group_name);
 			for (size_t i = 0; i < groups.num; i++) {
 				const char *n = obs_property_name(groups.array[i]);
-				if (strcmp(n, group_name) == 0) {
+				if (strcmp(n, gname.array) == 0) {
 					group = obs_property_group_content(groups.array[i]);
 				}
 			}
 			if (!group) {
+				struct dstr title = {0};
+				dstr_copy(&title, group_name);
+				dstr_replace(&title, "&", "&&");
 				group = obs_properties_create();
 				obs_property_t *p =
-					obs_properties_add_group(params, group_name, group_name, OBS_GROUP_NORMAL, group);
+					obs_properties_add_group(params, gname.array, title.array, OBS_GROUP_NORMAL, group);
 				da_push_back(groups, &p);
+				dstr_free(&title);
 			}
+			dstr_free(&gname);
 		}
 		if (!group)
 			group = params;
