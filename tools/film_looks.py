@@ -50,7 +50,7 @@ LOOKS = {
         Fringing=2, Corner_Falloff=15, Distortion=0.8, Corner_Softness=0.5),
     # 16mm, the defaults: visible grain, a soft warm print, a round frame.
     "Classic Film (16mm)": dict(
-        Speed=24, Stock=COLOUR, Warmth=50, Fade=15, Contrast=35, White=96, Roll_Off=40, Black_Lift=0, Softness=1.0,
+        Speed=24, Stock=COLOUR, Warmth=50, Fade=15, Contrast=35, White=97, Roll_Off=40, Black_Lift=0, Softness=0.8,
         Halation_Strength=13, Halation_Size=22, Halation_Threshold=78,
         Grain=26, Grain_Size=1.9, Grain_Colour=10, Grain_Shadows=70, Grain_Highlights=30,
         Dust=0.5, Scratches=0, Speck_Size=5, Light_Specks=25, Dust_Strength=50,
@@ -61,10 +61,10 @@ LOOKS = {
         Fringing=5, Corner_Falloff=25, Distortion=2, Corner_Softness=1.0),
     # Rich, punchy colour with no fade, for colourful graphics.
     "Vivid Colour": dict(
-        Speed=24, Stock=COLOUR, Warmth=32, Fade=0, Contrast=48, White=97, Roll_Off=40, Black_Lift=0, Softness=1.0,
-        Halation_Strength=13, Halation_Size=22, Halation_Threshold=78,
-        Grain=18, Grain_Size=1.8, Grain_Colour=8, Grain_Shadows=60, Grain_Highlights=30,
-        Dust=0.2, Scratches=0, Speck_Size=5, Light_Specks=25, Dust_Strength=50,
+        Speed=24, Stock=COLOUR, Warmth=24, Fade=0, Contrast=56, White=97, Roll_Off=40, Black_Lift=0, Softness=1.0,
+        Halation_Strength=10, Halation_Size=22, Halation_Threshold=78,
+        Grain=15, Grain_Size=1.8, Grain_Colour=8, Grain_Shadows=60, Grain_Highlights=30,
+        Dust=0, Scratches=0, Speck_Size=5, Light_Specks=25, Dust_Strength=50,
         Weave=0.8, Jump=0.6, Hand_Cranking=0,
         Exposure_Flicker=2.5, Lamp_Flicker=2, Dark_Frames=1, Dark_Frame_Depth=15, Uneven_Illumination=1.5,
         Lamp_Brightness=100,
@@ -83,20 +83,20 @@ LOOKS = {
         Fringing=5, Corner_Falloff=25, Distortion=2, Corner_Softness=1.0),
     # A glow round everything bright, soft all over, a soft frame.
     "Dreamy Glow": dict(
-        Speed=24, Stock=COLOUR, Warmth=45, Fade=20, Contrast=20, White=96, Roll_Off=60, Black_Lift=0, Softness=1.0,
-        Halation_Strength=18, Halation_Size=40, Halation_Threshold=68,
-        Grain=18, Grain_Size=2.0, Grain_Colour=10, Grain_Shadows=60, Grain_Highlights=30,
+        Speed=24, Stock=COLOUR, Warmth=45, Fade=20, Contrast=20, White=96, Roll_Off=60, Black_Lift=0, Softness=1.5,
+        Halation_Strength=15, Halation_Size=40, Halation_Threshold=60,
+        Grain=12, Grain_Size=1.6, Grain_Colour=10, Grain_Shadows=60, Grain_Highlights=30,
         Dust=0, Scratches=0, Speck_Size=5, Light_Specks=25, Dust_Strength=40,
         Weave=0.6, Jump=0.4, Hand_Cranking=0,
         Exposure_Flicker=2, Lamp_Flicker=2, Dark_Frames=0, Dark_Frame_Depth=10, Uneven_Illumination=1.5,
         Lamp_Brightness=100,
         Corner_Radius=40, Inset=10, Gate_Softness=10,
-        Fringing=4, Corner_Falloff=35, Distortion=2, Corner_Softness=1.5),
+        Fringing=4, Corner_Falloff=28, Distortion=2, Corner_Softness=1.5),
     # Home movies: big grain, warm, rich colour, a lively weave.
     "Home Movie (Super 8)": dict(
-        Speed=18, Stock=COLOUR, Warmth=65, Fade=14, Contrast=40, White=97, Roll_Off=45, Black_Lift=0, Softness=0.9,
+        Speed=18, Stock=COLOUR, Warmth=65, Fade=14, Contrast=40, White=97, Roll_Off=45, Black_Lift=0, Softness=0.8,
         Halation_Strength=15, Halation_Size=26, Halation_Threshold=70,
-        Grain=28, Grain_Size=2.5, Grain_Colour=6, Grain_Shadows=75, Grain_Highlights=35,
+        Grain=28, Grain_Size=2.3, Grain_Colour=6, Grain_Shadows=75, Grain_Highlights=35,
         Dust=0.6, Scratches=0.1, Speck_Size=6, Light_Specks=30, Dust_Strength=55,
         Weave=1.5, Jump=1.2, Hand_Cranking=0,
         Exposure_Flicker=3, Lamp_Flicker=1.8, Dark_Frames=4, Dark_Frame_Depth=15, Uneven_Illumination=2.5,
@@ -129,19 +129,19 @@ LOOKS = {
     # A 1920s silent film: black and white, 18 frames a second, a little
     # hand-cranked, dark corners and some wear.
     "Silent Film": dict(
-        Speed=18, Stock=BW, Warmth=10, Fade=0, Contrast=62, White=97, Roll_Off=45, Black_Lift=0, Softness=1.0,
+        Speed=18, Stock=BW, Warmth=20, Fade=0, Contrast=62, White=97, Roll_Off=45, Black_Lift=0, Softness=1.0,
         Halation_Strength=18, Halation_Size=18, Halation_Threshold=65,
-        Grain=30, Grain_Size=2.2, Grain_Colour=0, Grain_Shadows=80, Grain_Highlights=35,
+        Grain=27, Grain_Size=2.2, Grain_Colour=0, Grain_Shadows=80, Grain_Highlights=35,
         Dust=0.8, Scratches=0.5, Speck_Size=6, Light_Specks=25, Dust_Strength=60,
         Weave=1.2, Jump=1.0, Hand_Cranking=15,
         Exposure_Flicker=3, Lamp_Flicker=2, Dark_Frames=5, Dark_Frame_Depth=12, Uneven_Illumination=3,
         Lamp_Brightness=100,
         Corner_Radius=45, Inset=8, Gate_Softness=10,
-        Fringing=1, Corner_Falloff=48, Distortion=2.5, Corner_Softness=1.5),
+        Fringing=1, Corner_Falloff=40, Distortion=2.5, Corner_Softness=1.5),
     # Sepia-toned like an old photograph: contrasty, a little aged.
     "Sepia (Old Photo)": dict(
-        Speed=24, Stock=SEPIA, Warmth=0, Fade=0, Contrast=34, White=97, Roll_Off=40, Black_Lift=0, Softness=1.0,
-        Halation_Strength=18, Halation_Size=18, Halation_Threshold=68,
+        Speed=24, Stock=SEPIA, Warmth=0, Fade=0, Contrast=30, White=97, Roll_Off=40, Black_Lift=0, Softness=1.0,
+        Halation_Strength=14, Halation_Size=18, Halation_Threshold=68,
         Grain=24, Grain_Size=1.8, Grain_Colour=0, Grain_Shadows=70, Grain_Highlights=35,
         Dust=0.6, Scratches=0, Speck_Size=6, Light_Specks=40, Dust_Strength=50,
         Weave=0.8, Jump=0.6, Hand_Cranking=0,
@@ -163,7 +163,7 @@ LOOKS = {
         Fringing=2, Corner_Falloff=15, Distortion=1, Corner_Softness=0.6),
     # Tinted blue, as night scenes were: bright, clean, cool.
     "Blue Tint (Moonlight)": dict(
-        Speed=24, Stock=BLUE, Warmth=0, Fade=0, Contrast=45, White=97, Roll_Off=55, Black_Lift=0, Softness=1.0,
+        Speed=24, Stock=BLUE, Warmth=0, Fade=0, Contrast=45, White=97, Roll_Off=45, Black_Lift=0, Softness=1.0,
         Halation_Strength=12, Halation_Size=18, Halation_Threshold=68,
         Grain=20, Grain_Size=1.8, Grain_Colour=0, Grain_Shadows=70, Grain_Highlights=35,
         Dust=0, Scratches=0, Speck_Size=6, Light_Specks=40, Dust_Strength=50,

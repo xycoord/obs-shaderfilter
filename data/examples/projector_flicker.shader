@@ -70,6 +70,7 @@ uniform int Speed<
     string label = "Speed";
     string tooltip = "Frames of film a second: the flicker steps this often. 24 for sound film, 16 to 18 for silent film and Super 8. Use the same as Film Grain's Speed, so grain and flicker change at the same rate. 0 leaves only the lamp flicker.";
     string widget_type = "slider";
+    string suffix = " fps";
     int minimum = 0;
     int maximum = 60;
     int step = 1;

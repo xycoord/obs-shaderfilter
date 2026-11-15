@@ -21,7 +21,7 @@ uniform float Softness<
     float minimum = 0.0;
     float maximum = 3.0;
     float step = 0.05;
-> = 1.0;
+> = 0.8;
 uniform float Edge_Softness<
     string label = "Edge Softness";
     string tooltip = "How much softer the corners are than the middle, in pixels on a 1080-line picture: none in the middle, growing towards the edges, all of it in the corners, as a lens's focus falls off.";

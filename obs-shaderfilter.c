@@ -2332,6 +2332,14 @@ static bool param_visibility_changed(obs_properties_t *props, obs_property_t *p,
 	return true;
 }
 
+static bool section_toggled(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
+{
+	UNUSED_PARAMETER(props);
+	UNUSED_PARAMETER(p);
+	UNUSED_PARAMETER(settings);
+	return true;
+}
+
 static bool shader_preset_changed(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
 {
 	UNUSED_PARAMETER(p);
@@ -2531,7 +2539,8 @@ static void switch_shader(struct shader_filter_data *filter, obs_data_t *setting
 	if (n_others)
 		dstr_printf(&note, obs_module_text("ShaderFilter.Combined"), names.array, to, from);
 	else
-		dstr_printf(&note, obs_module_text("ShaderFilter.Switched"), from, to, from, from);
+		dstr_printf(&note, obs_module_text("ShaderFilter.Switched"), from, to, from,
+			    *filter->carry_look ? filter->carry_look : obs_module_text("ShaderFilter.TheirDefaults"), from);
 	bfree(filter->switch_note);
 	filter->switch_note = note.array;
 	bfree(from);
@@ -4245,6 +4254,13 @@ static obs_properties_t *shader_filter_properties(void *data)
 
 	/* ---- the shader's own settings ---- */
 	obs_properties_t *params = obs_properties_create();
+	/* What a switch to this shader did, and how to undo it (above the Look,
+	 * so the Look and Amount stay together). */
+	if (filter && filter->switch_note && has_file) {
+		obs_property_t *note = obs_properties_add_text(params, "switch_note", filter->switch_note, OBS_TEXT_INFO);
+		obs_property_text_set_info_type(note, OBS_TEXT_INFO_NORMAL);
+	}
+
 	if (filter && has_file && filter->stored_param_list.num) {
 		/* Presets first: choosing one sets the sliders below. The list shows
 		 * the preset the values match, or Custom. */
@@ -4329,11 +4345,6 @@ static obs_properties_t *shader_filter_properties(void *data)
 		obs_enum_sources(shader_filter_enum_audio_sources, audio_source);
 	}
 
-	if (filter && filter->switch_note && has_file) {
-		obs_property_t *note = obs_properties_add_text(params, "switch_note", filter->switch_note, OBS_TEXT_INFO);
-		obs_property_text_set_info_type(note, OBS_TEXT_INFO_NORMAL);
-	}
-
 	DARRAY(obs_property_t *) groups;
 	da_init(groups);
 	bool has_more = false;
@@ -4369,6 +4380,14 @@ static obs_properties_t *shader_filter_properties(void *data)
 		} else {
 			dstr_ncat(&display_name, label, param->display_name.len);
 		}
+		/* Show All Settings goes before the first hidden setting or group,
+		 * so it stays where it is when ticked. */
+		if (has_more && !all_added && (param_is_more(param) || (group_name && *group_name))) {
+			obs_property_t *all = obs_properties_add_bool(params, "show_all_settings", obs_module_text("ShaderFilter.ShowAll"));
+			obs_property_set_long_description(all, obs_module_text("ShaderFilter.ShowAllHelp"));
+			obs_property_set_modified_callback(all, param_visibility_changed);
+			all_added = true;
+		}
 		obs_properties_t *group = NULL;
 		if (group_name && strlen(group_name)) {
 			/* A group's own name is kept apart from the settings' names (a
@@ -4389,19 +4408,17 @@ static obs_properties_t *shader_filter_properties(void *data)
 			if (!group) {
 				struct dstr title = {0};
 				dstr_copy(&title, sec && sec->display_name.len ? sec->display_name.array : group_name);
+				if (sec && !obs_data_get_bool(settings, sec->name.array))
+					dstr_cat(&title, obs_module_text("ShaderFilter.SectionOff"));
 				dstr_replace(&title, "&", "&&");
-				if (!groups.num && has_more) {
-					obs_property_t *all = obs_properties_add_bool(params, "show_all_settings",
-										      obs_module_text("ShaderFilter.ShowAll"));
-					obs_property_set_long_description(all, obs_module_text("ShaderFilter.ShowAllHelp"));
-					obs_property_set_modified_callback(all, param_visibility_changed);
-					all_added = true;
-				}
 				group = obs_properties_create();
 				obs_property_t *p = obs_properties_add_group(params, gname.array, title.array,
 									    sec ? OBS_GROUP_CHECKABLE : OBS_GROUP_NORMAL, group);
-				if (sec)
+				if (sec) {
 					shader_filter_set_tooltip(p, &sec->tooltip);
+					/* (The heading and the Look list say what's off.) */
+					obs_property_set_modified_callback(p, section_toggled);
+				}
 				da_push_back(groups, &p);
 				dstr_free(&title);
 			}
@@ -4591,6 +4608,24 @@ static obs_properties_t *shader_filter_properties(void *data)
 			break;
 		case GS_SHADER_PARAM_STRING:
 			if (widget_type != NULL && strcmp(widget_type, "switch") == 0) {
+				/* With Projector and Lens filters after this one, the button
+				 * combines them (switching alone would apply them twice). */
+				obs_source_t *run[2];
+				size_t n = filter && !transition ? film_run_after(filter, run) : 0;
+				if (n) {
+					struct dstr names = {0}, label = {0};
+					for (size_t i = 0; i < n; i++) {
+						if (i)
+							dstr_cat(&names, obs_module_text("ShaderFilter.And"));
+						dstr_cat(&names, obs_source_get_name(run[i]));
+					}
+					dstr_printf(&label, obs_module_text("ShaderFilter.Combine"), names.array);
+					p = obs_properties_add_button2(group, "combine_film_look", label.array, combine_clicked, filter);
+					obs_property_set_long_description(p, obs_module_text("ShaderFilter.CombineHelp"));
+					dstr_free(&names);
+					dstr_free(&label);
+					break;
+				}
 				p = obs_properties_add_button2(group, param_name, display_name.array, switch_clicked, filter);
 			} else if (widget_type != NULL && strcmp(widget_type, "info") == 0) {
 				p = obs_properties_add_text(group, param_name, display_name.array, OBS_TEXT_INFO);
@@ -4606,7 +4641,8 @@ static obs_properties_t *shader_filter_properties(void *data)
 			else if (obs_property_get_type(p) == OBS_PROPERTY_INT)
 				obs_property_int_set_suffix(p, param->suffix.array);
 		}
-		shader_filter_set_tooltip(p, &param->tooltip);
+		if (p && !obs_property_long_description(p))
+			shader_filter_set_tooltip(p, &param->tooltip);
 		dstr_free(&display_name);
 	}
 	da_free(groups);
@@ -4617,23 +4653,6 @@ static obs_properties_t *shader_filter_properties(void *data)
 	}
 	if (filter)
 		apply_param_visibility(filter, params, settings);
-	if (filter && has_file && !transition) {
-		obs_source_t *run[2];
-		size_t n = film_run_after(filter, run);
-		if (n) {
-			struct dstr names = {0}, label = {0};
-			for (size_t i = 0; i < n; i++) {
-				if (i)
-					dstr_cat(&names, obs_module_text("ShaderFilter.And"));
-				dstr_cat(&names, obs_source_get_name(run[i]));
-			}
-			dstr_printf(&label, obs_module_text("ShaderFilter.Combine"), names.array);
-			obs_property_t *b = obs_properties_add_button2(params, "combine_film_look", label.array, combine_clicked, filter);
-			obs_property_set_long_description(b, obs_module_text("ShaderFilter.CombineHelp"));
-			dstr_free(&names);
-			dstr_free(&label);
-		}
-	}
 
 	obs_property_t *first_param = obs_properties_first(params);
 	obs_properties_t *params_group = first_param ? params : NULL;

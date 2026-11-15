@@ -22,14 +22,13 @@ uniform int Lens_Amount<
     int maximum = 200;
     int step = 1;
 > = 100;
-
-#include "lens_parts.hlsl"
-
 uniform string Full_Look<
     string label = "Switch to Film Look";
     string widget_type = "switch";
     string tooltip = "Make this filter a Film Look (the film, projector and lens in one filter), keeping these settings: the parts this filter doesn't have are set to the same Look.";
 > = "film_look.shader";
+
+#include "lens_parts.hlsl"
 
 float4 mainImage(VertData v_in) : TARGET
 {

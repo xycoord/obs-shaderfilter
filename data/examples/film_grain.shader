@@ -7,9 +7,10 @@
 // neighbouring shader filter's pass.
 
 uniform float Amount<
-    string label = "Amount";
+    string label = "Strength";
     string tooltip = "How strong the grain is.";
     string widget_type = "slider";
+    string suffix = " %";
     float minimum = 0.0;
     float maximum = 100.0;
     float step = 0.1;
@@ -18,14 +19,16 @@ uniform float Grain_Size<
     string label = "Grain Size";
     string tooltip = "Size of a grain, in pixels of a 1080-line picture. Grain belongs to the frame, so it scales with the source: twice as many pixels across at 4K, finer on smaller sources.";
     string widget_type = "slider";
+    string suffix = " px";
     float minimum = 1.0;
     float maximum = 6.0;
     float step = 0.05;
 > = 1.9;
 uniform float Color_Amount<
-    string label = "Color";
+    string label = "Colour";
     string tooltip = "0 gives black-and-white grain, as on most film; 100 gives each color channel its own grain.";
     string widget_type = "slider";
+    string suffix = " %";
     float minimum = 0.0;
     float maximum = 100.0;
     float step = 0.1;
@@ -34,6 +37,7 @@ uniform float Shadows<
     string label = "Shadows";
     string tooltip = "Grain strength in the darkest parts, compared with the midtones (100).";
     string widget_type = "slider";
+    string suffix = " %";
     float minimum = 0.0;
     float maximum = 100.0;
     float step = 0.1;
@@ -42,6 +46,7 @@ uniform float Highlights<
     string label = "Highlights";
     string tooltip = "Grain strength in the brightest parts, compared with the midtones (100).";
     string widget_type = "slider";
+    string suffix = " %";
     float minimum = 0.0;
     float maximum = 100.0;
     float step = 0.1;
@@ -50,6 +55,7 @@ uniform int Speed<
     string label = "Speed";
     string tooltip = "How many times a second the grain changes. 24 looks like film; 0 freezes it.";
     string widget_type = "slider";
+    string suffix = " fps";
     int minimum = 0;
     int maximum = 60;
     int step = 1;

@@ -5,7 +5,11 @@
 // See Film for what each does.
 
 uniform bool Print_On<
+#ifdef FILM_LOOK
+    string label = "Film · Print (tone and colour)";
+#else
     string label = "Print (tone and colour)";
+#endif
     string widget_type = "section";
     string group = "Print";
     string tooltip = "The print's tone and colour: its contrast, how it fades, how warm the light is, and its stock (colour, black and white, sepia, tinted).";
@@ -68,7 +72,7 @@ uniform float White<
     float minimum = 70.0;
     float maximum = 100.0;
     float step = 0.5;
-> = 96.0;
+> = 97.0;
 uniform int Roll_Off<
     string label = "Highlight Roll-off";
     string group = "Print";
@@ -101,9 +105,13 @@ uniform float Softness<
     float minimum = 0.0;
     float maximum = 3.0;
     float step = 0.05;
-> = 1.0;
+> = 0.8;
 uniform bool Halation_On<
+#ifdef FILM_LOOK
+    string label = "Film · Halation (glow round bright parts)";
+#else
     string label = "Halation (glow round bright parts)";
+#endif
     string widget_type = "section";
     string group = "Halation";
     string tooltip = "The red-orange glow film gives round bright parts, from light scattering back through it.";
@@ -144,7 +152,11 @@ uniform int Halation_Threshold<
     int step = 1;
 > = 78;
 uniform bool Grain_On<
+#ifdef FILM_LOOK
+    string label = "Film · Grain";
+#else
     string label = "Grain";
+#endif
     string widget_type = "section";
     string group = "Grain";
     string tooltip = "The film's grain, moving every frame.";
@@ -207,7 +219,11 @@ uniform int Grain_Highlights<
     int step = 1;
 > = 30;
 uniform bool Dust_On<
+#ifdef FILM_LOOK
+    string label = "Film · Dust & Scratches";
+#else
     string label = "Dust & Scratches";
+#endif
     string widget_type = "section";
     string group = "Dust & Scratches";
     string tooltip = "Specks of dust and hair, and scratches, on the film.";
@@ -217,6 +233,7 @@ uniform float Dust<
     string group = "Dust & Scratches";
     string tooltip = "How many specks of dust or hair are on each frame, on average.";
     string widget_type = "slider";
+    string suffix = " a frame";
     float minimum = 0.0;
     float maximum = 16.0;
     float step = 0.05;
@@ -226,6 +243,7 @@ uniform float Scratches<
     string group = "Dust & Scratches";
     string tooltip = "How many scratches are on screen at once, on average (up to 3).";
     string widget_type = "slider";
+    string suffix = " on screen";
     float minimum = 0.0;
     float maximum = 3.0;
     float step = 0.05;

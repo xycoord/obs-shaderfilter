@@ -4,7 +4,11 @@
 // declares Speed (frames a second). See Projector for what each does.
 
 uniform bool Weave_On<
+#ifdef FILM_LOOK
+    string label = "Projector · Gate Weave (picture wobble)";
+#else
     string label = "Gate Weave (picture wobble)";
+#endif
     string widget_type = "section";
     string group = "Gate Weave";
     string tooltip = "The picture not sitting quite still in the projector: a slow drift from side to side and a small jump up or down each frame.";
@@ -42,7 +46,11 @@ uniform float Hand_Cranking<
     float step = 0.5;
 > = 0.0;
 uniform bool Flicker_On<
+#ifdef FILM_LOOK
+    string label = "Projector · Flicker";
+#else
     string label = "Flicker";
+#endif
     string widget_type = "section";
     string group = "Flicker";
     string tooltip = "The picture's brightness changing from frame to frame: the film's density and the projector's lamp. Kept gentle, as fast flashing across a big picture can be uncomfortable to watch.";
@@ -73,6 +81,7 @@ uniform float Dark_Frames<
     string show = "more";
     string tooltip = "How many single frames a minute come out dark: dirt, a splice, an underexposed frame.";
     string widget_type = "slider";
+    string suffix = " a minute";
     float minimum = 0.0;
     float maximum = 60.0;
     float step = 0.5;
@@ -111,7 +120,11 @@ uniform float Lamp_Brightness<
     float step = 0.5;
 > = 100.0;
 uniform bool Gate_On<
+#ifdef FILM_LOOK
+    string label = "Projector · Frame Edge";
+#else
     string label = "Frame Edge";
+#endif
     string widget_type = "section";
     string group = "Frame Edge";
     string tooltip = "The projected frame's edge (the projector's gate): slightly in from the picture's edges, with round corners and a soft edge, so a full-frame picture doesn't look like an office projector's. Outside it is transparent (black on a projector).";

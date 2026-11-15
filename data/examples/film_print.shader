@@ -41,7 +41,7 @@ uniform float White<
     float minimum = 70.0;
     float maximum = 100.0;
     float step = 0.5;
-> = 96.0;
+> = 97.0;
 uniform float Roll_Off<
     string label = "Highlight Roll-off";
     string tooltip = "How softly the brightest parts roll off into White (the print's shoulder), in percent: 0 is a straight line up to White; more compresses the highlights and lifts the midtones a little.";

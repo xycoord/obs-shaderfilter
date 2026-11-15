@@ -35,7 +35,6 @@ uniform int Speed<
 > = 24;
 uniform int Film_Amount<
     string label = "Film Amount";
-    string show = "more";
     string tooltip = "How strong the film's part is (the print, halation, grain, dust and scratches), in percent of its settings.";
     string widget_type = "slider";
     string suffix = " %";
@@ -45,7 +44,6 @@ uniform int Film_Amount<
 > = 100;
 uniform int Projector_Amount<
     string label = "Projector Amount";
-    string show = "more";
     string tooltip = "How strong the projector's part is (gate weave, flicker, the frame's edge), in percent of its settings.";
     string widget_type = "slider";
     string suffix = " %";
@@ -55,7 +53,6 @@ uniform int Projector_Amount<
 > = 100;
 uniform int Lens_Amount<
     string label = "Lens Amount";
-    string show = "more";
     string tooltip = "How strong the lens's part is (distortion, fringes, dark and soft corners), in percent of its settings.";
     string widget_type = "slider";
     string suffix = " %";
