@@ -47,7 +47,7 @@ uniform float Chroma_Delay<
     float minimum = -10.0;
     float maximum = 10.0;
     float step = 0.1;
-> = 4.0;
+> = 3.0;
 uniform float Sharpening<
     string label = "Sharpening";
     string tooltip = "How much further a sharp edge overshoots, in percent of its step, from the player's detail circuit: a faint light and dark outline either side. The steep tape filter already rings about 6% by itself; 4 to 8 more is a typical VCR, 0 a plain one.";
@@ -55,7 +55,7 @@ uniform float Sharpening<
     float minimum = 0.0;
     float maximum = 30.0;
     float step = 0.5;
-> = 6.0;
+> = 3.0;
 uniform float White_Level<
     string label = "White Level";
     string tooltip = "How bright full white plays back, in percent. 100 keeps it; a worn or long-play tape plays back a little grey (92 to 96), which also leaves room for its noise to show in the whites.";
@@ -79,7 +79,7 @@ uniform float Noise<
     float minimum = 0.0;
     float maximum = 6.0;
     float step = 0.05;
-> = 1.0;
+> = 1.3;
 uniform float Colour_Noise<
     string label = "Colour Noise";
     string tooltip = "Colour noise, as a typical deviation in percent of full colour, in long soft blotches. About 2 for a good tape, 6 for a worn one.";
@@ -90,7 +90,7 @@ uniform float Colour_Noise<
 > = 2.0;
 uniform float Dropouts<
     string label = "Dropouts";
-    string tooltip = "Dropouts a minute, on average: a short stretch of a line replaced by the line above, for one field. 10 or so for a good tape, hundreds for a worn one.";
+    string tooltip = "Dropouts a minute, on average: a short stretch of a line replaced by the line above (or, one in four, a dim streak), for one frame. 10 or so for a good tape, hundreds for a worn one.";
     string widget_type = "slider";
     float minimum = 0.0;
     float maximum = 600.0;
@@ -103,7 +103,7 @@ uniform float Jitter<
     float minimum = 0.0;
     float maximum = 5.0;
     float step = 0.05;
-> = 0.3;
+> = 0.4;
 uniform float Head_Switching<
     string label = "Head Switching";
     string tooltip = "Torn, noisy lines at the bottom where the player switches heads, in TV lines. A TV's overscan hides them: 0 to hide, 6 to 10 to show them.";
@@ -216,7 +216,7 @@ float4 mainImage(VertData v_in) : TARGET
 
     // --- Signal (VHS Signal): a steep luma low-pass (windowed sinc, fixed
     // weights) and a wider Gaussian for the detail circuit; then chroma over
-    // two lines, late, half smeared and half laid on the brightness detail.
+    // two lines, late, 40% smeared and 60% laid on the brightness detail.
     // Filter widths grow with Amount from none.
     float step_l = 360.0 / max(Luma_Resolution, 1.0) * A;
     float y_l = 0.0;
@@ -269,12 +269,13 @@ float4 mainImage(VertData v_in) : TARGET
     float2 smeared = yiq_c.yz / max(a_c, 0.0001) * smoothstep(0.0, 0.03, yiq_c.x / max(a_c, 0.0001));
     float2 follows = yiq_c.yz / max(yiq_c.x, 0.0001) * y_here;
     float sat = 1.0 + (Saturation * 0.01 - 1.0) * A;
-    float2 iq = (0.5 * smeared + 0.5 * follows) * max(sat, 0.0);
+    float2 iq = (0.4 * smeared + 0.6 * follows) * max(sat, 0.0);
     float3 yiq = float3(y_here, iq);
 
     // --- Noise (VHS Noise): kept off black.
-    float lseed = line + field * 0.618;
-    float keep = smoothstep(0.02, 0.15, yiq.x) * a_l;
+    float tick = fmod(floor(elapsed_time * 120.0), 9973.0);
+    float lseed = line + tick * 0.618;
+    float keep = smoothstep(0.02, 0.08, yiq.x) * a_l;
     yiq.x += tape_smooth(x / 4.5, lseed, seed + 11.0) * Noise * 0.01 * A * keep;
     yiq.y += tape_smooth(x / 50.0, lseed, seed + 12.0) * Colour_Noise * 0.01 * A * 0.6 * keep;
     yiq.z += tape_smooth(x / 50.0, lseed, seed + 13.0) * Colour_Noise * 0.01 * A * 0.5 * keep;
@@ -282,18 +283,20 @@ float4 mainImage(VertData v_in) : TARGET
     float alpha = saturate(a_l);
 
     // Dropouts: the line above in place of a short stretch of this one.
-    float per_chance = Dropouts * A / 60.0 / (4.0 * rate);
+    float per_chance = Dropouts * A / 60.0 / (4.0 * 120.0);
     for (int k = 0; k < 4; k++) {
-        float3 h = tape_hash(float3(field, float(k) + 21.0, seed));
+        float3 h = tape_hash(float3(tick, float(k) + 21.0, seed));
         if (h.z >= per_chance)
             continue;
-        float3 g = tape_hash(float3(field, float(k) + 33.0, seed + 5.0));
+        float3 g = tape_hash(float3(tick, float(k) + 33.0, seed + 5.0));
         float len = 30.0 + 270.0 * g.x * g.x;
         float along = (x - h.y * 1080.0 * aspect) / len;
         if (line == floor(h.x * lines) && along >= 0.0 && along <= 1.0) {
             float shape = smoothstep(0.0, 0.15, along) * smoothstep(1.0, 0.7, along);
             float4 above = image.Sample(textureSampler, uv - float2(0.0, 1.0 / lines));
             float3 rep = above.rgb * (1.0 + 0.08 * tape_smooth(x / 4.5, lseed + 7.0, seed + 9.0));
+            if (g.y < 0.25)
+                rep = rgb * (0.55 + 0.2 * tape_smooth(x / 3.0, lseed + 9.0, seed + 10.0));
             rgb = lerp(rgb, max(rep, 0.0), shape);
             alpha = lerp(alpha, above.a, shape);
         }

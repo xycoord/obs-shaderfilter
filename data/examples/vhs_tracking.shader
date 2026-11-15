@@ -29,7 +29,7 @@ uniform float Jitter<
     float minimum = 0.0;
     float maximum = 5.0;
     float step = 0.05;
-> = 0.3;
+> = 0.4;
 uniform float Head_Switching<
     string label = "Head Switching";
     string tooltip = "How many lines at the bottom are torn sideways and noisy where the player switches heads, in TV lines. A TV's overscan usually hides them: 0 to hide, 6 to 10 to show them, as on a monitor.";
