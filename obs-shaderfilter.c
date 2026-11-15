@@ -437,6 +437,8 @@ struct shader_filter_data {
 	struct dstr carry_from;
 	char *carry_look;
 	char *switch_note;
+	/* The section ticks the panel was last built with ('1'/'0' each). */
+	struct dstr built_ticks;
 	gs_texrender_t *stage_render[SF_MAX_STAGES];
 	long effect_gen;
 	/* Ticks left in which derived effects may be compiled while showing,
@@ -943,13 +945,6 @@ static void shader_filter_reload_effect(struct shader_filter_data *filter)
 		}
 	}
 
-	/* (A shader with fewer stages than the last one frees the others.) */
-	obs_enter_graphics();
-	for (int i = filter->n_stages; i < SF_MAX_STAGES; i++) {
-		gs_texrender_destroy(filter->stage_render[i]);
-		filter->stage_render[i] = NULL;
-	}
-	obs_leave_graphics();
 
 	if (use_template) {
 		dstr_cat(&effect_text, effect_template_end);
@@ -1160,6 +1155,14 @@ static void shader_filter_reload_effect(struct shader_filter_data *filter)
 	}
 
 end:
+	/* (Stage textures this shader doesn't use, as after a switch away from
+	 * a multi-stage shader or a failed load, are freed.) */
+	obs_enter_graphics();
+	for (int i = filter->n_stages; i < SF_MAX_STAGES; i++) {
+		gs_texrender_destroy(filter->stage_render[i]);
+		filter->stage_render[i] = NULL;
+	}
+	obs_leave_graphics();
 	mark_error_in_name(filter, settings, obs_data_has_user_value(settings, "error_message"));
 	obs_data_release(settings);
 }
@@ -1234,6 +1237,7 @@ static void shader_filter_destroy(void *data)
 	dstr_free(&filter->carry_from);
 	bfree(filter->carry_look);
 	bfree(filter->switch_note);
+	dstr_free(&filter->built_ticks);
 
 	if (filter->volmeter)
 		obs_volmeter_destroy(filter->volmeter);
@@ -1824,19 +1828,25 @@ static void auto_name_filter(struct shader_filter_data *filter, obs_data_t *sett
 }
 
 /* Switch the filter to a shader file, as if chosen in the list. */
+/* Whether the shader last loaded is path (none loaded yet: no). */
+static bool same_path(const struct dstr *last, const char *path)
+{
+	return last->array && path && strcmp(last->array, path) == 0;
+}
+
 static void choose_shader_file(struct shader_filter_data *filter, obs_data_t *settings, const char *path)
 {
 	bfree(filter->switch_note);
 	filter->switch_note = NULL;
 	/* The Look picked was this shader's (a switch carries it on itself). */
-	if (dstr_cmp(&filter->last_path, path) != 0)
+	if (!same_path(&filter->last_path, path))
 		obs_data_unset_user_value(settings, "shader_look");
 	obs_data_set_bool(settings, "from_file", true);
 	obs_data_set_string(settings, "shader_file_name", path);
 	obs_data_set_string(settings, "shader_pick", path);
 	obs_data_set_bool(settings, "override_entire_effect", path_is_effect(path));
 	filter->last_from_file = true;
-	if (dstr_cmp(&filter->last_path, path) != 0 || !filter->effect)
+	if (!same_path(&filter->last_path, path) || !filter->effect)
 		filter->reload_effect = true;
 	dstr_copy(&filter->last_path, path);
 	auto_name_filter(filter, settings, path, false);
@@ -2067,7 +2077,7 @@ static bool shader_filter_file_name_changed(obs_properties_t *props, obs_propert
 	const char *new_file_name = obs_data_get_string(settings, obs_property_name(p));
 	if (!filter || !*new_file_name)
 		return false;
-	if (dstr_cmp(&filter->last_path, new_file_name) != 0 || !obs_data_get_bool(settings, "from_file")) {
+	if (!same_path(&filter->last_path, new_file_name) || !obs_data_get_bool(settings, "from_file")) {
 		char *path = bstrdup(new_file_name);
 		choose_shader_file(filter, settings, path);
 		bfree(path);
@@ -2421,12 +2431,31 @@ static void add_show_all(obs_properties_t *params)
 
 /* A section ticked or unticked: the panel is built again, so its heading and
  * the Look list say what's off. */
+/* The section ticks as they are, '1' or '0' for each section. */
+static void section_ticks(const struct shader_filter_data *filter, obs_data_t *settings, struct dstr *out)
+{
+	dstr_free(out);
+	for (size_t i = 0; i < filter->stored_param_list.num; i++) {
+		const struct effect_param_data *q = filter->stored_param_list.array + i;
+		if (param_is_section(q))
+			dstr_cat(out, obs_data_get_bool(settings, q->name.array) ? "1" : "0");
+	}
+}
+
+/* (OBS also calls this whenever it builds the panel, so it asks for the
+ * panel again only when a tick differs from the panel's.) */
 static bool section_toggled(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
 {
 	UNUSED_PARAMETER(p);
-	UNUSED_PARAMETER(settings);
 	struct shader_filter_data *filter = props_filter(props);
-	if (filter)
+	if (!filter)
+		return false;
+	struct dstr now = {0};
+	section_ticks(filter, settings, &now);
+	const bool changed = strcmp(filter->built_ticks.array ? filter->built_ticks.array : "",
+				    now.array ? now.array : "") != 0;
+	dstr_free(&now);
+	if (changed)
 		obs_source_update_properties(filter->context);
 	return false;
 }
@@ -2449,14 +2478,16 @@ static bool shader_preset_changed(obs_properties_t *props, obs_property_t *p, ob
 		}
 	}
 	presets_free(&presets);
-	/* (Built again, so the Look list and its Back button match.) */
-	if (applied)
+	/* (Built again, so the Look list and its Back button match; that does
+	 * all a refresh would.) */
+	if (applied) {
 		obs_source_update_properties(filter->context);
+		applied = false;
+	}
 	return applied;
 }
 
 /* Whether a shader file is one of those shipped with the plugin. */
-static bool is_bundled_shader(const char *path);
 static const char *shader_filter_id;
 
 /* ---- Switching to a larger shader, keeping the settings ----
@@ -2466,14 +2497,17 @@ static const char *shader_filter_id;
  * changed, and once it has loaded, each of its settings takes the noted
  * value of its own name, or of a name its "from" annotation gives for that
  * shader ("film_grain:Amount, halation:Strength"); the rest take the Look
- * this filter had, or their defaults. A run of Film, Projector and Lens
- * filters in that order can be combined the same way into one Film Look. */
+ * this filter had, or their defaults. Switched-on filters directly next to
+ * this one whose switch leads to the same shader are combined into it the
+ * same way (and switched off), so their effects aren't applied twice. */
 
 static char *shader_base_name(const char *path)
 {
-	char *dir = parent_dir(path);
-	const char *start = path + (strcmp(dir, path) == 0 ? 0 : strlen(dir) + 1);
-	bfree(dir);
+	const char *slash = strrchr(path, '/');
+	const char *bslash = strrchr(path, '\\');
+	if (bslash > slash)
+		slash = bslash;
+	const char *start = slash ? slash + 1 : path;
 	const char *dot = strrchr(start, '.');
 	return bstrdup_n(start, dot ? (size_t)(dot - start) : strlen(start));
 }
@@ -2481,12 +2515,14 @@ static char *shader_base_name(const char *path)
 /* A file next to the shader at path. */
 static char *sibling_path(const char *path, const char *name)
 {
-	char *dir = parent_dir(path);
+	const char *slash = strrchr(path, '/');
+	const char *bslash = strrchr(path, '\\');
+	if (bslash > slash)
+		slash = bslash;
 	struct dstr out = {0};
-	if (strcmp(dir, path) != 0)
-		dstr_printf(&out, "%s/", dir);
+	if (slash)
+		dstr_ncopy(&out, path, slash - path + 1);
 	dstr_cat(&out, name);
-	bfree(dir);
 	return out.array;
 }
 
@@ -2571,12 +2607,12 @@ static void carry_apply(struct shader_filter_data *filter, obs_data_t *settings)
 			obs_data_set_bool(settings, name, v);
 		} else if (p->type == GS_SHADER_PARAM_INT) {
 			long long v = (long long)floor(obs_data_get_double(filter->carry, key.array) + 0.5);
-			if (p->minimum.i != p->maximum.i)
+			if (p->maximum.i > p->minimum.i)
 				v = v < p->minimum.i ? p->minimum.i : v > p->maximum.i ? p->maximum.i : v;
 			obs_data_set_int(settings, name, v);
 		} else {
 			double v = obs_data_get_double(filter->carry, key.array);
-			if (p->minimum.f != p->maximum.f)
+			if (p->maximum.f > p->minimum.f)
 				v = v < p->minimum.f ? p->minimum.f : v > p->maximum.f ? p->maximum.f : v;
 			obs_data_set_double(settings, name, v);
 		}
@@ -2600,6 +2636,8 @@ static void carry_apply(struct shader_filter_data *filter, obs_data_t *settings)
 	filter->carry_look = NULL;
 }
 
+static void join_names(obs_source_t **sources, size_t n, struct dstr *out);
+
 /* Make this filter the shader at path, keeping its settings (and those of the
  * other filters, which are switched off). */
 static void switch_shader(struct shader_filter_data *filter, obs_data_t *settings, const char *path, obs_source_t **others,
@@ -2617,10 +2655,8 @@ static void switch_shader(struct shader_filter_data *filter, obs_data_t *setting
 			carry_note(o, os, filter->carry, &filter->carry_from);
 		obs_data_release(os);
 		obs_source_set_enabled(others[i], false);
-		if (names.len)
-			dstr_cat(&names, i + 1 == n_others ? obs_module_text("ShaderFilter.And") : ", ");
-		dstr_cat(&names, obs_source_get_name(others[i]));
 	}
+	join_names(others, n_others, &names);
 	bfree(filter->carry_look);
 	filter->carry_look = bstrdup(obs_data_get_string(settings, "shader_look"));
 	char *from = shader_display_name(obs_data_get_string(settings, "shader_file_name"));
@@ -2658,11 +2694,14 @@ static const char *switch_target(obs_source_t *f)
 /* The switched-on filters directly before and after this one whose switch
  * leads to the same shader (Film, Projector, Lens, Film Grain, ... all lead
  * to Film Look): switching this one alone would apply theirs twice, so they
- * are combined into it. Up to max, in the order they're applied, each with a
- * reference for the caller to release; how many (0 if none but this one). */
-#define SF_MAX_RUN 16
+ * are combined into it. Not a second filter of a shader already in the run
+ * (one Film's settings would overwrite the other's): the run stops there.
+ * Up to max, in the order they're applied, each with a reference for the
+ * caller to release; how many (0 if none but this one). */
+#define SF_MAX_RUN 64
 struct switch_run {
-	obs_source_t *all[64];
+	obs_source_t *self;
+	obs_source_t *all[SF_MAX_RUN];
 	size_t n;
 };
 
@@ -2670,11 +2709,27 @@ static void switch_run_scan(obs_source_t *parent, obs_source_t *child, void *par
 {
 	UNUSED_PARAMETER(parent);
 	struct switch_run *r = param;
-	if (r->n < 64 && obs_source_enabled(child)) {
+	if (r->n < SF_MAX_RUN && (child == r->self || obs_source_enabled(child))) {
 		obs_source_t *ref = obs_source_get_ref(child);
 		if (ref)
 			r->all[r->n++] = ref;
 	}
+}
+
+static bool joins_run(obs_source_t *f, const char *target, obs_source_t **run, size_t n)
+{
+	const char *t = switch_target(f);
+	if (!t || strcmp(t, target) != 0)
+		return false;
+	obs_data_t *fs = obs_source_get_settings(f);
+	bool dup = false;
+	for (size_t i = 0; i < n && !dup; i++) {
+		obs_data_t *rs = obs_source_get_settings(run[i]);
+		dup = strcmp(obs_data_get_string(fs, "shader_file_name"), obs_data_get_string(rs, "shader_file_name")) == 0;
+		obs_data_release(rs);
+	}
+	obs_data_release(fs);
+	return !dup;
 }
 
 static size_t switch_run_others(struct shader_filter_data *filter, obs_source_t **others, size_t max)
@@ -2683,26 +2738,42 @@ static size_t switch_run_others(struct shader_filter_data *filter, obs_source_t 
 	const char *target = switch_target(filter->context);
 	if (!parent || !target)
 		return 0;
-	struct switch_run r = {{NULL}, 0};
+	struct switch_run r = {filter->context, {NULL}, 0};
 	obs_source_enum_filters(parent, switch_run_scan, &r);
 	size_t self = r.n;
 	for (size_t i = 0; i < r.n; i++)
 		if (r.all[i] == filter->context)
 			self = i;
-	size_t first = self, last = self, n = 0;
+	obs_source_t *run[SF_MAX_RUN];
+	size_t n = 0;
 	if (self < r.n) {
-		while (first > 0 && switch_target(r.all[first - 1]) && strcmp(switch_target(r.all[first - 1]), target) == 0)
-			first--;
-		while (last + 1 < r.n && switch_target(r.all[last + 1]) && strcmp(switch_target(r.all[last + 1]), target) == 0)
-			last++;
+		run[n++] = r.all[self];
+		for (size_t i = self; i > 0 && joins_run(r.all[i - 1], target, run, n); i--)
+			run[n++] = r.all[i - 1];
+		for (size_t i = self + 1; i < r.n && joins_run(r.all[i], target, run, n); i++)
+			run[n++] = r.all[i];
 	}
+	size_t out = 0;
 	for (size_t i = 0; i < r.n; i++) {
-		if (self < r.n && i >= first && i <= last && i != self && n < max)
-			others[n++] = r.all[i];
+		bool in_run = false;
+		for (size_t k = 1; k < n && !in_run; k++)
+			in_run = run[k] == r.all[i];
+		if (in_run && out < max)
+			others[out++] = r.all[i];
 		else
 			obs_source_release(r.all[i]);
 	}
-	return n;
+	return out;
+}
+
+/* "A, B and C". */
+static void join_names(obs_source_t **sources, size_t n, struct dstr *out)
+{
+	for (size_t i = 0; i < n; i++) {
+		if (i)
+			dstr_cat(out, i + 1 == n ? obs_module_text("ShaderFilter.And") : ", ");
+		dstr_cat(out, obs_source_get_name(sources[i]));
+	}
 }
 
 /* Make this filter the shader its switch leads to, keeping its settings and
@@ -4709,12 +4780,9 @@ static obs_properties_t *shader_filter_properties(void *data)
 				size_t n = filter && !transition ? switch_run_others(filter, run, SF_MAX_RUN) : 0;
 				if (n) {
 					struct dstr names = {0}, label = {0};
-					for (size_t i = 0; i < n; i++) {
-						if (i)
-							dstr_cat(&names, i + 1 == n ? obs_module_text("ShaderFilter.And") : ", ");
-						dstr_cat(&names, obs_source_get_name(run[i]));
+					join_names(run, n, &names);
+					for (size_t i = 0; i < n; i++)
 						obs_source_release(run[i]);
-					}
 					char *to_path = sibling_path(obs_data_get_string(settings, "shader_file_name"),
 								     obs_data_get_string(settings, param_name));
 					char *to = shader_display_name(to_path);
@@ -4749,8 +4817,10 @@ static obs_properties_t *shader_filter_properties(void *data)
 	da_free(groups);
 	if (has_more && !all_added)
 		add_show_all(params);
-	if (filter)
+	if (filter) {
 		apply_param_visibility(filter, params, settings);
+		section_ticks(filter, settings, &filter->built_ticks);
+	}
 
 	obs_property_t *first_param = obs_properties_first(params);
 	obs_properties_t *params_group = first_param ? params : NULL;
