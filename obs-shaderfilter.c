@@ -319,11 +319,6 @@ struct shader_filter_data {
 	/* Until this time, a properties rebuild is a refresh of an open panel
 	 * after the shader changed (so browsing tools stay as they were). */
 	uint64_t props_refresh_until;
-	/* The person opened the browsing tools on this filter (this session);
-	 * browse_shown is what the panel was last built with, so a change can be
-	 * told apart from libobs re-running callbacks when it builds the panel. */
-	bool browse_kept;
-	bool browse_shown;
 
 	/* Measured GPU time of this filter's own pass (graphics thread). */
 	struct gpu_timer_slot gpu_slots[GPU_TIMER_SLOTS];
@@ -441,6 +436,11 @@ struct shader_filter_data {
 	struct dstr carry_from;
 	char *carry_look;
 	char *switch_note;
+	/* Recently used as it was when this filter's panel was opened, so the
+	 * shaders passed over while trying several (↑/↓ on the list) don't
+	 * fill it: only the one kept goes on top. NULL until a shader is chosen
+	 * in this panel. */
+	obs_data_array_t *recent_base;
 	/* The section ticks the panel was last built with ('1'/'0' each);
 	 * whether the shader's settings were put straight in the panel (it has
 	 * sections), and the names of the properties they made there
@@ -1247,6 +1247,7 @@ static void shader_filter_destroy(void *data)
 	dstr_free(&filter->carry_from);
 	bfree(filter->carry_look);
 	bfree(filter->switch_note);
+	obs_data_array_release(filter->recent_base);
 	dstr_free(&filter->built_ticks);
 	dstr_free(&filter->panel_names);
 
@@ -1280,6 +1281,7 @@ struct shader_entry {
 	char *category;
 	size_t rank; /* category's place in library.ini; uncategorised last */
 	int cost;    /* from library.ini, see struct library_item */
+	bool more;   /* listed under More Shaders, see struct library_item */
 };
 
 /* A folder's library.ini: "file = Category | Display name" under [shaders]. */
@@ -1289,6 +1291,7 @@ struct library_item {
 	char *name;
 	bool space; /* draws outside the image: offer "Add Space Around the Image" up front */
 	int cost;   /* rough GPU cost: 0 light, 1 medium, 2 heavy, 3 very heavy */
+	bool more;  /* rarely wanted: listed after the rest, under More Shaders */
 };
 typedef DARRAY(struct library_item) library_t;
 
@@ -1314,6 +1317,20 @@ static char *trimmed(const char *s, size_t len)
 }
 
 static bool contains_ci(const char *haystack, const char *needle);
+
+/* Whether a comma-separated flags list has `flag` as one of its words. */
+static bool has_flag(const char *flags, const char *flag)
+{
+	bool found = false;
+	char **words = strlist_split(flags, ',', false);
+	for (char **w = words; w && *w && !found; w++) {
+		char *t = trimmed(*w, strlen(*w));
+		found = astrcmpi(t, flag) == 0;
+		bfree(t);
+	}
+	strlist_free(words);
+	return found;
+}
 
 static void library_load(const char *dir, library_t *lib)
 {
@@ -1348,9 +1365,11 @@ static void library_load(const char *dir, library_t *lib)
 		it.name = bar ? trimmed(bar + 1, bar2 ? (size_t)(bar2 - bar - 1) : strlen(bar + 1)) : bstrdup("");
 		it.space = false;
 		it.cost = 0;
+		it.more = false;
 		if (bar2) {
 			char *flags = trimmed(bar2 + 1, strlen(bar2 + 1));
 			it.space = contains_ci(flags, "space");
+			it.more = has_flag(flags, "more");
 			it.cost = contains_ci(flags, "very heavy") ? 3 : contains_ci(flags, "heavy") ? 2
 								   : contains_ci(flags, "medium") ? 1 : 0;
 			bfree(flags);
@@ -1649,10 +1668,10 @@ static bool contains_ci(const char *haystack, const char *needle)
 	return false;
 }
 
-/* The shaders in `dir` for a filter or a transition, by name, in `category`
- * (if any) and matching `search` (if any, against name and category). An
+/* The shaders in `dir` for a filter or a transition, by name, matching
+ * `search` (if any, against name and category). An
  * .effect with a .shader of the same name is listed once, as the .shader. */
-static void list_shaders(const char *dir, bool transitions, const char *search, const char *category,
+static void list_shaders(const char *dir, bool transitions, const char *search,
 			 shader_list_t *out)
 {
 	da_init((*out));
@@ -1704,7 +1723,7 @@ static void list_shaders(const char *dir, bool transitions, const char *search, 
 		}
 		struct shader_entry e = {path.array,
 					 it && *it->name ? bstrdup(it->name) : friendly_shader_name(path.array),
-					 bstrdup(it ? it->category : ""), rank, it ? it->cost : 0};
+					 bstrdup(it ? it->category : ""), rank, it ? it->cost : 0, it && it->more};
 		da_push_back((*out), &e);
 	}
 	os_closedir(d);
@@ -1728,8 +1747,7 @@ static void list_shaders(const char *dir, bool transitions, const char *search, 
 	size_t w = 0;
 	for (size_t i = 0; i < out->num; i++) {
 		struct shader_entry *e = &out->array[i];
-		bool keep = (!category || !*category || astrcmpi(e->category, category) == 0) &&
-			    (contains_ci(e->label, search) || (*e->category && contains_ci(e->category, search)));
+		bool keep = contains_ci(e->label, search) || (*e->category && contains_ci(e->category, search));
 		if (keep) {
 			out->array[w++] = *e;
 		} else {
@@ -1739,26 +1757,6 @@ static void list_shaders(const char *dir, bool transitions, const char *search, 
 		}
 	}
 	out->num = w;
-}
-
-typedef DARRAY(char *) category_list_t;
-
-/* The categories used in a folder's library.ini, in file order. */
-static void library_categories(const char *dir, category_list_t *out)
-{
-	library_t lib;
-	library_load(dir, &lib);
-	for (size_t i = 0; i < lib.num; i++) {
-		const char *c = lib.array[i].category;
-		bool seen = !*c;
-		for (size_t k = 0; k < out->num && !seen; k++)
-			seen = astrcmpi(out->array[k], c) == 0;
-		if (!seen) {
-			char *copy = bstrdup(c);
-			da_push_back((*out), &copy);
-		}
-	}
-	library_free(&lib);
 }
 
 /* The folder whose shaders the list offers. */
@@ -1849,6 +1847,118 @@ static bool same_path(const struct dstr *last, const char *path)
 	return last->array && path && strcmp(last->array, path) == 0;
 }
 
+/* ------------------------------------------------------------------------
+ * The shaders the person used last (the Shader list's Recently used group),
+ * kept across filters and OBS sessions in the plugin's config folder.
+ * ------------------------------------------------------------------------ */
+
+#define SF_RECENT_MAX 6
+
+/* The file they're kept in; none when OBS gives the plugin no config folder
+ * (as in the test harnesses), so nothing is written to the working folder. */
+static char *prefs_path(void)
+{
+	char *path = obs_module_config_path("browser.json");
+	const bool absolute = path && (path[0] == '/' || path[0] == '\\' || (path[0] && path[1] == ':'));
+	if (!absolute) {
+		bfree(path);
+		return NULL;
+	}
+	return path;
+}
+
+static obs_data_t *prefs_load(void)
+{
+	char *path = prefs_path();
+	obs_data_t *d = path ? obs_data_create_from_json_file_safe(path, "bak") : NULL;
+	bfree(path);
+	return d ? d : obs_data_create();
+}
+
+static void prefs_save(obs_data_t *d)
+{
+	char *path = prefs_path();
+	if (!path)
+		return;
+	char *dir = parent_dir(path);
+	os_mkdirs(dir);
+	bfree(dir);
+	obs_data_save_json_safe(d, path, "tmp", "bak");
+	bfree(path);
+}
+
+static const char *recent_key(bool transitions)
+{
+	return transitions ? "recent_transitions" : "recent_filters";
+}
+
+static const struct shader_entry *find_entry(const shader_list_t *list, const char *path)
+{
+	for (size_t i = 0; i < list->num; i++)
+		if (strcmp(list->array[i].path, path) == 0)
+			return &list->array[i];
+	return NULL;
+}
+
+/* The shaders used last, newest first, for filters or transitions, leaving
+ * out `current` (so the list's selection, and ↑/↓, stay in its category).
+ * Names and costs come from the lists already loaded, where they're listed. */
+static void recent_shaders(bool transitions, const char *current, const shader_list_t *a_list,
+			   const shader_list_t *b_list, shader_list_t *out)
+{
+	da_init((*out));
+	obs_data_t *d = prefs_load();
+	obs_data_array_t *a = obs_data_get_array(d, recent_key(transitions));
+	for (size_t i = 0; a && i < obs_data_array_count(a) && out->num < SF_RECENT_MAX; i++) {
+		obs_data_t *item = obs_data_array_item(a, i);
+		const char *path = obs_data_get_string(item, "path");
+		if (*path && !(current && strcmp(path, current) == 0) && os_file_exists(path)) {
+			const struct shader_entry *known = find_entry(a_list, path);
+			if (!known)
+				known = find_entry(b_list, path);
+			struct shader_entry e = {bstrdup(path), known ? bstrdup(known->label) : shader_display_name(path),
+						 bstrdup(""), 0, known ? known->cost : 0, false};
+			da_push_back((*out), &e);
+		}
+		obs_data_release(item);
+	}
+	obs_data_array_release(a);
+	obs_data_release(d);
+}
+
+/* A shader was chosen: it goes on top of Recent as it was when the filter's
+ * panel was opened (`base`, taken now if NULL). */
+static void recent_note(const char *path, bool transitions, obs_data_array_t **base)
+{
+	if (!path || !*path)
+		return;
+	obs_data_t *d = prefs_load();
+	const char *key = recent_key(transitions);
+	if (!*base) {
+		*base = obs_data_get_array(d, key);
+		if (!*base)
+			*base = obs_data_array_create();
+	}
+	obs_data_array_t *old = *base;
+	obs_data_array_addref(old);
+	obs_data_array_t *a = obs_data_array_create();
+	obs_data_t *first = obs_data_create();
+	obs_data_set_string(first, "path", path);
+	obs_data_array_push_back(a, first);
+	obs_data_release(first);
+	for (size_t i = 0; old && i < obs_data_array_count(old) && obs_data_array_count(a) < SF_RECENT_MAX; i++) {
+		obs_data_t *item = obs_data_array_item(old, i);
+		if (strcmp(obs_data_get_string(item, "path"), path) != 0)
+			obs_data_array_push_back(a, item);
+		obs_data_release(item);
+	}
+	obs_data_set_array(d, key, a);
+	obs_data_array_release(a);
+	obs_data_array_release(old);
+	prefs_save(d);
+	obs_data_release(d);
+}
+
 /* Switch the filter to a shader file, as if chosen in the list. */
 static void choose_shader_file(struct shader_filter_data *filter, obs_data_t *settings, const char *path)
 {
@@ -1866,6 +1976,7 @@ static void choose_shader_file(struct shader_filter_data *filter, obs_data_t *se
 		filter->reload_effect = true;
 	dstr_copy(&filter->last_path, path);
 	auto_name_filter(filter, settings, path, false);
+	recent_note(path, filter->transition, &filter->recent_base);
 }
 
 /* A greyed heading in the Shader list, which can't be chosen. */
@@ -1917,30 +2028,48 @@ static size_t fill_shader_list(obs_property_t *pick, obs_data_t *settings, bool 
 	char *bundled = examples_dir();
 	char *own = library_dir(settings);
 	const bool own_folder = bundled && own && !same_folder(own, bundled);
-	const bool narrow = obs_data_get_bool(settings, "browse_shaders");
-	const char *search = narrow ? obs_data_get_string(settings, "shader_search") : "";
-	const char *category = narrow ? obs_data_get_string(settings, "shader_category") : "";
+	const char *search = obs_data_get_string(settings, "shader_search");
 	shader_list_t list, mine;
-	list_shaders(bundled, transition, search, category, &list);
+	list_shaders(bundled, transition, search, &list);
 	da_init(mine);
 	if (own_folder)
-		list_shaders(own, transition, search, category, &mine);
+		list_shaders(own, transition, search, &mine);
 
 	bool listed = false;
 	bool any_category = false;
 	for (size_t i = 0; i < list.num; i++)
 		any_category = any_category || *list.array[i].category;
+	size_t shown = 0; /* place in the list, for "12 of 160" */
+
+	/* The shaders used last, first, unless the list is narrowed. */
+	if (!*search) {
+		shader_list_t recent;
+		recent_shaders(transition, has_file ? file : NULL, &list, &mine, &recent);
+		if (recent.num)
+			add_list_heading(pick, obs_module_text("ShaderFilter.Recent"));
+		for (size_t i = 0; i < recent.num; i++)
+			add_shader_entry(pick, &recent.array[i]);
+		free_shader_list(&recent);
+	}
+
 	const char *last_category = NULL;
+	shader_list_t more;
+	da_init(more);
 	for (size_t i = 0; i < list.num; i++) {
+		if (list.array[i].more) {
+			da_push_back(more, &list.array[i]); /* (shares list's strings) */
+			continue;
+		}
 		const char *c = list.array[i].category;
 		if (any_category && (!last_category || astrcmpi(c, last_category) != 0)) {
 			add_list_heading(pick, *c ? c : obs_module_text("ShaderFilter.Uncategorised"));
 			last_category = c;
 		}
 		add_shader_entry(pick, &list.array[i]);
+		shown++;
 		if (has_file && strcmp(list.array[i].path, file) == 0) {
 			listed = true;
-			*pos = i + 1;
+			*pos = shown;
 		}
 	}
 	if (mine.num) {
@@ -1951,12 +2080,28 @@ static size_t fill_shader_list(obs_property_t *pick, obs_data_t *settings, bool 
 		add_list_heading(pick, folder ? folder + 1 : own);
 		for (size_t i = 0; i < mine.num; i++) {
 			add_shader_entry(pick, &mine.array[i]);
+			shown++;
 			if (has_file && strcmp(mine.array[i].path, file) == 0) {
 				listed = true;
-				*pos = list.num + i + 1;
+				*pos = shown;
 			}
 		}
 	}
+	/* Shaders few people want (another does the job, or they're demos),
+	 * by name, after the rest. */
+	if (more.num) {
+		qsort(more.array, more.num, sizeof(struct shader_entry), cmp_entry);
+		add_list_heading(pick, obs_module_text("ShaderFilter.MoreShaders"));
+		for (size_t i = 0; i < more.num; i++) {
+			add_shader_entry(pick, &more.array[i]);
+			shown++;
+			if (has_file && strcmp(more.array[i].path, file) == 0) {
+				listed = true;
+				*pos = shown;
+			}
+		}
+	}
+	da_free(more);
 	if (has_file && !listed) {
 		/* The current shader always appears, even when filtered out. */
 		char *name = shader_display_name(file);
@@ -1998,8 +2143,7 @@ static void update_browse_status(obs_properties_t *props, obs_data_t *settings, 
 	if (!status)
 		return;
 	const char *search = obs_data_get_string(settings, "shader_search");
-	const char *category = obs_data_get_string(settings, "shader_category");
-	/* "8 of 11 in Blur & Glow, matching "blur"" / "154 shaders" */
+	/* "Shader 3 of 8 matching "blur"" / "8 shaders matching "blur"" */
 	struct dstr text = {0};
 	if (n == 0) {
 		dstr_copy(&text, obs_module_text("ShaderFilter.BrowseNone"));
@@ -2009,8 +2153,6 @@ static void update_browse_status(obs_properties_t *props, obs_data_t *settings, 
 		else
 			dstr_printf(&text, obs_module_text(n == 1 ? "ShaderFilter.BrowseOne" : "ShaderFilter.BrowseMany"),
 				    (int)n);
-		if (category && *category)
-			dstr_catf(&text, obs_module_text("ShaderFilter.BrowseIn"), category);
 		if (search && *search)
 			dstr_catf(&text, obs_module_text("ShaderFilter.BrowseMatching"), search);
 		if (!pos) {
@@ -2024,7 +2166,8 @@ static void update_browse_status(obs_properties_t *props, obs_data_t *settings, 
 	}
 	obs_property_set_description(status, text.array);
 	obs_property_text_set_info_type(status, n == 0 ? OBS_TEXT_INFO_WARNING : OBS_TEXT_INFO_NORMAL);
-	obs_property_set_visible(status, obs_data_get_bool(settings, "browse_shaders"));
+	/* (Only while searching: the whole list needs no count.) */
+	obs_property_set_visible(status, search && *search);
 	dstr_free(&text);
 }
 
@@ -2039,24 +2182,6 @@ static bool shader_search_changed(obs_properties_t *props, obs_property_t *p, ob
 	size_t n = fill_shader_list(pick, settings, filter->transition, &pos);
 	update_browse_status(props, settings, n, pos);
 	return true;
-}
-
-static bool browse_shaders_changed(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
-{
-	UNUSED_PARAMETER(p);
-	bool show = obs_data_get_bool(settings, "browse_shaders");
-	struct shader_filter_data *bf = obs_properties_get_param(props);
-	if (bf && show != bf->browse_shown) {
-		bf->browse_kept = show;
-		bf->browse_shown = show;
-	}
-	const char *keys[] = {"shader_category", "shader_search", "browse_status"};
-	for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
-		obs_property_t *q = obs_properties_get(props, keys[i]);
-		if (q)
-			obs_property_set_visible(q, show);
-	}
-	return shader_search_changed(props, p, settings);
 }
 
 static bool shader_pick_changed(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
@@ -4435,51 +4560,20 @@ static obs_properties_t *shader_filter_properties(void *data)
 	if (has_file && filter && path_is_effect(file) && has_shader_neighbour(filter))
 		obs_properties_add_text(props, "effect_note", obs_module_text("ShaderFilter.EffectNote"), OBS_TEXT_INFO);
 
-	/* The browsing tools show on a filter with no shader yet. Once a filter
-	 * has a shader they start hidden each time its settings are opened,
-	 * unless the person opened them on this filter themselves. */
+	/* Search, always there: it narrows the Shader list by name or
+	 * category, and since it's always shown (with how many match), the list
+	 * is never narrowed without the person seeing why. */
 	const bool refreshing = filter && os_gettime_ns() < filter->props_refresh_until;
-	if (has_file || inline_code) {
-		if (!refreshing && !(filter && filter->browse_kept))
-			obs_data_set_bool(settings, "browse_shaders", false);
-	} else if (!obs_data_has_user_value(settings, "browse_shaders")) {
-		obs_data_set_bool(settings, "browse_shaders", true);
+	if (filter && !refreshing) {
+		/* A panel opened afresh: a new go at choosing (see recent_base). */
+		obs_data_array_release(filter->recent_base);
+		filter->recent_base = NULL;
 	}
-	const bool browsing = obs_data_get_bool(settings, "browse_shaders");
-	if (filter)
-		filter->browse_shown = browsing;
-	obs_property_t *browse = obs_properties_add_bool(props, "browse_shaders", obs_module_text("ShaderFilter.Browse"));
-	obs_property_set_long_description(browse, obs_module_text("ShaderFilter.BrowseHelp"));
-	obs_property_set_modified_callback(browse, browse_shaders_changed);
-
-	category_list_t categories;
-	da_init(categories);
-	/* Categories come from the bundled library, which is always listed. */
-	char *bundled_lib = examples_dir();
-	library_categories(bundled_lib, &categories);
-	bfree(bundled_lib);
-	if (categories.num) {
-		obs_property_t *cat = obs_properties_add_list(props, "shader_category", obs_module_text("ShaderFilter.Category"),
-							      OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
-		obs_property_list_add_string(cat, obs_module_text("ShaderFilter.AllCategories"), "");
-		for (size_t i = 0; i < categories.num; i++)
-			obs_property_list_add_string(cat, categories.array[i], categories.array[i]);
-		obs_property_set_modified_callback(cat, shader_search_changed);
-		obs_property_set_long_description(cat, obs_module_text("ShaderFilter.CategoryHelp"));
-		obs_property_set_visible(cat, browsing);
-	} else if (*obs_data_get_string(settings, "shader_category")) {
-		obs_data_set_string(settings, "shader_category", "");
-	}
-	for (size_t i = 0; i < categories.num; i++)
-		bfree(categories.array[i]);
-	da_free(categories);
 	bfree(lib);
-
 	obs_property_t *search = obs_properties_add_text(props, "shader_search", obs_module_text("ShaderFilter.Search"),
 							 OBS_TEXT_DEFAULT);
 	obs_property_set_long_description(search, obs_module_text("ShaderFilter.SearchHelp"));
 	obs_property_set_modified_callback(search, shader_search_changed);
-	obs_property_set_visible(search, browsing);
 
 	/* Where the shader is in the (narrowed) list. (The arrow keys on the
 	 * Shader list apply the next or previous entry, as in any dropdown.) */

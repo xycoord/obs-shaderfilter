@@ -43,12 +43,10 @@ def shots():
         # A shader file of the person's own that fails to compile.
         {"name": "5_error", "filters": [{"settings": {}}], "ui": pick(0, "broken.shader", HERE), "select": 0,
          "panel": True},
-        # Trying shaders: coming back to a filter that has a shader, opening the
-        # browsing tools and narrowing the list to one category.
+        # Trying shaders: a shader chosen, then the list narrowed by a search
+        # (which matches categories too).
         {"name": "7_browsing", "filters": [{"settings": {}}],
-         "ui": pick(0, "glow.shader") + [{"filter": 0, "wait_ms": 1200},
-                                         {"filter": 0, "property": "browse_shaders", "value": True},
-                                         {"filter": 0, "property": "shader_category", "value": "Blur & Glow"}],
+         "ui": pick(0, "glow.shader") + [{"filter": 0, "property": "shader_search", "value": "blur"}],
          "select": 0, "panel": True, "open_combo": 0},
         # Film Grain with a preset chosen: the presets list, and the measured
         # GPU time.

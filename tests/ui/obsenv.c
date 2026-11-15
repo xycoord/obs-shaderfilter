@@ -1,6 +1,7 @@
 /* libobs set-up for the UI capture tool (kept in C, away from Qt, because the
  * X11 headers' macros clash with Qt's). */
 #include <X11/Xlib.h>
+#include <stdlib.h>
 #include <obs-module.h>
 #include <obs-nix-platform.h>
 #include <obs.h>
@@ -41,7 +42,10 @@ bool env_start(const char *obs_prefix, const char *plugin, const char *data, uin
 	}
 	obs_set_nix_platform(OBS_NIX_PLATFORM_X11_EGL);
 	obs_set_nix_platform_display(dpy);
-	if (!obs_startup("en-US", NULL, NULL))
+	/* A fresh config folder each run: the plugin keeps the person's recent
+	 * shaders and browsing choices there, shared by the shots of one run. */
+	char config[] = "/tmp/uishot-config-XXXXXX";
+	if (!obs_startup("en-US", mkdtemp(config), NULL))
 		return false;
 	struct obs_video_info ovi = {0};
 	ovi.graphics_module = "libobs-opengl";
