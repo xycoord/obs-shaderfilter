@@ -5522,8 +5522,8 @@ static obs_properties_t *shader_filter_properties(void *data)
 
 	obs_properties_add_text(
 		props, "plugin_info",
-		"<a href=\"https://obsproject.com/forum/resources/obs-shaderfilter.1736/\">obs-shaderfilter</a> (" PROJECT_VERSION
-		") by <a href=\"https://www.exeldro.com\">Exeldro</a>",
+		"<a href=\"https://github.com/xycoord/obs-shaderfilter\">obs-shaderfilter</a>, a fork of "
+		"<a href=\"https://www.exeldro.com\">Exeldro</a>'s " PROJECT_VERSION,
 		OBS_TEXT_INFO);
 	obs_data_release(settings);
 	return props;
