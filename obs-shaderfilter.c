@@ -2401,14 +2401,17 @@ static const struct effect_param_data *section_of(const struct shader_filter_dat
 	return NULL;
 }
 
-/* A blank line, for room above a tick (a tick's row is shorter than a
- * slider's, and OBS leaves little room above a group's heading), named
- * after the group it's above ("" for Show All Settings, a name no group
- * has), so it's hidden with it. */
+/* A blank line, for room above Show All Settings (a tick's row is shorter
+ * than a slider's) and round the run of group boxes, named after the group
+ * it's above ("" for Show All Settings, a name no group has), so it's
+ * hidden with it. */
 static void gap_name(struct dstr *out, const char *above)
 {
 	dstr_printf(out, "shader_gap:%s", above);
 }
+
+/* (The gap below the last group: a name no group has.) */
+#define SF_GAP_END "~end"
 
 static void add_gap(obs_properties_t *params, const char *above)
 {
@@ -2434,23 +2437,35 @@ static void apply_param_visibility(const struct shader_filter_data *filter, obs_
 		const bool off = sec && !obs_data_get_bool(settings, sec->name.array);
 		obs_property_set_visible(p, (all || !param_is_more(q)) && !off);
 	}
-	/* A group shows when it has a setting to show. (An unticked section's
-	 * settings show greyed, as OBS shows them, so it's clear what's off.) */
+	/* A group shows when it has a setting to show; a section shows when it
+	 * would have one if ticked (unticked, it folds to its heading). */
+	bool boxes = false;
 	for (obs_property_t *g = obs_properties_first(params); g; obs_property_next(&g)) {
 		/* (Only the shader's own groups: the panel's are its business.) */
 		if (obs_property_get_type(g) != OBS_PROPERTY_GROUP || !panel_owns(filter, obs_property_name(g)))
 			continue;
 		bool any = false;
-		for (obs_property_t *c = obs_properties_first(obs_property_group_content(g)); c; obs_property_next(&c))
-			any = any || obs_property_visible(c);
+		for (obs_property_t *c = obs_properties_first(obs_property_group_content(g)); c; obs_property_next(&c)) {
+			const struct effect_param_data *q = find_param(filter, obs_property_name(c));
+			any = any || (q ? all || !param_is_more(q) : obs_property_visible(c));
+		}
 		obs_property_set_visible(g, any);
+		/* (The boxes sit close together, with room above the first one
+		 * shown and below the last.) */
 		struct dstr gap = {0};
 		gap_name(&gap, obs_property_name(g));
 		obs_property_t *gp = obs_properties_get(params, gap.array);
 		if (gp)
-			obs_property_set_visible(gp, any);
+			obs_property_set_visible(gp, any && !boxes);
 		dstr_free(&gap);
+		boxes = boxes || any;
 	}
+	struct dstr end = {0};
+	gap_name(&end, SF_GAP_END);
+	obs_property_t *gp = obs_properties_get(params, end.array);
+	if (gp)
+		obs_property_set_visible(gp, boxes);
+	dstr_free(&end);
 }
 
 static bool param_visibility_changed(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
@@ -2515,8 +2530,8 @@ static void section_ticks(const struct shader_filter_data *filter, obs_data_t *s
 	}
 }
 
-/* A section ticked or unticked: the panel is built again, so its heading and
- * the Look list say what's off. (OBS also calls this whenever it builds the
+/* A section ticked or unticked: the panel is built again, so the section
+ * folds or opens and the Look list says what's off. (OBS also calls this whenever it builds the
  * panel, so it asks for the panel again only when a tick differs from the
  * panel's.) */
 static bool section_toggled(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
@@ -4651,7 +4666,14 @@ static obs_properties_t *shader_filter_properties(void *data)
 			 * title shows an & as itself rather than as a shortcut key. */
 			struct dstr gname = {0};
 			const struct effect_param_data *sec = section_of(filter, group_name);
-			dstr_printf(&gname, SF_GROUP_PREFIX "%s", group_name);
+			/* A section's box is a ticked group named after its tick: its
+			 * heading carries the tick, as OBS draws a group that can be
+			 * turned off, and unticked it folds to that heading. (The Look
+			 * list says what's off.) */
+			if (sec)
+				dstr_copy(&gname, sec->name.array);
+			else
+				dstr_printf(&gname, SF_GROUP_PREFIX "%s", group_name);
 			for (size_t i = 0; i < groups.num; i++) {
 				const char *n = obs_property_name(groups.array[i]);
 				if (strcmp(n, gname.array) == 0) {
@@ -4661,28 +4683,18 @@ static obs_properties_t *shader_filter_properties(void *data)
 			if (!group) {
 				struct dstr title = {0};
 				dstr_copy(&title, sec && sec->display_name.len ? sec->display_name.array : group_name);
-				if (sec && !obs_data_get_bool(settings, sec->name.array))
-					dstr_cat(&title, obs_module_text("ShaderFilter.SectionOff"));
 				dstr_replace(&title, "&", "&&");
 				group = obs_properties_create();
 				/* (Room above its heading, if the group can be added.) */
 				if (flat && !obs_properties_get(params, gname.array))
 					add_gap(params, gname.array);
-				obs_property_t *p = obs_properties_add_group(params, gname.array, title.array, OBS_GROUP_NORMAL, group);
+				obs_property_t *p = obs_properties_add_group(params, gname.array, title.array,
+									     sec ? OBS_GROUP_CHECKABLE : OBS_GROUP_NORMAL, group);
 				if (p)
 					dstr_catf(&filter->panel_names, "%s;", gname.array);
-				if (sec) {
-					/* The section's tick is its first row ("On"); unticked,
-					 * the section folds to its heading and that tick. (The
-					 * heading and the Look list say what's off.) */
+				if (p && sec) {
 					shader_filter_set_tooltip(p, &sec->tooltip);
-					obs_property_t *tick = obs_properties_add_bool(group, sec->name.array,
-										       obs_module_text("ShaderFilter.SectionOn"));
-					if (tick) {
-						shader_filter_set_tooltip(tick, &sec->tooltip);
-						obs_property_set_modified_callback(tick, section_toggled);
-						dstr_catf(&filter->panel_names, "%s;", sec->name.array);
-					}
+					obs_property_set_modified_callback(p, section_toggled);
 				}
 				da_push_back(groups, &p);
 				dstr_free(&title);
@@ -4918,6 +4930,8 @@ static obs_properties_t *shader_filter_properties(void *data)
 			shader_filter_set_tooltip(p, &param->tooltip);
 		dstr_free(&display_name);
 	}
+	if (flat && groups.num)
+		add_gap(params, SF_GAP_END);
 	da_free(groups);
 	if (has_more && !all_added)
 		add_show_all(params);

@@ -154,7 +154,8 @@ uniform string notes<
 ```
 
 A group with a tick on its heading, to switch a part of the shader on and off: a `bool` with `widget_type = "section"`
-and the group's name. Unticked, its settings show greyed and keep their values.
+and the group's name. Unticked, the group folds to its heading; its settings
+keep their values.
 ```
 uniform bool Dust_On<
   string label = "Dust & Scratches";
@@ -365,7 +366,9 @@ xvfb-run -a tests/run.sh bench
 See [tests/README.md](tests/README.md) for what is compared and how differences are judged.
 
 `tests/ui/` captures the filter's settings panel, drawn by OBS's own properties widget, in a set of fixed
-scenarios (`tests/ui/shots.py`), for reviewing the UI.
+scenarios (`tests/ui/shots.py`), for reviewing the UI. Pass `--theme` one of OBS's own themes (OBS 30's
+`themes/Yami.qss` is its default) so group boxes, ticks and spacing are drawn as OBS draws them; without it a rough
+stand-in style is used, whose group boxes look like no OBS theme's.
 
 ## Donations
 https://www.paypal.me/exeldro
