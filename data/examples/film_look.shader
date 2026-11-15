@@ -23,16 +23,6 @@ uniform int Look_Amount<
     int maximum = 200;
     int step = 1;
 > = 100;
-uniform int Speed<
-    string label = "Speed";
-    string show = "more";
-    string tooltip = "Frames of film a second: the grain, dust, weave and flicker change this often. 24 for sound film, 16 to 18 for silent film and Super 8.";
-    string widget_type = "slider";
-    string suffix = " fps";
-    int minimum = 1;
-    int maximum = 60;
-    int step = 1;
-> = 24;
 uniform int Film_Amount<
     string label = "Film Amount";
     string tooltip = "How strong the film's part is (the print, halation, grain, dust and scratches), in percent of its settings.";
@@ -60,6 +50,16 @@ uniform int Lens_Amount<
     int maximum = 200;
     int step = 1;
 > = 100;
+uniform int Speed<
+    string label = "Speed";
+    string show = "more";
+    string tooltip = "Frames of film a second: the grain, dust, weave and flicker change this often. 24 for sound film, 16 to 18 for silent film and Super 8.";
+    string widget_type = "slider";
+    string suffix = " fps";
+    int minimum = 1;
+    int maximum = 60;
+    int step = 1;
+> = 24;
 
 #include "film_parts.hlsl"
 #include "projector_parts.hlsl"
