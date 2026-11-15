@@ -977,6 +977,7 @@ static void shader_filter_reload_effect(struct shader_filter_data *filter)
 	obs_leave_graphics();
 
 	if (filter->effect == NULL) {
+		filter->n_stages = 0;
 		blog(LOG_WARNING, "[obs-shaderfilter] Unable to create effect. Errors returned from parser:\n%s",
 		     (errors == NULL || strlen(errors) == 0 ? "(None)" : errors));
 		if (errors && strlen(errors)) {
@@ -1365,14 +1366,19 @@ static const struct library_item *library_find(const library_t *lib, const char 
 	return NULL;
 }
 
+/* The last / or \\ in a path, or NULL. */
+static const char *last_separator(const char *path)
+{
+	const char *slash = path ? strrchr(path, '/') : NULL;
+	const char *bslash = path ? strrchr(path, '\\') : NULL;
+	return bslash > slash ? bslash : slash;
+}
+
 static char *parent_dir(const char *path)
 {
 	struct dstr d = {0};
 	dstr_copy(&d, path);
-	char *slash = strrchr(d.array, '/');
-	char *bslash = strrchr(d.array, '\\');
-	if (bslash > slash)
-		slash = bslash;
+	const char *slash = last_separator(d.array);
 	if (slash)
 		dstr_resize(&d, slash - d.array);
 	return d.array;
@@ -1827,13 +1833,13 @@ static void auto_name_filter(struct shader_filter_data *filter, obs_data_t *sett
 	bfree(name);
 }
 
-/* Switch the filter to a shader file, as if chosen in the list. */
 /* Whether the shader last loaded is path (none loaded yet: no). */
 static bool same_path(const struct dstr *last, const char *path)
 {
 	return last->array && path && strcmp(last->array, path) == 0;
 }
 
+/* Switch the filter to a shader file, as if chosen in the list. */
 static void choose_shader_file(struct shader_filter_data *filter, obs_data_t *settings, const char *path)
 {
 	bfree(filter->switch_note);
@@ -2429,8 +2435,6 @@ static void add_show_all(obs_properties_t *params)
 	obs_property_set_modified_callback(all, param_visibility_changed);
 }
 
-/* A section ticked or unticked: the panel is built again, so its heading and
- * the Look list say what's off. */
 /* The section ticks as they are, '1' or '0' for each section. */
 static void section_ticks(const struct shader_filter_data *filter, obs_data_t *settings, struct dstr *out)
 {
@@ -2442,8 +2446,10 @@ static void section_ticks(const struct shader_filter_data *filter, obs_data_t *s
 	}
 }
 
-/* (OBS also calls this whenever it builds the panel, so it asks for the
- * panel again only when a tick differs from the panel's.) */
+/* A section ticked or unticked: the panel is built again, so its heading and
+ * the Look list say what's off. (OBS also calls this whenever it builds the
+ * panel, so it asks for the panel again only when a tick differs from the
+ * panel's.) */
 static bool section_toggled(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
 {
 	UNUSED_PARAMETER(p);
@@ -2480,14 +2486,11 @@ static bool shader_preset_changed(obs_properties_t *props, obs_property_t *p, ob
 	presets_free(&presets);
 	/* (Built again, so the Look list and its Back button match; that does
 	 * all a refresh would.) */
-	if (applied) {
+	if (applied)
 		obs_source_update_properties(filter->context);
-		applied = false;
-	}
-	return applied;
+	return false;
 }
 
-/* Whether a shader file is one of those shipped with the plugin. */
 static const char *shader_filter_id;
 
 /* ---- Switching to a larger shader, keeping the settings ----
@@ -2503,10 +2506,7 @@ static const char *shader_filter_id;
 
 static char *shader_base_name(const char *path)
 {
-	const char *slash = strrchr(path, '/');
-	const char *bslash = strrchr(path, '\\');
-	if (bslash > slash)
-		slash = bslash;
+	const char *slash = last_separator(path);
 	const char *start = slash ? slash + 1 : path;
 	const char *dot = strrchr(start, '.');
 	return bstrdup_n(start, dot ? (size_t)(dot - start) : strlen(start));
@@ -2515,10 +2515,7 @@ static char *shader_base_name(const char *path)
 /* A file next to the shader at path. */
 static char *sibling_path(const char *path, const char *name)
 {
-	const char *slash = strrchr(path, '/');
-	const char *bslash = strrchr(path, '\\');
-	if (bslash > slash)
-		slash = bslash;
+	const char *slash = last_separator(path);
 	struct dstr out = {0};
 	if (slash)
 		dstr_ncopy(&out, path, slash - path + 1);
@@ -2694,13 +2691,13 @@ static const char *switch_target(obs_source_t *f)
 /* The switched-on filters directly before and after this one whose switch
  * leads to the same shader (Film, Projector, Lens, Film Grain, ... all lead
  * to Film Look): switching this one alone would apply theirs twice, so they
- * are combined into it. Not a second filter of a shader already in the run
- * (one Film's settings would overwrite the other's): the run stops there.
- * Up to max, in the order they're applied, each with a reference for the
- * caller to release; how many (0 if none but this one). */
+ * are combined into it. Only when this filter is on itself (combining from a
+ * switched-off one would switch every effect off), and not a second filter
+ * of a shader already in the run (its settings would overwrite the
+ * other's): the run stops there. In the order they're applied, each with a
+ * reference for the caller to release; how many (0 if none but this one). */
 #define SF_MAX_RUN 64
 struct switch_run {
-	obs_source_t *self;
 	obs_source_t *all[SF_MAX_RUN];
 	size_t n;
 };
@@ -2709,26 +2706,36 @@ static void switch_run_scan(obs_source_t *parent, obs_source_t *child, void *par
 {
 	UNUSED_PARAMETER(parent);
 	struct switch_run *r = param;
-	if (r->n < SF_MAX_RUN && (child == r->self || obs_source_enabled(child))) {
+	if (r->n < SF_MAX_RUN && obs_source_enabled(child)) {
 		obs_source_t *ref = obs_source_get_ref(child);
 		if (ref)
 			r->all[r->n++] = ref;
 	}
 }
 
-static bool joins_run(obs_source_t *f, const char *target, obs_source_t **run, size_t n)
+/* The name a filter's settings are carried under (its shader's file name). */
+static char *carry_name(obs_source_t *f)
+{
+	obs_data_t *fs = obs_source_get_settings(f);
+	char *base = shader_base_name(obs_data_get_string(fs, "shader_file_name"));
+	obs_data_release(fs);
+	return base;
+}
+
+/* Whether f, next to the run, joins it; if so its name is added to names. */
+static bool joins_run(obs_source_t *f, const char *target, struct dstr *names)
 {
 	const char *t = switch_target(f);
 	if (!t || strcmp(t, target) != 0)
 		return false;
-	obs_data_t *fs = obs_source_get_settings(f);
-	bool dup = false;
-	for (size_t i = 0; i < n && !dup; i++) {
-		obs_data_t *rs = obs_source_get_settings(run[i]);
-		dup = strcmp(obs_data_get_string(fs, "shader_file_name"), obs_data_get_string(rs, "shader_file_name")) == 0;
-		obs_data_release(rs);
-	}
-	obs_data_release(fs);
+	char *base = carry_name(f);
+	struct dstr key = {0};
+	dstr_printf(&key, ";%s;", base);
+	const bool dup = names->array && strstr(names->array, key.array) != NULL;
+	if (!dup)
+		dstr_catf(names, "%s;", base);
+	dstr_free(&key);
+	bfree(base);
 	return !dup;
 }
 
@@ -2738,27 +2745,27 @@ static size_t switch_run_others(struct shader_filter_data *filter, obs_source_t 
 	const char *target = switch_target(filter->context);
 	if (!parent || !target)
 		return 0;
-	struct switch_run r = {filter->context, {NULL}, 0};
+	struct switch_run r = {{NULL}, 0};
 	obs_source_enum_filters(parent, switch_run_scan, &r);
 	size_t self = r.n;
 	for (size_t i = 0; i < r.n; i++)
 		if (r.all[i] == filter->context)
 			self = i;
-	obs_source_t *run[SF_MAX_RUN];
-	size_t n = 0;
+	size_t first = self, last = self;
 	if (self < r.n) {
-		run[n++] = r.all[self];
-		for (size_t i = self; i > 0 && joins_run(r.all[i - 1], target, run, n); i--)
-			run[n++] = r.all[i - 1];
-		for (size_t i = self + 1; i < r.n && joins_run(r.all[i], target, run, n); i++)
-			run[n++] = r.all[i];
+		char *base = carry_name(filter->context);
+		struct dstr names = {0};
+		dstr_printf(&names, ";%s;", base);
+		bfree(base);
+		while (first > 0 && joins_run(r.all[first - 1], target, &names))
+			first--;
+		while (last + 1 < r.n && joins_run(r.all[last + 1], target, &names))
+			last++;
+		dstr_free(&names);
 	}
 	size_t out = 0;
 	for (size_t i = 0; i < r.n; i++) {
-		bool in_run = false;
-		for (size_t k = 1; k < n && !in_run; k++)
-			in_run = run[k] == r.all[i];
-		if (in_run && out < max)
+		if (self < r.n && i >= first && i <= last && i != self && out < max)
 			others[out++] = r.all[i];
 		else
 			obs_source_release(r.all[i]);
