@@ -7,8 +7,10 @@
 // Projector, then Lens.
 //
 // Amount scales every effect from none (0: the picture comes through
-// untouched) through the settings as set (100) to twice as strong (200). The
-// halo is red-orange on a colour stock and neutral on the others, as on black
+// untouched) through the settings as set (100) to twice as strong (200). In
+// one pass the softness and the halo's threshold work on the picture before
+// the print rather than after it, so it differs a little from the separate
+// filters chained (by about a level in 255 on average). The halo is red-orange on a colour stock and neutral on the others, as on black
 // and white film. Grain and dust change Speed times a second; set it the same
 // as Projector's. Sizes are in pixels on a 1080-line picture (scaled for other
 // sizes). Where the source is transparent, as round a logo, the halo and light
@@ -271,7 +273,14 @@ float3 film_print(float3 x, float a)
 {
     x = max(x, 0.0);
     float3 xs = min(x, 1.0);
-    float3 rgb = lerp(x, xs * xs * (3.0 - 2.0 * xs) + (x - xs), Contrast * 0.01 * a);
+    // The S-curve, blended in up to its full strength, then (above 100%, at
+    // Amount over 100) blended towards the curve applied twice, so stronger
+    // contrast steepens the curve rather than pushing shadows below black.
+    float cs = Contrast * 0.01 * a;
+    float3 s1 = xs * xs * (3.0 - 2.0 * xs) + (x - xs);
+    float3 s1c = min(s1, 1.0);
+    float3 s2 = s1c * s1c * (3.0 - 2.0 * s1c) + (s1 - s1c);
+    float3 rgb = cs <= 1.0 ? lerp(x, s1, cs) : lerp(s1, s2, min(cs - 1.0, 1.0));
     float k = max(Roll_Off * 0.02 * a, 0.0001);
     rgb = (1.0 - exp(-k * rgb)) / (1.0 - exp(-k)) * lerp(1.0, White * 0.01, a);
     float l = dot(rgb, float3(0.2126, 0.7152, 0.0722));
@@ -300,9 +309,11 @@ float4 mainImage(VertData v_in) : TARGET
     float turn = 6.2831853 * frac(52.9829189 * frac(dot(px, float2(0.06711056, 0.00583715))));
     float3 lw = float3(0.2126, 0.7152, 0.0722);
 
-    // The film's softness: a Gaussian from 24 points on a turned spiral (as
-    // Lens Softness), in near-linear light, kept inside the picture.
-    float4 c = image.Sample(textureSampler, v_in.uv);
+    // The film's softness: a Gaussian from points on a turned spiral (as Lens
+    // Softness: 24, or 48 wider than 2 pixels), in near-linear light, kept
+    // inside the picture.
+    float4 raw = image.Sample(textureSampler, v_in.uv);
+    float4 c = raw;
     float sigma = Softness * a * scale;
     if (sigma >= 0.05) {
         float2 lo = min(v_in.uv, 0.5 * uv_pixel_interval);
@@ -312,14 +323,16 @@ float4 mainImage(VertData v_in) : TARGET
         float3 sum = float3(0.0, 0.0, 0.0);
         float cover = 0.0;
         float total = 0.0;
-        float w = 0.91051036;
-        for (int i = 0; i < 24; i++) {
-            float4 s = image.Sample(textureSampler, clamp(v_in.uv + dir * reach * sqrt((float(i) + 0.5) / 24.0), lo, hi));
+        int n = sigma > 2.0 ? 48 : 24;
+        float step_w = exp(-4.5 / float(n));
+        float w = sqrt(step_w);
+        for (int i = 0; i < n; i++) {
+            float4 s = image.Sample(textureSampler, clamp(v_in.uv + dir * reach * sqrt((float(i) + 0.5) / float(n)), lo, hi));
             sum += w * s.rgb * s.rgb * s.a;
             cover += w * s.a;
             total += w;
             dir = float2(dir.x * -0.73736886 - dir.y * 0.67549032, dir.x * 0.67549032 + dir.y * -0.73736886);
-            w *= 0.82902912;
+            w *= step_w;
         }
         c = cover > 0.0 ? float4(sqrt(max(sum / cover, 0.0)), cover / total) : float4(0.0, 0.0, 0.0, 0.0);
     }
@@ -342,7 +355,9 @@ float4 mainImage(VertData v_in) : TARGET
             w *= 0.92311635;
         }
         glow /= 12.421987 * (1.0 - t);
-        float own = c.a * max(dot(film_to_linear(c.rgb), lw) - t, 0.0) / (1.0 - t);
+        // (The pixel's own share from the unsoftened pixel, as the samples
+        // are, so a softened bright edge doesn't let the halo in.)
+        float own = raw.a * max(dot(film_to_linear(raw.rgb), lw) - t, 0.0) / (1.0 - t);
         glow = max(glow - own, 0.0) * strength;
     }
 
@@ -352,9 +367,7 @@ float4 mainImage(VertData v_in) : TARGET
     float3 h = (Stock == 0 ? float3(1.0, 0.13, 0.03) : float3(0.31, 0.31, 0.31)) * glow;
     float3 lit = film_to_linear(c.rgb) * c.a + h;
     float alpha = saturate(max(c.a, max(h.r, max(h.g, h.b))));
-    if (alpha <= 0.0)
-        return float4(0.0, 0.0, 0.0, 0.0);
-    c = float4(film_from_linear(lit / alpha), alpha);
+    c = alpha > 0.0 ? float4(film_from_linear(lit / alpha), alpha) : float4(0.0, 0.0, 0.0, 0.0);
 
     // The frame of film: grain and dust change Speed times a second.
     float frame_count = floor(elapsed_time * float(Speed));

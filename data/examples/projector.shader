@@ -6,8 +6,9 @@
 //
 // Amount scales every effect from none (0: the picture comes through
 // untouched) through the settings as set (100) to twice as strong (200).
-// Weave and flicker step together, once per frame of film, at Speed (with
-// Hand Cranking wavering both). Set Speed the same as Film's or Film Grain's.
+// Weave and flicker step once per frame of film, at Speed; Hand Cranking
+// wavers the flicker, as in Projector Flicker. Set Speed the same as Film's or
+// Film Grain's, and the picture weaves in step with the grain.
 // It goes after the film's own effects (grain and dust move with the picture)
 // and before the lens's. Outside the gate the picture turns transparent
 // (black on a projector).
@@ -169,15 +170,18 @@ float4 mainImage(VertData v_in) : TARGET
     float a = Amount * 0.01;
     float seed = rand_instance_f * 61.0;
 
-    // The frame of film on screen: Speed frames a second, wavering when hand
-    // cranked (by at most Hand_Cranking percent, from two slow waves, so the
-    // film never runs backwards). Weave and flicker both step on it.
+    // The frame of film in the gate, counted as Gate Weave, Film and Film
+    // Grain count them, so the picture weaves in step with the grain; and the
+    // frame of film as the lamp lights it, wavering when hand cranked (by at
+    // most Hand_Cranking percent, from two slow waves, so the film never runs
+    // backwards), as Projector Flicker counts it.
     float h = Hand_Cranking * 0.01 * a;
     float w1 = 6.2831853 * 0.23;
     float w2 = 6.2831853 * 0.61;
     float t = elapsed_time;
     float crank = h * (0.6 * (cos(seed * 0.71) - cos(w1 * t + seed * 0.71)) / w1 + 0.4 * (cos(seed * 1.37) - cos(w2 * t + seed * 1.37)) / w2);
-    float frame = floor(float(Speed) * (t + crank));
+    float frame = floor(float(Speed) * t);
+    float lit_frame = floor(float(Speed) * (t + crank));
 
     // Gate weave: side to side mostly a wander over about half a second, up
     // and down mostly new each frame; pixels on a 1080-line picture.
@@ -191,11 +195,11 @@ float4 mainImage(VertData v_in) : TARGET
     float tl = fmod(t, 9973.0);
     float lamp = (projector_smooth(tl * 3.1, seed + 1.0) + 0.5 * projector_smooth(tl * 7.3, seed + 2.0)) / 1.118;
     float gain = Lamp_Flicker * 0.01 * lamp;
-    gain += Exposure_Flicker * 0.01 * (0.8 * projector_gauss(frame, seed + 3.0) + 0.6 * projector_smooth(frame / 6.0, seed + 4.0));
-    float3 b = projector_hash(float3(fmod(frame, 9973.0), seed + 5.0, 7.0));
+    gain += Exposure_Flicker * 0.01 * (0.8 * projector_gauss(lit_frame, seed + 3.0) + 0.6 * projector_smooth(lit_frame / 6.0, seed + 4.0));
+    float3 b = projector_hash(float3(fmod(lit_frame, 9973.0), seed + 5.0, 7.0));
     if (b.x < Dark_Frames / (60.0 * float(Speed)))
         gain -= Dark_Frame_Depth * 0.01 * (0.75 + 0.5 * b.y);
-    float3 r = projector_hash(float3(fmod(frame, 9973.0), seed + 6.0, 11.0));
+    float3 r = projector_hash(float3(fmod(lit_frame, 9973.0), seed + 6.0, 11.0));
     float angle = r.x * 6.2831853;
     float2 dd = v_in.uv - 0.5;
     float side = dot(dd, float2(cos(angle), sin(angle))) * 2.0;
@@ -212,6 +216,6 @@ float4 mainImage(VertData v_in) : TARGET
     float2 q = abs(p) - (half_size - rr);
     float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - rr;
     float s = max(Edge_Softness * a, 0.001);
-    c.a *= smoothstep(0.5 * s, -0.5 * s, d);
+    c.a *= 1.0 - smoothstep(-0.5 * s, 0.5 * s, d);
     return c;
 }

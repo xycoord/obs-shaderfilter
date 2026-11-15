@@ -54,6 +54,18 @@ uniform float Corner_Falloff<
     float step = 1.0;
 > = 25.0;
 
+// The sRGB curve, both ways, carried on above 1.
+float3 lens_to_linear(float3 c)
+{
+    c = max(c, 0.0);
+    return lerp(c / 12.92, pow((c + 0.055) / 1.055, float3(2.4, 2.4, 2.4)), step(0.04045, c));
+}
+float3 lens_from_linear(float3 c)
+{
+    c = max(c, 0.0);
+    return lerp(c * 12.92, 1.055 * pow(c, float3(1.0 / 2.4, 1.0 / 2.4, 1.0 / 2.4)) - 0.055, step(0.0031308, c));
+}
+
 float4 mainImage(VertData v_in) : TARGET
 {
     float a = Amount * 0.01;
@@ -119,10 +131,12 @@ float4 mainImage(VertData v_in) : TARGET
         c = float4(sqrt(max(sum / alpha, 0.0)), alpha);
     }
 
-    // Corner falloff, the cos^4 law, in linear light (on the encoded picture,
-    // the falloff's 1/2.2 power).
-    float kv = (1.0 / sqrt(1.0 - min(Corner_Falloff * a, 99.0) * 0.01) - 1.0) / rc2;
-    float q = 1.0 + kv * dot(d, d);
-    c.rgb *= pow(1.0 / (q * q), 1.0 / 2.2);
+    // Corner falloff, the cos^4 law, in linear light, as Lens Vignette.
+    float falloff = min(Corner_Falloff * a, 99.0);
+    if (falloff > 0.0) {
+        float kv = (1.0 / sqrt(1.0 - falloff * 0.01) - 1.0) / rc2;
+        float q = 1.0 + kv * dot(d, d);
+        c.rgb = lens_from_linear(lens_to_linear(c.rgb) / (q * q));
+    }
     return c;
 }

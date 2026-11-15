@@ -54,6 +54,6 @@ float4 mainImage(VertData v_in) : TARGET
 
     // Fades out over Edge_Softness, centred on the gate's edge.
     float s = max(Edge_Softness, 0.001);
-    c.a *= smoothstep(0.5 * s, -0.5 * s, d);
+    c.a *= 1.0 - smoothstep(-0.5 * s, 0.5 * s, d);
     return c;
 }
