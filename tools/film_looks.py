@@ -248,9 +248,8 @@ EXTRAS = {
 }
 
 HEADER = """; Presets for {name}.shader, written by tools/film_looks.py from the film
-; pack's Looks (change them there, not here). Each Look sets every setting it
+; pack's looks (change them there, not here). Each preset sets every setting it
 ; lists; the Amounts and the section ticks are left as they are.
-label = Look
 default = {default}
 """
 
