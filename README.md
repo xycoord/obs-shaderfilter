@@ -149,7 +149,7 @@ uniform string notes<
 ```
 
 A group with a tick on its heading, to switch a part of the shader on and off: a `bool` with `widget_type = "section"`
-and the group's name. The group folds to its heading when unticked; its settings keep their values.
+and the group's name. Unticked, its settings show greyed and keep their values.
 ```
 uniform bool Dust_On<
   string label = "Dust & Scratches";

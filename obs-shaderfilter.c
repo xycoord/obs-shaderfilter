@@ -2232,7 +2232,7 @@ static struct shader_filter_data *props_filter(obs_properties_t *props)
  * A bool setting with widget_type "section" and a group puts a tick on that
  * group's heading: the group is then named after the bool (OBS keeps a
  * checkable group's tick under the group's name), and when it's unticked
- * the group folds to its heading. A setting with show = "more" is shown only
+ * its settings show greyed. A setting with show = "more" is shown only
  * when the filter's "Show every setting" is ticked, which appears only for
  * shaders that mark something. Neither changes any value: hidden and folded
  * settings keep theirs. */
@@ -2268,30 +2268,17 @@ static void apply_param_visibility(const struct shader_filter_data *filter, obs_
 		obs_property_t *p = obs_properties_get(params, q->name.array);
 		if (!p)
 			continue;
-		bool visible = all || !param_is_more(q);
-		const struct effect_param_data *sec = q->group.len ? section_of(filter, q->group.array) : NULL;
-		if (sec && !obs_data_get_bool(settings, sec->name.array))
-			visible = false;
-		obs_property_set_visible(p, visible);
+		obs_property_set_visible(p, all || !param_is_more(q));
 	}
-	/* A group shows when it has a setting to show; a section also shows,
-	 * folded, when unticked, unless everything in it is behind "more". */
+	/* A group shows when it has a setting to show. (An unticked section's
+	 * settings show greyed, as OBS shows them, so it's clear what's off.) */
 	for (obs_property_t *g = obs_properties_first(params); g; obs_property_next(&g)) {
 		if (obs_property_get_type(g) != OBS_PROPERTY_GROUP)
 			continue;
-		obs_properties_t *content = obs_property_group_content(g);
 		bool any = false;
-		bool any_main = false;
-		for (obs_property_t *c = obs_properties_first(content); c; obs_property_next(&c)) {
+		for (obs_property_t *c = obs_properties_first(obs_property_group_content(g)); c; obs_property_next(&c))
 			any = any || obs_property_visible(c);
-			const struct effect_param_data *q = NULL;
-			for (size_t i = 0; i < filter->stored_param_list.num && !q; i++)
-				if (strcmp(filter->stored_param_list.array[i].name.array, obs_property_name(c)) == 0)
-					q = filter->stored_param_list.array + i;
-			any_main = any_main || !q || !param_is_more(q);
-		}
-		const bool checkable = obs_property_group_type(g) == OBS_GROUP_CHECKABLE;
-		obs_property_set_visible(g, any || (checkable && (all || any_main)));
+		obs_property_set_visible(g, any);
 	}
 }
 
@@ -2299,9 +2286,11 @@ static bool param_visibility_changed(obs_properties_t *props, obs_property_t *p,
 {
 	UNUSED_PARAMETER(p);
 	struct shader_filter_data *filter = props_filter(props);
-	if (!filter)
+	/* (OBS passes the whole panel; the shader's settings are in its group.) */
+	obs_property_t *group = obs_properties_get(props, "shader_params");
+	if (!filter || !group)
 		return false;
-	apply_param_visibility(filter, props, settings);
+	apply_param_visibility(filter, obs_property_group_content(group), settings);
 	return true;
 }
 
@@ -4008,7 +3997,7 @@ static obs_properties_t *shader_filter_properties(void *data)
 			}
 			if (!group) {
 				struct dstr title = {0};
-				dstr_copy(&title, group_name);
+				dstr_copy(&title, sec && sec->display_name.len ? sec->display_name.array : group_name);
 				dstr_replace(&title, "&", "&&");
 				if (!groups.num && has_more) {
 					obs_property_t *all = obs_properties_add_bool(params, "show_all_settings",
@@ -4020,10 +4009,8 @@ static obs_properties_t *shader_filter_properties(void *data)
 				group = obs_properties_create();
 				obs_property_t *p = obs_properties_add_group(params, gname.array, title.array,
 									    sec ? OBS_GROUP_CHECKABLE : OBS_GROUP_NORMAL, group);
-				if (sec) {
+				if (sec)
 					shader_filter_set_tooltip(p, &sec->tooltip);
-					obs_property_set_modified_callback(p, param_visibility_changed);
-				}
 				da_push_back(groups, &p);
 				dstr_free(&title);
 			}
