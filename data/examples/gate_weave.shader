@@ -51,9 +51,12 @@ float3 weave_hash(float3 p3)
 }
 
 // Roughly Gaussian, mean 0 and standard deviation 1: three uniform numbers, rescaled.
+// x is a whole number (a frame, or a point of the smooth noise); the sequence
+// repeats after 9973 of them, small enough for the hash, and as the smooth
+// noise wraps its points rather than its position, without a jump.
 float weave_gauss(float x, float seed)
 {
-    float3 u = weave_hash(float3(x, seed, seed * 0.37 + 5.0));
+    float3 u = weave_hash(float3(fmod(x, 9973.0), seed, seed * 0.37 + 5.0));
     return (u.x + u.y + u.z - 1.5) * 2.0;
 }
 
@@ -72,8 +75,8 @@ float4 mainImage(VertData v_in) : TARGET
     float seed = rand_instance_f * 61.0;
 
     // The frame of film in the gate, counted as Film Grain and Projector
-    // Flicker count them. The sequence repeats after 9973 frames.
-    float frame = fmod(floor(elapsed_time * float(Speed)), 9973.0);
+    // Flicker count them.
+    float frame = floor(elapsed_time * float(Speed));
 
     // Side to side: mostly a wander over about half a second of frames, a
     // little new each frame. Up and down: mostly new each frame, a little
@@ -82,8 +85,7 @@ float4 mainImage(VertData v_in) : TARGET
     float x = Weave * (0.45 * weave_gauss(frame, seed + 1.0) + 0.89 * weave_smooth(frame / wander, seed + 2.0));
     float y = Jump * (0.8 * weave_gauss(frame, seed + 3.0) + 0.6 * weave_smooth(frame / 4.0, seed + 4.0));
 
-    float2 uv = v_in.uv - float2(x, y) * (uv_size.y / 1080.0) * uv_pixel_interval;
-    if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0)
-        return float4(0.0, 0.0, 0.0, 0.0);
-    return image.Sample(textureSampler, uv);
+    // Pixels on a 1080-line picture, scaled to the source's own height. Past
+    // the picture's edges the sampler reads transparent, smoothly.
+    return image.Sample(textureSampler, v_in.uv - float2(x, y) * uv_pixel_interval / (uv_pixel_interval.y * 1080.0));
 }
