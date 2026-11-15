@@ -13,19 +13,19 @@ what every part does, and it runs shaders you write yourself.
 
 - **Complete looks, with parts you can switch off.** *Film Look* is one filter for a whole projected-film look: the
   print's colour, halation, grain, dust and scratches, gate weave, flicker, the frame's edge and the lens. Each part
-  has a tick, so you can have the look without the dust. 13 tuned Looks set everything at once, and each part is also
+  has a tick, so you can have the look without the dust. 13 tuned presets set everything at once, and each part is also
   a filter of its own. The *VHS & CRT* pack has all-in-one VHS Tape and CRT TV filters with presets, and each part
   on its own.
-- **Looks of your own,** for any shader: **Save as a Look…** keeps a filter's settings to use on other filters.
-- **A settings panel you can use without knowing the shader:** a Look list that says when you've changed a Look,
+- **Presets of your own,** for any shader: **Save as a Preset…** keeps a filter's settings to use on other filters.
+- **A settings panel you can use without knowing the shader:** a Preset list that says when you've changed a preset,
   and which parts are off, and puts it back; the main settings first and the rest behind **Show All Settings**; units on
   the numbers; and what the shader costs in GPU time.
 - **Easier to find a shader:** **Recently used** first, categories, shaders few people need kept at the end, a
-  remembered category, and ↑/↓ to step through shaders while watching the preview. Filters are named after their
-  shader.
+  Search box that matches names and categories, and ↑/↓ to step through shaders while watching the preview. Filters
+  are named after their shader.
 - **Faster stacks of shader filters**, with the same output (see [Performance](#performance)).
 - **More for shader authors:** sections with ticks, settings shown only on request, units, several passes in one
-  shader, buttons that switch a filter to a larger shader keeping its settings, and Look files (see
+  shader, buttons that switch a filter to a larger shader keeping its settings, and presets files (see
   [Writing shaders](#writing-shaders)).
 - **Tested against release 2.6.1** in a headless OBS: every bundled shader, chains of filters, transitions and the
   settings panel (see [Testing](#testing)).
@@ -48,21 +48,21 @@ Add the filter to any source through "Filters" when right-clicking it; it is cal
   shader filters can be told apart; a name you typed yourself is never changed. A filter whose shader fails
   shows "⚠" before its name until it works again.
 - After choosing a shader, **↑/↓ on the Shader list** applies the next or previous one, so you can step
-  through shaders while watching the preview. **Browse Shaders** shows Category and Search, to narrow the
-  list (and so what ↑/↓ steps through), with the shader's place in it ("Shader 8 of 11 in Blur & Glow").
-  Browse Shaders and the category stay as you left them, on every filter and next time OBS starts.
+  through shaders while watching the preview. **Search** narrows the list (and so what ↑/↓ steps through) to
+  shaders whose name or category matches (film, blur, vhs…), with the shader's place among them
+  ("Shader 3 of 8 matching "blur"").
 - The list starts with the shaders you used last (**Recently used**). Shaders few people need (another shader or
   one of OBS's own filters does the job, or they're demos) are at the end, under **More shaders**; they all still
   work, and Search finds them.
-- The shader's settings follow. Shaders with presets start with a **Look** (or **Preset**) list: choosing one sets
-  every setting, which you can then adjust. After a change the list says so ("Classic Film (16mm) — changed"), and
-  **Back to** puts the Look back. A shader made of parts, such as Film Look, shows each part in a box with a tick on
-  its heading: untick it to leave that part out (its settings are kept). Settings most people won't need are behind
+- The shader's settings follow. Shaders with presets start with a **Preset** list: choosing one sets every setting,
+  which you can then adjust. After a change the list says so ("Classic Film (16mm) — changed"), and **Back to** puts
+  the preset back. A shader made of parts, such as Film Look, shows each part in a box with a tick on its heading:
+  untick it to leave that part out (its settings are kept). Settings most people won't need are behind
   **Show All Settings**.
-- **Your own Looks:** **Save as a Look…** keeps a filter's settings (part ticks included) as a Look of your own, for
-  every filter using that shader; it's listed under **Your Looks** after the shader's own presets, and works for any
+- **Your own presets:** **Save as a Preset…** keeps a filter's settings (part ticks included) as a preset of your own,
+  for every filter using that shader; it's listed under **Your presets** after the shader's own, and works for any
   shader, with presets or without. Picking one sets everything it saved; after a change, **Update** saves the change
-  into it, and **Delete** removes it. They're kept in OBS's plugin settings folder (`obs-shaderfilter/looks/`), one
+  into it, and **Delete** removes it. They're kept in OBS's plugin settings folder (`obs-shaderfilter/presets/`), one
   file per shader name.
 - **How much it costs:** the Shader list marks shaders that take noticeably more GPU time than a simple
   color filter (Medium, Heavy, Very Heavy), and a chosen shader's settings show the GPU time it actually
@@ -78,11 +78,11 @@ The shader list for a folder can be given categories, display names, cost rating
 next to the shaders; see [data/examples/library.ini](data/examples/library.ini). Presets go in a
 `<shader name>.presets.ini` beside the shader: one `[section]` per preset with `parameter = value` lines
 (`;` starts a comment); see
-[data/examples/film_grain.presets.ini](data/examples/film_grain.presets.ini). A `label = Look` line before the first
-preset makes them a list of Looks: the list takes that name, remembers the one picked, and after a change shows
-"*Look* — changed" rather than Custom (picking the Look again, or Back to, puts it back), naming any sections that are
-unticked; a `default = <name>` line names the preset the shader's defaults are, shown (of several with the same values)
-until another is picked, and a `description = ...` line in a preset is shown under the list.
+[data/examples/film_grain.presets.ini](data/examples/film_grain.presets.ini). The Preset list remembers the one
+picked, and after a change shows "*preset* — changed" rather than Custom (picking it again, or Back to, puts it back),
+naming any sections that are unticked. Before the first preset, a `default = <name>` line names the preset the
+shader's defaults are, shown (of several with the same values) until another is picked, and a `label = ...` line
+renames the list; a `description = ...` line in a preset is shown under the list.
 The film pack's presets are all written from one table by [tools/film_looks.py](tools/film_looks.py).
 
 Normally all that's required for OBS purposes is a pixel shader (a `.shader` file), and the plugin wraps it
@@ -144,7 +144,7 @@ Settings most people won't need can be marked `string show = "more";`: they're s
 A `string` with `widget_type = "switch"` and a shader file (next to this one) as its value shows as a button that
 makes the filter that shader, keeping its settings: each setting of the new shader takes this one's value of the same
 name, or of a name its `string from = "film_grain:Amount, halation:Strength";` annotation gives for this shader; the
-rest take the Look this filter had (or their defaults). The film pack's filters use it for **Switch to Film Look**,
+rest take the preset this filter had (or their defaults). The film pack's filters use it for **Switch to Film Look**,
 and a run of Film, Projector and Lens filters can be combined into one Film Look the same way.
 
 ### Several passes

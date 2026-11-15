@@ -5,7 +5,7 @@
 // one after another, with the same settings, but in step with each other
 // (the weave, flicker, grain and dust all change on the same frame of film).
 //
-// Pick a Look, then turn the whole thing up or down with Amount; untick any
+// Pick a preset, then turn the whole thing up or down with Amount; untick any
 // part you don't want (its settings are kept for when you tick it again).
 // Show All Settings shows every setting of every part, and each part's own
 // Amount. The film and projector are drawn in one pass, the lens in a second
