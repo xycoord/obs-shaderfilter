@@ -118,7 +118,11 @@ float4 lens_at(float2 uv, float a)
         // evenly from red to blue in a scrambled order. Samples stay half a
         // pixel inside the picture, so its edges keep their colour (no fringe
         // along the frame); the bent edge's fade is applied after.
-        int n = sigma > 2.0 ? 48 : 24;
+        // As many samples as the spread here needs: in the middle of the
+        // picture, where the fringes and the corner softness are a fraction of
+        // a pixel, a few do; towards the corners, more.
+        float shift = length((uv0 - 0.5) * spread * 0.5 / uv_pixel_interval);
+        int n = sigma < 0.25 && shift < 0.35 ? 6 : (sigma < 0.6 && shift < 0.7 ? 12 : (sigma > 2.0 ? 48 : 24));
         float step_w = exp(-4.5 / float(n));
         float w = sqrt(step_w);
         float2 px = uv / uv_pixel_interval;

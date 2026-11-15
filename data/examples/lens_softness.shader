@@ -69,6 +69,33 @@ float4 mainImage(VertData v_in) : TARGET
     // opaque), unless this pixel is outside it, in added space.
     float2 lo = min(v_in.uv, 0.5 * uv_pixel_interval);
     float2 hi = max(v_in.uv, 1.0 - 0.5 * uv_pixel_interval);
+
+    // Under a pixel (most of the picture, as usual), exactly instead: 3 by 3
+    // samples, each between two pixels, so they cover 5 by 5.
+    if (sigma <= 0.9) {
+        float k = -0.5 / (sigma * sigma);
+        float g1 = exp(k);
+        float g2 = exp(4.0 * k);
+        float side = g1 + g2;
+        float2 off = (1.0 + g2 / side) * uv_pixel_interval;
+        float3 sum3 = float3(0.0, 0.0, 0.0);
+        float cover3 = 0.0;
+        float total3 = 0.0;
+        for (int j = -1; j <= 1; j++) {
+            float wy = j == 0 ? 1.0 : side;
+            for (int i = -1; i <= 1; i++) {
+                float w3 = wy * (i == 0 ? 1.0 : side);
+                float4 s = image.Sample(textureSampler, clamp(v_in.uv + float2(float(i), float(j)) * off, lo, hi));
+                sum3 += w3 * softness_to_linear(s.rgb) * s.a;
+                cover3 += w3 * s.a;
+                total3 += w3;
+            }
+        }
+        if (cover3 <= 0.0)
+            return float4(0.0, 0.0, 0.0, 0.0);
+        return float4(softness_from_linear(sum3 / cover3), cover3 / total3);
+    }
+
     float2 px = v_in.uv / uv_pixel_interval;
     float turn = 6.2831853 * frac(52.9829189 * frac(dot(px, float2(0.06711056, 0.00583715))));
     float2 dir = float2(cos(turn), sin(turn));

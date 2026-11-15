@@ -8,9 +8,10 @@
 // Pick a preset, then turn the whole thing up or down with Amount; untick any
 // part you don't want (its settings are kept for when you tick it again).
 // Show All Settings shows every setting of every part, and each part's own
-// Amount. The film and projector are drawn in one pass, the lens in a second
-// over its result (it softens and fringes what the film made). Sizes are in
-// pixels on a 1080-line picture (scaled for other sizes).
+// Amount. The halation's halo is blurred first, small (three quarter-size
+// passes, see halo_parts.hlsl); the film and projector are drawn in one pass,
+// the lens in another over its result (it softens and fringes what the film
+// made). Sizes are in pixels on a 1080-line picture (scaled for other sizes).
 
 #define FILM_LOOK 1
 
@@ -68,7 +69,24 @@ uniform int Speed<
 
 // The film, moved by the weave so that everything on it moves with the
 // picture, then lit by the flickering lamp and cut by the gate.
+// The halo, drawn small (see halo_parts.hlsl); then the film and the
+// projector; then the lens over them.
 float4 stage1(VertData v_in) : TARGET
+{
+    return halo_down(v_in.uv);
+}
+
+float4 stage2(VertData v_in) : TARGET
+{
+    return halo_blur(v_in.uv, float2(1.0, 0.0));
+}
+
+float4 stage3(VertData v_in) : TARGET
+{
+    return halo_blur(v_in.uv, float2(0.0, 1.0));
+}
+
+float4 stage4(VertData v_in) : TARGET
 {
     float look = float(Look_Amount) * 0.01;
     float ap = float(Projector_Amount) * 0.01 * look;

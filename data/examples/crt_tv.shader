@@ -151,11 +151,70 @@ float2 tv_warp(float2 uv, float k, float conv, float aspect)
     return s / float2(aspect, 1.0) + 0.5;
 }
 
+// The tube's bow (as in mainImage), for the glow.
+float tv_k()
+{
+    float aspect = uv_pixel_interval.y / uv_pixel_interval.x;
+    float curv = min(Curvature * Amount * 0.01, 50.0);
+    return (1.0 / (1.0 - curv * 0.01) - 1.0) / ((aspect * aspect + 1.0) * 0.25);
+}
+
+// The glow, drawn small where the plugin draws stages (see glow_parts.hlsl):
+// of the bent picture.
+#define GLOW_SIGMA Glow_Size * 0.01 / 3.0 / uv_pixel_interval.y
+#define GLOW_ON Glow > 0.0 && Amount > 0.0
+#define GLOW_SAMPLE(uv) glow_source(tv_warp(uv, tv_k(), 0.0, uv_pixel_interval.y / uv_pixel_interval.x))
+#include "glow_parts.hlsl"
+
+float4 stage1(VertData v_in) : TARGET
+{
+    return glow_down(v_in.uv);
+}
+
+float4 stage2(VertData v_in) : TARGET
+{
+    return glow_blur(v_in.uv, float2(1.0, 0.0));
+}
+
+float4 stage3(VertData v_in) : TARGET
+{
+    return glow_blur(v_in.uv, float2(0.0, 1.0));
+}
+
+// The bent picture at p, its colours converged conv apart: light (each
+// colour from its own sample, premultiplied by its transparency) and the
+// largest transparency.
+float4 tv_sample(float2 p, float k, float conv, float aspect)
+{
+    float4 sr = glow_source(tv_warp(p, k, -conv, aspect));
+    float4 sg = glow_source(tv_warp(p, k, 0.0, aspect));
+    float4 sb = glow_source(tv_warp(p, k, conv, aspect));
+    return float4(tv_to_linear(float3(sr.r, sg.g, sb.b)) * float3(sr.a, sg.a, sb.a), max(sg.a, max(sr.a, sb.a)));
+}
+
+// One line's light over this pixel, from its filtered colour f (light and
+// transparency): each colour's beam wider the brighter it is, its light
+// spread over the line's share of height and summed over this pixel; and
+// the line's transparency if this pixel is in its share. None for a line
+// outside the picture.
+void tv_line(float li, float last, float gap, float y, float s_dark, float s_bright, float4 f, inout float3 light,
+             inout float cover)
+{
+    if (li < 0.0 || li >= last)
+        return;
+    float yc = (li + 0.5) * gap;
+    float3 sig = lerp(float3(s_dark, s_dark, s_dark), float3(s_bright, s_bright, s_bright), sqrt(saturate(f.rgb)));
+    float3 share = tv_cdf((y + 0.5 - yc) / sig) - tv_cdf((y - 0.5 - yc) / sig);
+    light += f.rgb * share * gap;
+    if (abs(y - yc) <= gap * 0.5)
+        cover = f.a;
+}
+
 float4 mainImage(VertData v_in) : TARGET
 {
     float A = Amount * 0.01;
     if (A <= 0.0)
-        return image.Sample(textureSampler, v_in.uv);
+        return glow_source(v_in.uv);
 
     float aspect = uv_pixel_interval.y / uv_pixel_interval.x;
     float2 d = (v_in.uv - 0.5) * float2(aspect, 1.0);
@@ -180,35 +239,28 @@ float4 mainImage(VertData v_in) : TARGET
     float s_dark = s_bright / (1.0 + Blooming * 0.01 * max(A, 1.0));
     float n = floor(y / gap - 0.5);
     float last = floor(height / gap + 0.5);
+    // Each of the four lines filtered from the bent picture (three samples
+    // down, half a line apart, per colour). Next lines' samples overlap, so
+    // the four lines take nine, not twelve.
+    float base = (n - 0.5) * gap - gap * 0.5;
+    float4 p0 = tv_sample(float2(v_in.uv.x, (base + 0.0 * gap * 0.5) * uv_pixel_interval.y), k, conv, aspect);
+    float4 p1 = tv_sample(float2(v_in.uv.x, (base + 1.0 * gap * 0.5) * uv_pixel_interval.y), k, conv, aspect);
+    float4 p2 = tv_sample(float2(v_in.uv.x, (base + 2.0 * gap * 0.5) * uv_pixel_interval.y), k, conv, aspect);
+    float4 p3 = tv_sample(float2(v_in.uv.x, (base + 3.0 * gap * 0.5) * uv_pixel_interval.y), k, conv, aspect);
+    float4 p4 = tv_sample(float2(v_in.uv.x, (base + 4.0 * gap * 0.5) * uv_pixel_interval.y), k, conv, aspect);
+    float4 p5 = tv_sample(float2(v_in.uv.x, (base + 5.0 * gap * 0.5) * uv_pixel_interval.y), k, conv, aspect);
+    float4 p6 = tv_sample(float2(v_in.uv.x, (base + 6.0 * gap * 0.5) * uv_pixel_interval.y), k, conv, aspect);
+    float4 p7 = tv_sample(float2(v_in.uv.x, (base + 7.0 * gap * 0.5) * uv_pixel_interval.y), k, conv, aspect);
+    float4 p8 = tv_sample(float2(v_in.uv.x, (base + 8.0 * gap * 0.5) * uv_pixel_interval.y), k, conv, aspect);
     float3 light = float3(0.0, 0.0, 0.0);
     float cover = 0.0;
-    for (int kk = -1; kk <= 2; kk++) {
-        float li = n + float(kk);
-        if (li < 0.0 || li >= last)
-            continue;
-        float yc = (li + 0.5) * gap;
-        float3 v = float3(0.0, 0.0, 0.0);
-        float a = 0.0;
-        for (int t = -1; t <= 1; t++) {
-            float2 p = float2(v_in.uv.x, (yc + float(t) * gap * 0.5) * uv_pixel_interval.y);
-            float wt = t == 0 ? 1.0 : 0.60653066;
-            float4 sr = image.Sample(textureSampler, tv_warp(p, k, -conv, aspect));
-            float4 sg = image.Sample(textureSampler, tv_warp(p, k, 0.0, aspect));
-            float4 sb = image.Sample(textureSampler, tv_warp(p, k, conv, aspect));
-            v += wt * tv_to_linear(float3(sr.r, sg.g, sb.b)) * float3(sr.a, sg.a, sb.a);
-            a += wt * max(sg.a, max(sr.a, sb.a));
-        }
-        v /= 2.21306132;
-        a /= 2.21306132;
-        float3 sig = lerp(float3(s_dark, s_dark, s_dark), float3(s_bright, s_bright, s_bright), sqrt(saturate(v)));
-        float3 share = tv_cdf((y + 0.5 - yc) / sig) - tv_cdf((y - 0.5 - yc) / sig);
-        light += v * share * gap;
-        if (abs(y - yc) <= gap * 0.5)
-            cover = a;
-    }
+    tv_line(n - 1.0, last, gap, y, s_dark, s_bright, (0.60653066 * p0 + p1 + 0.60653066 * p2) / 2.21306132, light, cover);
+    tv_line(n, last, gap, y, s_dark, s_bright, (0.60653066 * p2 + p3 + 0.60653066 * p4) / 2.21306132, light, cover);
+    tv_line(n + 1.0, last, gap, y, s_dark, s_bright, (0.60653066 * p4 + p5 + 0.60653066 * p6) / 2.21306132, light, cover);
+    tv_line(n + 2.0, last, gap, y, s_dark, s_bright, (0.60653066 * p6 + p7 + 0.60653066 * p8) / 2.21306132, light, cover);
 
     // Amount under 100 blends the lines with the bent picture itself.
-    float4 here = image.Sample(textureSampler, tv_warp(v_in.uv, k, 0.0, aspect));
+    float4 here = glow_source(tv_warp(v_in.uv, k, 0.0, aspect));
     float3 flat_light = tv_to_linear(here.rgb) * here.a;
     float sl = min(A, 1.0);
     light = lerp(flat_light, light, sl);
@@ -238,28 +290,10 @@ float4 mainImage(VertData v_in) : TARGET
     // the mask on average), then the tube's corners and falloff.
     float gl = Glow * 0.01 * A;
     if (gl > 0.0) {
-        float sigma = Glow_Size * 0.01 / 3.0;
-        float2 reach = sigma * 3.0 * float2(uv_pixel_interval.x / uv_pixel_interval.y, 1.0);
-        float2 pxy = v_in.uv / uv_pixel_interval;
-        float turn = 6.2831853 * frac(52.9829189 * frac(dot(pxy, float2(0.06711056, 0.00583715))));
-        float2 dir = float2(cos(turn), sin(turn));
-        float3 sum = float3(0.0, 0.0, 0.0);
-        float sum_a = 0.0;
-        float total = 0.0;
-        float step_w = exp(-4.5 / 32.0);
-        float w = sqrt(step_w);
-        for (int i = 0; i < 32; i++) {
-            float4 s = image.Sample(textureSampler, tv_warp(v_in.uv + dir * reach * sqrt((float(i) + 0.5) / 32.0), k, 0.0, aspect));
-            // (The sRGB curve by a close cubic, within 0.002: it's only the glow.)
-            sum += w * s.rgb * (s.rgb * (s.rgb * 0.305306011 + 0.682171111) + 0.012522878) * s.a;
-            sum_a += w * s.a;
-            total += w;
-            dir = float2(dir.x * -0.73736886 - dir.y * 0.67549032, dir.x * 0.67549032 + dir.y * -0.73736886);
-            w *= step_w;
-        }
+        float4 glow = glow_at(v_in.uv);
         float through = Mask_Type == 0 ? 0.25 : (Mask_Type == 2 ? 0.35 : 0.5);
-        light = light * (1.0 - gl) + sum / total * (1.0 - ms * (1.0 - through)) * gl;
-        cover = cover * (1.0 - gl) + sum_a / total * gl;
+        light = light * (1.0 - gl) + glow.rgb * (1.0 - ms * (1.0 - through)) * gl;
+        cover = cover * (1.0 - gl) + glow.a * gl;
     }
 
     float fall = min(Edge_Falloff * A, 95.0) * 0.01;

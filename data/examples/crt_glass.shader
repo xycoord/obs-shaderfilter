@@ -58,39 +58,39 @@ float3 glass_from_linear(float3 c)
     return lerp(c * 12.92, 1.055 * pow(c, float3(1.0 / 2.4, 1.0 / 2.4, 1.0 / 2.4)) - 0.055, step(0.0031308, c));
 }
 
+// The glow, drawn small where the plugin draws stages (see glow_parts.hlsl).
+#define GLOW_SIGMA Glow_Size * 0.01 / 3.0 / uv_pixel_interval.y
+#define GLOW_ON Glow > 0.0
+#define GLOW_SAMPLE(uv) glow_source(uv)
+#include "glow_parts.hlsl"
+
+float4 stage1(VertData v_in) : TARGET
+{
+    return glow_down(v_in.uv);
+}
+
+float4 stage2(VertData v_in) : TARGET
+{
+    return glow_blur(v_in.uv, float2(1.0, 0.0));
+}
+
+float4 stage3(VertData v_in) : TARGET
+{
+    return glow_blur(v_in.uv, float2(0.0, 1.0));
+}
+
 float4 mainImage(VertData v_in) : TARGET
 {
-    float4 c = image.Sample(textureSampler, v_in.uv);
+    float4 c = glow_source(v_in.uv);
     float3 lit = glass_to_linear(c.rgb) * c.a;
     float cover = c.a;
 
-    // The glow: a Gaussian blur of the light from 32 points on a spiral out
-    // to 3 standard deviations, each the last turned by the golden angle,
-    // the spiral turned differently at each pixel so its gaps come out as an
-    // even fine noise. Glow percent of the light moves into it.
+    // The glow (see glow_parts.hlsl): Glow percent of the light moves into it.
     float g = Glow * 0.01;
     if (g > 0.0) {
-        float sigma = Glow_Size * 0.01 / 3.0;
-        float2 reach = sigma * 3.0 * float2(uv_pixel_interval.x / uv_pixel_interval.y, 1.0);
-        float2 pxy = v_in.uv / uv_pixel_interval;
-        float turn = 6.2831853 * frac(52.9829189 * frac(dot(pxy, float2(0.06711056, 0.00583715))));
-        float2 dir = float2(cos(turn), sin(turn));
-        float3 sum = float3(0.0, 0.0, 0.0);
-        float sum_a = 0.0;
-        float total = 0.0;
-        float step_w = exp(-4.5 / 32.0);
-        float w = sqrt(step_w);
-        for (int i = 0; i < 32; i++) {
-            float4 s = image.Sample(textureSampler, v_in.uv + dir * reach * sqrt((float(i) + 0.5) / 32.0));
-            // (The sRGB curve by a close cubic, within 0.002: it's only the glow.)
-            sum += w * s.rgb * (s.rgb * (s.rgb * 0.305306011 + 0.682171111) + 0.012522878) * s.a;
-            sum_a += w * s.a;
-            total += w;
-            dir = float2(dir.x * -0.73736886 - dir.y * 0.67549032, dir.x * 0.67549032 + dir.y * -0.73736886);
-            w *= step_w;
-        }
-        lit = lit * (1.0 - g) + sum / total * g;
-        cover = cover * (1.0 - g) + sum_a / total * g;
+        float4 glow = glow_at(v_in.uv);
+        lit = lit * (1.0 - g) + glow.rgb * g;
+        cover = cover * (1.0 - g) + glow.a * g;
     }
 
     // The tube's shape: rounded corners (soft over a pixel), and light

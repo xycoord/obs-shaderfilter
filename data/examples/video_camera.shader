@@ -75,10 +75,15 @@ float4 mainImage(VertData v_in) : TARGET
     float2 r = Detail_Size / (uv_pixel_interval.y * 1080.0) * uv_pixel_interval;
     float blur = y * c.a;
     float total = c.a;
+    // (The directions turned an eighth of a turn at a time, so the loop has
+    // no sines or cosines.)
+    float2 da = float2(1.0, 0.0);
+    float2 db = float2(0.92387953, 0.38268343);
     for (int i = 0; i < 8; i++) {
-        float ang = float(i) * 0.7853982;
-        float4 sa = image.Sample(textureSampler, v_in.uv + float2(cos(ang), sin(ang)) * r);
-        float4 sb = image.Sample(textureSampler, v_in.uv + float2(cos(ang + 0.3926991), sin(ang + 0.3926991)) * r * 2.0);
+        float4 sa = image.Sample(textureSampler, v_in.uv + da * r);
+        float4 sb = image.Sample(textureSampler, v_in.uv + db * r * 2.0);
+        da = float2(da.x * 0.70710678 - da.y * 0.70710678, da.x * 0.70710678 + da.y * 0.70710678);
+        db = float2(db.x * 0.70710678 - db.y * 0.70710678, db.x * 0.70710678 + db.y * 0.70710678);
         blur += 0.6065307 * dot(sa.rgb, lw) * sa.a + 0.1353353 * dot(sb.rgb, lw) * sb.a;
         total += 0.6065307 * sa.a + 0.1353353 * sb.a;
     }

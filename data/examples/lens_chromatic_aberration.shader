@@ -52,10 +52,15 @@ float4 mainImage(VertData v_in) : TARGET
         return image.Sample(textureSampler, v_in.uv);
 
     // Wavelengths from red (t = 0) to blue (t = 1), each a slightly different
-    // size, summed per channel by how much of it that channel sees: nine, and
-    // more for wider fringes (always an odd number, for the gap below), so the
-    // steps between them stay about a pixel.
-    int n = 9 + 2 * int(clamp(abs(Fringing) * 0.6 - 2.5, 0.0, 10.0));
+    // size, summed per channel by how much of it that channel sees: enough
+    // that the steps between them stay about a pixel here (always an odd
+    // number, for the gap below): three in the middle of the picture, where
+    // the fringes are a fraction of a pixel, up to nine (more for wide
+    // fringes) at the edges.
+    int n_max = 9 + 2 * int(clamp(abs(Fringing) * 0.6 - 2.5, 0.0, 10.0));
+    float2 d = v_in.uv - 0.5;
+    float reach = length(d * abs(Fringing) * 2.0 * uv_pixel_interval.x / (uv_pixel_interval.y * 1080.0) / uv_pixel_interval) / 0.639;
+    int n = min(3 + 2 * int(ceil(reach * 0.5)), n_max);
 
     // The gap between the red and blue parts' centres in t, from the weights
     // below (green stays in the middle), so Fringing is that gap in pixels:
@@ -66,7 +71,6 @@ float4 mainImage(VertData v_in) : TARGET
     // Size difference between red and blue: Fringing pixels (on a 1080-line
     // picture, scaled to the source's own height) over half its width.
     float spread = Fringing / gap * 2.0 * uv_pixel_interval.x / (uv_pixel_interval.y * 1080.0);
-    float2 d = v_in.uv - 0.5;
 
     // Samples are kept inside the picture, half a pixel in from its edges
     // (a projected frame's colours all reach its edge), unless this pixel is
