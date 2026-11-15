@@ -126,7 +126,7 @@ uniform int Halation_Strength<
     int minimum = 0;
     int maximum = 100;
     int step = 1;
-> = 13;
+> = 11;
 uniform float Halation_Size<
     string from = "halation:Size";
     string label = "Size";
@@ -150,7 +150,7 @@ uniform int Halation_Threshold<
     int minimum = 0;
     int maximum = 99;
     int step = 1;
-> = 78;
+> = 80;
 uniform bool Grain_On<
 #ifdef FILM_LOOK
     string label = "Film · Grain";
@@ -170,7 +170,7 @@ uniform float Grain<
     float minimum = 0.0;
     float maximum = 100.0;
     float step = 0.1;
-> = 26.0;
+> = 23.0;
 uniform float Grain_Size<
     string label = "Grain Size";
     string group = "Grain";

@@ -26,7 +26,7 @@ uniform float Strength<
     float minimum = 0.0;
     float maximum = 100.0;
     float step = 1.0;
-> = 13.0;
+> = 11.0;
 uniform float Size<
     string label = "Size";
     string tooltip = "How far the halo reaches from a bright edge (to a tenth of its brightness at the edge), in pixels on a 1080-line picture (it's scaled for other sizes). About 15 for 35mm film, 30 for 16mm, 55 for Super 8.";
@@ -42,7 +42,7 @@ uniform float Threshold<
     float minimum = 0.0;
     float maximum = 99.0;
     float step = 1.0;
-> = 78.0;
+> = 80.0;
 uniform int Film<
     string label = "Film";
     string tooltip = "Colour film's halo is red-orange; black-and-white film's is a plain lighter glow.";

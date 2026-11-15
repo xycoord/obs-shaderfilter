@@ -14,7 +14,7 @@ uniform float Amount<
     float minimum = 0.0;
     float maximum = 100.0;
     float step = 0.1;
-> = 26.0;
+> = 23.0;
 uniform float Grain_Size<
     string label = "Grain Size";
     string tooltip = "Size of a grain, in pixels of a 1080-line picture. Grain belongs to the frame, so it scales with the source: twice as many pixels across at 4K, finer on smaller sources.";
