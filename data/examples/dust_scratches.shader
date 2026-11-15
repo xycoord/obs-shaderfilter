@@ -22,7 +22,7 @@ uniform string Full_Look<
     string tooltip = "Make this filter a Film Look (the film, projector and lens in one filter), keeping these settings: the parts this filter doesn't have are set to the same Look.";
 > = "film_look.shader";
 uniform float Dust<
-    string label = "Dust";
+    string label = "Specks per Frame";
     string tooltip = "How many specks of dust or hair are on each frame, on average (each is on screen for one frame). Under 1 for a kept print; 3 or more for a dirty one.";
     string widget_type = "slider";
     float minimum = 0.0;
@@ -54,7 +54,7 @@ uniform float Strength<
     float step = 1.0;
 > = 50.0;
 uniform float Scratches<
-    string label = "Scratches";
+    string label = "Scratches at Once";
     string tooltip = "How many scratches are on screen at once, on average (up to 3). Each lasts a second or so, wandering a little.";
     string widget_type = "slider";
     float minimum = 0.0;

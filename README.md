@@ -104,7 +104,9 @@ next to the shaders; see [data/examples/library.ini](data/examples/library.ini).
 (`;` starts a comment); see
 [data/examples/film_grain.presets.ini](data/examples/film_grain.presets.ini). A `label = Look` line before the first
 preset makes them a list of Looks: the list takes that name, remembers the one picked, and after a change shows
-"*Look* (changed)" rather than Custom (picking the Look again puts it back), naming any sections that are unticked.
+"*Look* — changed" rather than Custom (picking the Look again, or Back to, puts it back), naming any sections that are
+unticked; a `default = <name>` line names the preset the shader's defaults are, shown (of several with the same values)
+until another is picked, and a `description = ...` line in a preset is shown under the list.
 The film pack's presets are all written from one table by [tools/film_looks.py](tools/film_looks.py).
 
 Normally all that's required for OBS purposes is a pixel shader (a `.shader` file), and the plugin wraps it

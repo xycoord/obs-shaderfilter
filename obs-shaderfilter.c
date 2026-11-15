@@ -231,6 +231,10 @@ technique DrawPremul\n\
 	}\n\
 }\n";
 
+/* The name a shader's group of settings gets in the panel: this and its
+ * title (a section's is its tick's name instead). */
+#define SF_GROUP_PREFIX "shader_group:"
+
 /* The most stages (stage1 ... stageN before mainImage) a shader can have. */
 #define SF_MAX_STAGES 4
 
@@ -437,8 +441,13 @@ struct shader_filter_data {
 	struct dstr carry_from;
 	char *carry_look;
 	char *switch_note;
-	/* The section ticks the panel was last built with ('1'/'0' each). */
+	/* The section ticks the panel was last built with ('1'/'0' each);
+	 * whether the shader's settings were put straight in the panel (it has
+	 * sections), and the names of the properties they made there
+	 * (";a;b;"), so nothing else in the panel is touched. */
 	struct dstr built_ticks;
+	bool panel_flat;
+	struct dstr panel_names;
 	gs_texrender_t *stage_render[SF_MAX_STAGES];
 	long effect_gen;
 	/* Ticks left in which derived effects may be compiled while showing,
@@ -1239,6 +1248,7 @@ static void shader_filter_destroy(void *data)
 	bfree(filter->carry_look);
 	bfree(filter->switch_note);
 	dstr_free(&filter->built_ticks);
+	dstr_free(&filter->panel_names);
 
 	if (filter->volmeter)
 		obs_volmeter_destroy(filter->volmeter);
@@ -2185,12 +2195,16 @@ static void presets_free(preset_list_t *list)
 
 /* label (if given) gets the file's "label = ..." line before its first
  * preset, if it has one (NULL if not): the list's name, which also makes it
- * a list of Looks (see the shader's settings). */
-static void presets_load_labelled(const char *shader_path, preset_list_t *out, char **label)
+ * a list of Looks (see the shader's settings); fallback its "default = ..."
+ * line, the preset the shader's defaults are (shown, of several with the
+ * same values, until another is picked). */
+static void presets_load_labelled(const char *shader_path, preset_list_t *out, char **label, char **fallback)
 {
 	da_init((*out));
 	if (label)
 		*label = NULL;
+	if (fallback)
+		*fallback = NULL;
 	if (!shader_path || !*shader_path)
 		return;
 	struct dstr path = {0};
@@ -2227,11 +2241,12 @@ static void presets_load_labelled(const char *shader_path, preset_list_t *out, c
 			continue;
 		if (!out->num) {
 			char *key = trimmed(line, eq - line);
-			if (label && !*label && strcmp(key, "label") == 0) {
-				*label = trimmed(eq + 1, strlen(eq + 1));
-				size_t n = strlen(*label);
-				while (n && ((*label)[n - 1] == '\r' || (*label)[n - 1] == ' '))
-					(*label)[--n] = 0;
+			char **into = strcmp(key, "label") == 0 ? label : strcmp(key, "default") == 0 ? fallback : NULL;
+			if (into && !*into) {
+				*into = trimmed(eq + 1, strlen(eq + 1));
+				size_t n = strlen(*into);
+				while (n && ((*into)[n - 1] == '\r' || (*into)[n - 1] == ' '))
+					(*into)[--n] = 0;
 			}
 			bfree(key);
 			continue;
@@ -2251,15 +2266,27 @@ static void presets_load_labelled(const char *shader_path, preset_list_t *out, c
 
 static void presets_load(const char *shader_path, preset_list_t *out)
 {
-	presets_load_labelled(shader_path, out, NULL);
+	presets_load_labelled(shader_path, out, NULL, NULL);
 }
 
-static struct effect_param_data *find_param(struct shader_filter_data *filter, const char *name)
+static struct effect_param_data *find_param(const struct shader_filter_data *filter, const char *name)
 {
 	for (size_t i = 0; i < filter->stored_param_list.num; i++)
 		if (strcmp(filter->stored_param_list.array[i].name.array, name) == 0)
-			return &filter->stored_param_list.array[i];
+			return (struct effect_param_data *)&filter->stored_param_list.array[i];
 	return NULL;
+}
+
+/* Whether the shader's settings made a property of that name in the panel. */
+static bool panel_owns(const struct shader_filter_data *filter, const char *name)
+{
+	if (!filter->panel_names.array || !name)
+		return false;
+	struct dstr key = {0};
+	dstr_printf(&key, ";%s;", name);
+	const bool owns = strstr(filter->panel_names.array, key.array) != NULL;
+	dstr_free(&key);
+	return owns;
 }
 
 static bool preset_bool(const char *v)
@@ -2356,6 +2383,14 @@ static bool param_is_more(const struct effect_param_data *param)
 	return param->show.array && strcmp(param->show.array, "more") == 0;
 }
 
+static bool has_sections(const struct shader_filter_data *filter)
+{
+	for (size_t i = 0; i < filter->stored_param_list.num; i++)
+		if (param_is_section(filter->stored_param_list.array + i))
+			return true;
+	return false;
+}
+
 static const struct effect_param_data *section_of(const struct shader_filter_data *filter, const char *group)
 {
 	for (size_t i = 0; i < filter->stored_param_list.num; i++) {
@@ -2374,7 +2409,7 @@ static void apply_param_visibility(const struct shader_filter_data *filter, obs_
 		const struct effect_param_data *q = filter->stored_param_list.array + i;
 		if (param_is_section(q))
 			continue;
-		obs_property_t *p = obs_properties_get(params, q->name.array);
+		obs_property_t *p = panel_owns(filter, q->name.array) ? obs_properties_get(params, q->name.array) : NULL;
 		if (!p)
 			continue;
 		obs_property_set_visible(p, all || !param_is_more(q));
@@ -2383,9 +2418,7 @@ static void apply_param_visibility(const struct shader_filter_data *filter, obs_
 	 * settings show greyed, as OBS shows them, so it's clear what's off.) */
 	for (obs_property_t *g = obs_properties_first(params); g; obs_property_next(&g)) {
 		/* (Only the shader's own groups: the panel's are its business.) */
-		if (obs_property_get_type(g) != OBS_PROPERTY_GROUP ||
-		    (strncmp(obs_property_name(g), "shader_group:", 13) != 0 &&
-		     !find_param((struct shader_filter_data *)filter, obs_property_name(g))))
+		if (obs_property_get_type(g) != OBS_PROPERTY_GROUP || !panel_owns(filter, obs_property_name(g)))
 			continue;
 		bool any = false;
 		for (obs_property_t *c = obs_properties_first(obs_property_group_content(g)); c; obs_property_next(&c))
@@ -2400,10 +2433,16 @@ static bool param_visibility_changed(obs_properties_t *props, obs_property_t *p,
 	struct shader_filter_data *filter = props_filter(props);
 	/* (OBS passes the whole panel; the shader's settings are in its group,
 	 * or in the panel itself when it has sections.) */
-	obs_property_t *group = obs_properties_get(props, "shader_params");
 	if (!filter)
 		return false;
-	apply_param_visibility(filter, group ? obs_property_group_content(group) : props, settings);
+	obs_properties_t *params = props;
+	if (!filter->panel_flat) {
+		obs_property_t *group = obs_properties_get(props, "shader_params");
+		if (!group || obs_property_get_type(group) != OBS_PROPERTY_GROUP)
+			return false;
+		params = obs_property_group_content(group);
+	}
+	apply_param_visibility(filter, params, settings);
 	return true;
 }
 
@@ -4415,10 +4454,12 @@ static obs_properties_t *shader_filter_properties(void *data)
 	 * panel: its sections are boxes already, and a box round them doubled
 	 * the margins and put their sliders out of line with the rest. Others
 	 * keep theirs in one "<shader> Settings" box. */
-	bool flat = false;
-	for (size_t i = 0; filter && has_file && i < filter->stored_param_list.num && !flat; i++)
-		flat = param_is_section(filter->stored_param_list.array + i);
+	const bool flat = filter && has_sections(filter);
 	obs_properties_t *params = flat ? props : obs_properties_create();
+	if (filter) {
+		filter->panel_flat = flat;
+		dstr_copy(&filter->panel_names, ";");
+	}
 	/* What a switch to this shader did, and how to undo it (above the Look,
 	 * so the Look and Amount stay together). */
 	if (filter && filter->switch_note && has_file) {
@@ -4431,7 +4472,8 @@ static obs_properties_t *shader_filter_properties(void *data)
 		 * the preset the values match, or Custom. */
 		preset_list_t presets;
 		char *look_label = NULL;
-		presets_load_labelled(file, &presets, &look_label);
+		char *fallback = NULL;
+		presets_load_labelled(file, &presets, &look_label, &fallback);
 		if (presets.num) {
 			/* A presets file with a "label" line is a list of Looks: the
 			 * list is named by it, remembers the Look last picked (shown
@@ -4446,6 +4488,8 @@ static obs_properties_t *shader_filter_properties(void *data)
 			obs_property_set_long_description(pl, obs_module_text(looks ? "ShaderFilter.LookHelp"
 										    : "ShaderFilter.PresetHelp"));
 			const char *last = looks ? obs_data_get_string(settings, "shader_look") : "";
+			if (!*last && fallback)
+				last = fallback;
 			const char *current = "";
 			for (size_t i = 0; i < presets.num && !*current && *last; i++)
 				if (strcmp(presets.array[i].name, last) == 0 && preset_matches(filter, settings, &presets.array[i]))
@@ -4521,6 +4565,7 @@ static obs_properties_t *shader_filter_properties(void *data)
 			dstr_free(&offs);
 		}
 		bfree(look_label);
+		bfree(fallback);
 		presets_free(&presets);
 	}
 	if (filter && (filter->param_audio_magnitude || filter->param_audio_peak)) {
@@ -4581,7 +4626,7 @@ static obs_properties_t *shader_filter_properties(void *data)
 			if (sec)
 				dstr_copy(&gname, sec->name.array);
 			else
-				dstr_printf(&gname, "shader_group:%s", group_name);
+				dstr_printf(&gname, SF_GROUP_PREFIX "%s", group_name);
 			for (size_t i = 0; i < groups.num; i++) {
 				const char *n = obs_property_name(groups.array[i]);
 				if (strcmp(n, gname.array) == 0) {
@@ -4597,6 +4642,8 @@ static obs_properties_t *shader_filter_properties(void *data)
 				group = obs_properties_create();
 				obs_property_t *p = obs_properties_add_group(params, gname.array, title.array,
 									    sec ? OBS_GROUP_CHECKABLE : OBS_GROUP_NORMAL, group);
+				if (p)
+					dstr_catf(&filter->panel_names, "%s;", gname.array);
 				if (sec) {
 					shader_filter_set_tooltip(p, &sec->tooltip);
 					/* (The heading and the Look list say what's off.) */
@@ -4623,7 +4670,8 @@ static obs_properties_t *shader_filter_properties(void *data)
 				range_max = 1000.0;
 				step = 0.0001;
 			}
-			obs_properties_remove_by_name(params, param_name);
+			if (!flat)
+				obs_properties_remove_by_name(params, param_name);
 			if (widget_type != NULL && strcmp(widget_type, "slider") == 0) {
 				p = obs_properties_add_float_slider(group, param_name, display_name.array, range_min, range_max,
 								    step);
@@ -4641,7 +4689,8 @@ static obs_properties_t *shader_filter_properties(void *data)
 				range_max = 1000;
 				step = 1;
 			}
-			obs_properties_remove_by_name(params, param_name);
+			if (!flat)
+				obs_properties_remove_by_name(params, param_name);
 
 			if (widget_type != NULL && strcmp(widget_type, "slider") == 0) {
 				p = obs_properties_add_int_slider(group, param_name, display_name.array, range_min, range_max,
@@ -4822,6 +4871,8 @@ static obs_properties_t *shader_filter_properties(void *data)
 			break;
 		default:;
 		}
+		if (p && filter)
+			dstr_catf(&filter->panel_names, "%s;", obs_property_name(p));
 		if (p && param->suffix.len) {
 			if (obs_property_get_type(p) == OBS_PROPERTY_FLOAT)
 				obs_property_float_set_suffix(p, param->suffix.array);
@@ -4842,8 +4893,7 @@ static obs_properties_t *shader_filter_properties(void *data)
 
 	obs_property_t *first_param = flat ? NULL : obs_properties_first(params);
 	obs_properties_t *params_group = flat ? props : first_param ? params : NULL;
-	if (flat) {
-	} else if (first_param) {
+	if (!flat && first_param) {
 		struct dstr title = {0};
 		if (has_file || inline_code) {
 			char *name = has_file ? shader_display_name(file) : bstrdup(obs_module_text("ShaderFilter.SavedCodeName"));
@@ -4854,7 +4904,7 @@ static obs_properties_t *shader_filter_properties(void *data)
 		}
 		obs_properties_add_group(props, "shader_params", title.array, OBS_GROUP_NORMAL, params);
 		dstr_free(&title);
-	} else {
+	} else if (!flat) {
 		obs_properties_destroy(params);
 	}
 

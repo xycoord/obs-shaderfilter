@@ -49,7 +49,7 @@ LOOKS = {
         Corner_Radius=18, Inset=4, Gate_Softness=5,
         Fringing=2, Corner_Falloff=15, Distortion=0.8, Corner_Softness=0.5),
     # The picture's own colours, untouched: only the projector (frame edge,
-    # weave, gentle flicker), the lens and a little grain.
+    # weave, gentle flicker), a lighter lens and a little grain.
     "Projector Only (true colours)": dict(
         Speed=24, Stock=COLOUR, Warmth=0, Fade=0, Contrast=0, White=100, Roll_Off=0, Black_Lift=0, Softness=0,
         Halation_Strength=0, Halation_Size=22, Halation_Threshold=80,
@@ -59,7 +59,7 @@ LOOKS = {
         Exposure_Flicker=2, Lamp_Flicker=1.5, Dark_Frames=0, Dark_Frame_Depth=15, Uneven_Illumination=1.5,
         Lamp_Brightness=100,
         Corner_Radius=30, Inset=6, Gate_Softness=8,
-        Fringing=5, Corner_Falloff=25, Distortion=2, Corner_Softness=1.0),
+        Fringing=4, Corner_Falloff=20, Distortion=1.5, Corner_Softness=0.8),
     # Rich, punchy colour with no fade, for colourful graphics.
     "Vivid Colour": dict(
         Speed=24, Stock=COLOUR, Warmth=24, Fade=0, Contrast=56, White=97, Roll_Off=40, Black_Lift=0, Softness=1.0,
@@ -251,6 +251,7 @@ HEADER = """; Presets for {name}.shader, written by tools/film_looks.py from the
 ; pack's Looks (change them there, not here). Each Look sets every setting it
 ; lists; the Amounts and the section ticks are left as they are.
 label = Look
+default = {default}
 """
 
 
@@ -304,7 +305,7 @@ def main():
             sections.append((look, out))
         for extra, values in EXTRAS.get(name, {}).items():
             sections.append((extra, values))
-        text = HEADER.format(name=name)
+        text = HEADER.format(name=name, default=DEFAULT_LOOK)
         for look, values in sections:
             text += "\n[%s]\n" % look
             if look in DESCRIPTIONS and name == "film_look":
