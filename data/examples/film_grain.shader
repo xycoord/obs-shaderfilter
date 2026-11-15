@@ -21,7 +21,7 @@ uniform float Grain_Size<
     float minimum = 1.0;
     float maximum = 6.0;
     float step = 0.05;
-> = 2.2;
+> = 1.9;
 uniform float Color_Amount<
     string label = "Color";
     string tooltip = "0 gives black-and-white grain, as on most film; 100 gives each color channel its own grain.";
@@ -29,7 +29,7 @@ uniform float Color_Amount<
     float minimum = 0.0;
     float maximum = 100.0;
     float step = 0.1;
-> = 15.0;
+> = 10.0;
 uniform float Shadows<
     string label = "Shadows";
     string tooltip = "Grain strength in the darkest parts, compared with the midtones (100).";
