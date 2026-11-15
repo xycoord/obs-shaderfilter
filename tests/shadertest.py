@@ -512,6 +512,7 @@ def cmd_parity(args) -> int:
             shutil.rmtree(d, ignore_errors=True)
         t0 = time.time()
         ref_cases = ref_equivalent_cases(cases)
+        chain_refs = {c["name"] for c, r in zip(cases, ref_cases) if len(r.get("filters", [])) != len(c.get("filters", []))}
         if args.ref_examples:
             # The reference renders the shader files in another folder (e.g. the
             # originals, to check an optimised shader against them).
@@ -546,10 +547,13 @@ def cmd_parity(args) -> int:
                 if v in ("FAIL", "edge") and name in AMPLIFIERS and "psnr" in m and m["psnr"] >= 20 \
                         and m["frac_gt8"] < 0.06:
                     v = "amplified"
-                if args.opaque and v == "edge":
+                if args.opaque and v == "edge" and name not in chain_refs:
                     # No translucent edges to excuse: only rounding is allowed
                     # (the same shader compiled into a different program can
-                    # round differently, ~1 LSB).
+                    # round differently, ~1 LSB). (A shader compared with a
+                    # chain in the reference, see REF_EQUIVALENTS, can still
+                    # make translucent edges of its own, which the chain keeps
+                    # in 8 bits between its filters.)
                     v = "FAIL"
                 m["verdict"] = v
                 entry["frames"].append(m)
