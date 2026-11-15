@@ -2785,29 +2785,32 @@ static bool param_visibility_changed(obs_properties_t *props, obs_property_t *p,
 	return true;
 }
 
-/* Put the Look picked last back: its values, and every section ticked. */
-static bool look_restore_clicked(obs_properties_t *props, obs_property_t *property, void *data)
+/* Whether the settings are exactly the Look's: its values, and every section
+ * ticked that the Look doesn't itself leave off. */
+static bool look_is_exact(struct shader_filter_data *filter, obs_data_t *settings, const struct shader_preset *look)
 {
-	UNUSED_PARAMETER(props);
-	UNUSED_PARAMETER(property);
-	struct shader_filter_data *filter = data;
-	obs_data_t *settings = obs_source_get_settings(filter->context);
-	preset_list_t presets;
-	presets_load(obs_data_get_string(settings, "shader_file_name"), &presets);
-	const struct shader_preset *look = preset_find(&presets, obs_data_get_string(settings, "shader_look"));
+	if (!preset_matches(filter, settings, look))
+		return false;
+	for (size_t i = 0; i < filter->stored_param_list.num; i++) {
+		const struct effect_param_data *q = filter->stored_param_list.array + i;
+		if (!param_is_section(q) || obs_data_get_bool(settings, q->name.array))
+			continue;
+		if (!(look->mine && obs_data_has_user_value(look->values, q->name.array)))
+			return false;
+	}
+	return true;
+}
+
+/* Put a Look back: its values, and every section ticked. */
+static void look_restore(struct shader_filter_data *filter, obs_data_t *settings, const struct shader_preset *look)
+{
 	for (size_t i = 0; i < filter->stored_param_list.num; i++) {
 		const struct effect_param_data *q = filter->stored_param_list.array + i;
 		if (param_is_section(q))
 			obs_data_set_bool(settings, q->name.array, true);
 	}
 	/* (After the ticks: a Look of the person's own keeps parts off.) */
-	if (look)
-		preset_apply(filter, settings, look);
-	presets_free(&presets);
-	obs_data_release(settings);
-	obs_source_update(filter->context, NULL);
-	obs_source_update_properties(filter->context);
-	return false;
+	preset_apply(filter, settings, look);
 }
 
 /* ---- Saving a Look of one's own ---- */
@@ -2887,11 +2890,18 @@ static bool look_save_start_clicked(obs_properties_t *props, obs_property_t *pro
 	obs_data_t *settings = obs_source_get_settings(filter->context);
 	preset_list_t presets;
 	presets_load(obs_data_get_string(settings, "shader_file_name"), &presets);
-	/* Offered: "My Look", "My Look 2"… whichever is free. */
+	/* Offered: the name of the person's own Look that was changed, so that
+	 * saving straight away updates it (a button for that was a third row
+	 * under the list); else "My Look", "My Look 2"… whichever is free. */
 	struct dstr name = {0};
-	dstr_copy(&name, obs_module_text("ShaderFilter.MyLook"));
-	for (int n = 2; preset_find(&presets, name.array); n++)
-		dstr_printf(&name, "%s %d", obs_module_text("ShaderFilter.MyLook"), n);
+	const struct shader_preset *base = preset_find(&presets, obs_data_get_string(settings, "shader_look"));
+	if (base && base->mine) {
+		dstr_copy(&name, base->name);
+	} else {
+		dstr_copy(&name, obs_module_text("ShaderFilter.MyLook"));
+		for (int n = 2; preset_find(&presets, name.array); n++)
+			dstr_printf(&name, "%s %d", obs_module_text("ShaderFilter.MyLook"), n);
+	}
 	presets_free(&presets);
 	obs_data_release(settings);
 	set_ui_flag(filter, "look_saving", true, name.array);
@@ -2907,29 +2917,28 @@ static bool look_save_cancel_clicked(obs_properties_t *props, obs_property_t *pr
 	return false;
 }
 
-/* Save the settings as a Look: a new one ("look_new_name"), or the one
- * picked last (update), and show it picked. */
-static void look_store_current(struct shader_filter_data *filter, bool update)
+/* Save the settings as a Look under the name typed ("look_new_name": a
+ * new Look, or the person's own Look of that name, replaced), and show it
+ * picked. */
+static bool look_save_clicked(obs_properties_t *props, obs_property_t *property, void *data)
 {
+	UNUSED_PARAMETER(props);
+	UNUSED_PARAMETER(property);
+	struct shader_filter_data *filter = data;
 	obs_data_t *settings = obs_source_get_settings(filter->context);
 	const char *file = obs_data_get_string(settings, "shader_file_name");
 	preset_list_t presets;
 	presets_load(file, &presets);
-	char *wanted = NULL;
-	if (update) {
-		wanted = bstrdup(obs_data_get_string(settings, "shader_look"));
-	} else {
-		char *typed = bstrdup(obs_data_get_string(settings, "look_new_name"));
-		char *t = trimmed(typed, strlen(typed));
-		/* (A leading ~ marks the list's "changed" entry, so it's dropped.) */
-		const char *start = t;
-		while (*start == '~' || *start == ' ')
-			start++;
-		/* (A shader's own preset of that name stays; the new one is "<name> 2".) */
-		wanted = new_look_name(&presets, start);
-		bfree(t);
-		bfree(typed);
-	}
+	char *typed = bstrdup(obs_data_get_string(settings, "look_new_name"));
+	char *t = trimmed(typed, strlen(typed));
+	/* (A leading ~ marks the list's "changed" entry, so it's dropped.) */
+	const char *start = t;
+	while (*start == '~' || *start == ' ')
+		start++;
+	/* (A shader's own preset of that name stays; the new one is "<name> 2".) */
+	char *wanted = new_look_name(&presets, start);
+	bfree(t);
+	bfree(typed);
 	if (*wanted) {
 		obs_data_t *values = look_values(filter, settings);
 		user_look_store(file, wanted, values);
@@ -2942,21 +2951,6 @@ static void look_store_current(struct shader_filter_data *filter, bool update)
 	presets_free(&presets);
 	obs_data_release(settings);
 	obs_source_update_properties(filter->context);
-}
-
-static bool look_save_clicked(obs_properties_t *props, obs_property_t *property, void *data)
-{
-	UNUSED_PARAMETER(props);
-	UNUSED_PARAMETER(property);
-	look_store_current(data, false);
-	return false;
-}
-
-static bool look_update_clicked(obs_properties_t *props, obs_property_t *property, void *data)
-{
-	UNUSED_PARAMETER(props);
-	UNUSED_PARAMETER(property);
-	look_store_current(data, true);
 	return false;
 }
 
@@ -2975,13 +2969,16 @@ static bool look_delete_clicked(obs_properties_t *props, obs_property_t *propert
 }
 
 /* Under the Look list (or, for a shader without one, at the top of its
- * settings): saving the settings as a Look of one's own, and updating or
- * deleting such a Look. `base` is the Look picked (NULL if none), `same`
- * whether the settings are still that Look's. */
+ * settings): saving the settings as a Look of one's own, or deleting such a
+ * Look. One row at most: OBS gives each button a row of its own, and a
+ * stack of them took more room than the list they belong to. So going back
+ * to the Look is done in the list (see shader_preset_changed), and updating
+ * a Look of one's own by saving under its name, which is offered. `base` is
+ * the Look picked (NULL if none), `same` whether the settings are still
+ * that Look's. */
 static void add_look_saving(obs_properties_t *params, struct shader_filter_data *filter, obs_data_t *settings,
 			    const struct shader_preset *base, bool same)
 {
-	struct dstr label = {0};
 	if (obs_data_get_bool(settings, "look_saving")) {
 		obs_property_t *name = obs_properties_add_text(params, "look_new_name", obs_module_text("ShaderFilter.LookName"),
 							       OBS_TEXT_DEFAULT);
@@ -2990,23 +2987,17 @@ static void add_look_saving(obs_properties_t *params, struct shader_filter_data 
 					   filter);
 		obs_properties_add_button2(params, "look_save_cancel", obs_module_text("ShaderFilter.LookSaveCancel"),
 					   look_save_cancel_clicked, filter);
-		return;
-	}
-	if (base && base->mine && !same) {
-		dstr_printf(&label, obs_module_text("ShaderFilter.LookUpdate"), base->name);
-		obs_properties_add_button2(params, "look_update", label.array, look_update_clicked, filter);
-	}
-	if (!base || !same) {
+	} else if (!base || !same) {
 		obs_property_t *b = obs_properties_add_button2(params, "look_save_start",
 							       obs_module_text("ShaderFilter.LookSaveStart"),
 							       look_save_start_clicked, filter);
 		obs_property_set_long_description(b, obs_module_text("ShaderFilter.LookSaveHelp"));
-	}
-	if (base && base->mine && same) {
+	} else if (base->mine) {
+		struct dstr label = {0};
 		dstr_printf(&label, obs_module_text("ShaderFilter.LookDelete"), base->name);
 		obs_properties_add_button2(params, "look_delete", label.array, look_delete_clicked, filter);
+		dstr_free(&label);
 	}
-	dstr_free(&label);
 }
 
 /* The "Show All Settings" tick, for a shader that hides some settings. */
@@ -3055,19 +3046,24 @@ static bool shader_preset_changed(obs_properties_t *props, obs_property_t *p, ob
 	const char *name = obs_data_get_string(settings, "shader_preset");
 	if (!filter || !name || !*name || *name == '~' || !obs_data_get_bool(settings, "from_file"))
 		return false;
+	/* The Look that's changed, or has a part off, picked again: put back
+	 * whole, its parts ticked. (Another Look leaves the ticks alone.) */
+	const bool again = strcmp(name, obs_data_get_string(settings, "shader_look")) == 0;
 	obs_data_set_string(settings, "shader_look", name);
 	preset_list_t presets;
 	presets_load(obs_data_get_string(settings, "shader_file_name"), &presets);
+	const struct shader_preset *look = preset_find(&presets, name);
 	bool applied = false;
-	for (size_t i = 0; i < presets.num && !applied; i++) {
-		if (strcmp(presets.array[i].name, name) == 0 && !preset_matches(filter, settings, &presets.array[i])) {
-			preset_apply(filter, settings, &presets.array[i]);
-			applied = true;
-		}
+	if (look && again && !look_is_exact(filter, settings, look)) {
+		look_restore(filter, settings, look);
+		applied = true;
+	} else if (look && !preset_matches(filter, settings, look)) {
+		preset_apply(filter, settings, look);
+		applied = true;
 	}
 	presets_free(&presets);
-	/* (Built again, so the Look list and its Back button match; that does
-	 * all a refresh would.) */
+	/* (Built again, so the Look list matches; that does all a refresh
+	 * would.) */
 	if (applied)
 		obs_source_update_properties(filter->context);
 	return false;
@@ -4985,8 +4981,8 @@ static obs_properties_t *shader_filter_properties(void *data)
 		if (presets.num) {
 			/* The list remembers the preset last picked (shown when several
 			 * match), and after a change shows that preset "— changed"
-			 * rather than Custom, with picking it again, or Back to,
-			 * putting it back. It says which sections are off, since a
+			 * rather than Custom, next to the preset itself: picking that
+			 * puts it back. It says which sections are off, since a
 			 * preset doesn't set the ticks. A presets file's "label" line
 			 * names the list. */
 			obs_property_t *pl = obs_properties_add_list(params, "shader_preset",
@@ -5043,45 +5039,27 @@ static obs_properties_t *shader_filter_properties(void *data)
 					obs_property_list_add_string(pl, name, name);
 					continue;
 				}
-				/* This Look as it is now: changed, and/or with parts off. */
+				/* This Look as it is now, changed and/or with parts off,
+				 * after the Look itself (picking which puts it back). */
 				struct dstr text = {0};
-				if (!*current) {
-					obs_property_list_add_string(pl, name, name);
-					dstr_printf(&marker, "~%s", name);
-					dstr_printf(&text, obs_module_text(offs.len ? "ShaderFilter.LookChangedOff"
-										    : "ShaderFilter.LookChanged"),
-						    name, offs.array);
-					obs_property_list_add_string(pl, text.array, marker.array);
-					selected = marker.array;
-				} else {
-					dstr_printf(&text, obs_module_text("ShaderFilter.LookOff"), name, offs.array);
-					obs_property_list_add_string(pl, text.array, name);
-				}
+				obs_property_list_add_string(pl, name, name);
+				dstr_printf(&marker, "~%s", name);
+				const char *as = *current ? "ShaderFilter.LookOff"
+							  : offs.len ? "ShaderFilter.LookChangedOff" : "ShaderFilter.LookChanged";
+				dstr_printf(&text, obs_module_text(as), name, offs.array);
+				obs_property_list_add_string(pl, text.array, marker.array);
+				selected = marker.array;
 				dstr_free(&text);
 			}
 			if (*current)
 				obs_data_set_string(settings, "shader_look", current);
 			obs_data_set_string(settings, "shader_preset", selected);
 			obs_property_set_modified_callback(pl, shader_preset_changed);
-			/* Under a Look list: what the Look is like (its "description"),
-			 * and, once it's changed or a part is off, a button putting it
-			 * back. */
-			for (size_t i = 0; *base && i < presets.num; i++) {
-				if (strcmp(presets.array[i].name, base) != 0)
-					continue;
-				const char *about = obs_data_get_string(presets.array[i].values, "description");
-				if (about && *about) {
-					obs_property_t *t = obs_properties_add_text(params, "look_description", about, OBS_TEXT_INFO);
-					obs_property_text_set_info_word_wrap(t, true);
-				}
-				if (!*current || offs.len) {
-					struct dstr label = {0};
-					dstr_printf(&label, obs_module_text("ShaderFilter.LookRestore"), base);
-					obs_property_t *b = obs_properties_add_button2(params, "look_restore", label.array,
-										     look_restore_clicked, filter);
-					obs_property_set_long_description(b, obs_module_text("ShaderFilter.LookRestoreHelp"));
-					dstr_free(&label);
-				}
+			/* Under a Look list: what the Look is like (its "description"). */
+			const char *about = base_look ? obs_data_get_string(base_look->values, "description") : "";
+			if (about && *about) {
+				obs_property_t *t = obs_properties_add_text(params, "look_description", about, OBS_TEXT_INFO);
+				obs_property_text_set_info_word_wrap(t, true);
 			}
 			add_look_saving(params, filter, settings, base_look, *current && !offs.len);
 			dstr_free(&marker);
