@@ -15,7 +15,6 @@ uniform bool Print_On<
     string tooltip = "The print's tone and colour: its contrast, how it fades, how warm the light is, and its stock (colour, black and white, sepia, tinted).";
 > = true;
 uniform int Stock<
-    string from = "halation:Film";
     string label = "Film Type";
     string group = "Print";
     string tooltip = "What the print is: colour; black and white; sepia toned; or tinted all over, amber or blue, as silent films were.";
