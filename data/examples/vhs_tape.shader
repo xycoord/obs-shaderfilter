@@ -39,7 +39,7 @@ uniform float Chroma_Resolution<
     float minimum = 10.0;
     float maximum = 200.0;
     float step = 1.0;
-> = 35.0;
+> = 40.0;
 uniform float Chroma_Delay<
     string label = "Chroma Delay";
     string tooltip = "How far colour sits to the right of where it belongs, in pixels on a 1080-line picture. 3 to 6 on a typical VCR.";
@@ -50,12 +50,20 @@ uniform float Chroma_Delay<
 > = 4.0;
 uniform float Sharpening<
     string label = "Sharpening";
-    string tooltip = "How far a sharp edge overshoots, in percent of the step: the faint outline the player's detail circuit draws. 10 to 15 for a typical VCR.";
+    string tooltip = "How much further a sharp edge overshoots, in percent of its step, from the player's detail circuit: a faint light and dark outline either side. The steep tape filter already rings about 6% by itself; 4 to 8 more is a typical VCR, 0 a plain one.";
     string widget_type = "slider";
     float minimum = 0.0;
-    float maximum = 40.0;
+    float maximum = 30.0;
     float step = 0.5;
-> = 12.0;
+> = 6.0;
+uniform float White_Level<
+    string label = "White Level";
+    string tooltip = "How bright full white plays back, in percent. 100 keeps it; a worn or long-play tape plays back a little grey (92 to 96), which also leaves room for its noise to show in the whites.";
+    string widget_type = "slider";
+    float minimum = 80.0;
+    float maximum = 100.0;
+    float step = 0.5;
+> = 100.0;
 uniform float Saturation<
     string label = "Saturation";
     string tooltip = "How strong colours are, in percent: 100 keeps them as they are; tape often loses a little.";
@@ -206,35 +214,38 @@ float4 mainImage(VertData v_in) : TARGET
     }
     float2 uv = v_in.uv - float2(shift * px.x, 0.0);
 
-    // --- Signal (VHS Signal): luma and a wider luma for the detail
-    // circuit, then chroma over two lines, late and low. Blur widths grow
-    // with Amount from none.
-    float sigma_l = 404.8 / max(Luma_Resolution, 1.0) * A;
-    float sigma_w = sigma_l * 2.5;
-    float sigma_c = 404.8 / max(Chroma_Resolution, 1.0) * A;
-    float step_l = max(sigma_l * 0.75, 0.001);
+    // --- Signal (VHS Signal): a steep luma low-pass (windowed sinc, fixed
+    // weights) and a wider Gaussian for the detail circuit; then chroma over
+    // two lines, late, half smeared and half laid on the brightness detail.
+    // Filter widths grow with Amount from none.
+    float step_l = 360.0 / max(Luma_Resolution, 1.0) * A;
     float y_l = 0.0;
     float y_w = 0.0;
     float a_l = 0.0;
     float wl = 0.0;
     float ww = 0.0;
-    for (int i = -10; i <= 10; i++) {
-        float o = float(i) * step_l;
-        float4 s = image.Sample(textureSampler, uv + float2(o * px.x, 0.0));
+    float wa = 0.0;
+    for (int i = -12; i <= 12; i++) {
+        float u = float(i) / 12.0;
+        float4 s = image.Sample(textureSampler, uv + float2(float(i) * step_l * px.x, 0.0));
         float y = dot(s.rgb, float3(0.299, 0.587, 0.114)) * s.a;
-        float kl = exp(-0.5 * (float(i) * 0.75) * (float(i) * 0.75));
-        float kw = exp(-0.5 * (float(i) * 0.3) * (float(i) * 0.3));
+        float sinc = i == 0 ? 1.0 : sin(12.566371 * u) / (12.566371 * u);
+        float kl = sinc * (0.42 + 0.5 * cos(3.1415927 * u) + 0.08 * cos(6.2831853 * u));
+        float kw = exp(-0.5 * (4.27 * u) * (4.27 * u));
+        float ka = exp(-0.5 * (10.67 * u) * (10.67 * u));
         y_l += kl * y;
-        a_l += kl * s.a;
         wl += kl;
         y_w += kw * y;
         ww += kw;
+        a_l += ka * s.a;
+        wa += ka;
     }
     y_l /= wl;
-    a_l /= wl;
+    a_l /= wa;
     y_w /= ww;
-    float y_out = y_l + (Sharpening * A / 16.2) * (y_l - y_w);
+    float y_out = y_l + (Sharpening * A / 24.1) * (y_l - y_w);
 
+    float sigma_c = 404.8 / max(Chroma_Resolution, 1.0) * A;
     float line_gap = Standard == 1 ? 1080.0 / 480.0 : 1080.0 / 576.0;
     float step_c = sigma_c * 0.5;
     float2 pix = v_in.uv / uv_pixel_interval;
@@ -242,7 +253,7 @@ float4 mainImage(VertData v_in) : TARGET
     float3 yiq_c = float3(0.0, 0.0, 0.0);
     float a_c = 0.0;
     for (int r = 0; r < 2; r++) {
-        float dy = -(float(r) + 0.5) * line_gap * px.y * min(A, 1.0);
+        float dy = -float(r) * line_gap * px.y * min(A, 1.0);
         for (int j = -7; j <= 7; j++) {
             float tj = float(j) + jitter;
             float o = tj * step_c - Chroma_Delay * A;
@@ -252,12 +263,14 @@ float4 mainImage(VertData v_in) : TARGET
             a_c += k * s.a;
         }
     }
-    yiq_c /= max(a_c, 0.0001);
-    float sat = 1.0 + (Saturation * 0.01 - 1.0) * A;
-    float2 iq = yiq_c.yz * max(sat, 0.0) * smoothstep(0.0, 0.03, yiq_c.x);
     if (a_l <= 0.0)
         return float4(0.0, 0.0, 0.0, 0.0);
-    float3 yiq = float3(y_out / a_l, iq);
+    float y_here = max(y_out / a_l, 0.0) * (1.0 + (White_Level * 0.01 - 1.0) * A);
+    float2 smeared = yiq_c.yz / max(a_c, 0.0001) * smoothstep(0.0, 0.03, yiq_c.x / max(a_c, 0.0001));
+    float2 follows = yiq_c.yz / max(yiq_c.x, 0.0001) * y_here;
+    float sat = 1.0 + (Saturation * 0.01 - 1.0) * A;
+    float2 iq = (0.5 * smeared + 0.5 * follows) * max(sat, 0.0);
+    float3 yiq = float3(y_here, iq);
 
     // --- Noise (VHS Noise): kept off black.
     float lseed = line + field * 0.618;

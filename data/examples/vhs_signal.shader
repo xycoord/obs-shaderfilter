@@ -5,7 +5,9 @@
 // edges it belongs to, and arrives a little late, so it sits slightly to the
 // right. The player's detail circuit sharpens what's left, which leaves a
 // faint light and dark outline either side of strong edges. Playback also
-// averages colour over two lines, so it sits about a line low.
+// averages colour over two lines, so it sits half a line low. Half the
+// colour is laid on the brightness detail it belongs to, so thin coloured
+// lettering keeps some colour (strict tape loses nearly all of it).
 //
 // Settings are in TV lines (TVL: how many alternating light and dark lines
 // can be told apart across a width equal to the picture's height, where
@@ -42,7 +44,7 @@ uniform float Chroma_Resolution<
     float minimum = 10.0;
     float maximum = 200.0;
     float step = 1.0;
-> = 35.0;
+> = 40.0;
 uniform float Chroma_Delay<
     string label = "Chroma Delay";
     string tooltip = "How far colour sits to the right of where it belongs, in pixels on a 1080-line picture (about 37 ns of signal each). 3 to 6 on a typical VCR; 0 on a well-adjusted one; negative moves it left.";
@@ -53,12 +55,20 @@ uniform float Chroma_Delay<
 > = 4.0;
 uniform float Sharpening<
     string label = "Sharpening";
-    string tooltip = "How far a sharp edge overshoots, in percent of the step: the faint light and dark outline the player's detail circuit draws either side of strong edges. 0 for none, 10 to 15 for a typical VCR.";
+    string tooltip = "How much further a sharp edge overshoots, in percent of its step, from the player's detail circuit: a faint light and dark outline either side. The steep tape filter already rings about 6% by itself; 4 to 8 more is a typical VCR, 0 a plain one.";
     string widget_type = "slider";
     float minimum = 0.0;
-    float maximum = 40.0;
+    float maximum = 30.0;
     float step = 0.5;
-> = 12.0;
+> = 6.0;
+uniform float White_Level<
+    string label = "White Level";
+    string tooltip = "How bright full white plays back, in percent. 100 keeps it; a worn or long-play tape plays back a little grey (92 to 96), which also leaves room for its noise to show in the whites.";
+    string widget_type = "slider";
+    float minimum = 80.0;
+    float maximum = 100.0;
+    float step = 0.5;
+> = 100.0;
 uniform float Saturation<
     string label = "Saturation";
     string tooltip = "How strong colours are, in percent: 100 keeps them as they are; tape often loses a little.";
@@ -82,46 +92,47 @@ float4 mainImage(VertData v_in) : TARGET
     // One pixel on a 1080-line picture, in uv, across and down.
     float2 px = uv_pixel_interval / (uv_pixel_interval.y * 1080.0);
 
-    // Gaussian filters whose response is down to half at the set resolution:
-    // a standard deviation of 404.8 / TVL pixels on a 1080-line picture.
-    float sigma_l = 404.8 / max(Luma_Resolution, 1.0);
-    float sigma_w = sigma_l * 2.5;
-    float sigma_c = 404.8 / max(Chroma_Resolution, 1.0);
-
-    // Luma, and a wider luma for the detail circuit, from one row of 21
-    // samples out to 3 of the wider one's standard deviations (premultiplied
-    // by transparency, which is filtered with luma).
-    float step_l = sigma_l * 0.75;
+    // Luma: a steep low-pass (a windowed sinc, as a VCR's luma filter is
+    // steep), its response down to half at Luma_Resolution and to under a
+    // tenth a third of the way above it, from 25 samples across two of its
+    // periods either side. A wider Gaussian of the same samples (standard
+    // deviation 1012 / TVL pixels) is the detail circuit's reference, and a
+    // positive Gaussian filters transparency, which can't ring. All the
+    // weights are fixed: only the spacing follows the setting.
+    float step_l = 360.0 / max(Luma_Resolution, 1.0);
     float y_l = 0.0;
     float y_w = 0.0;
     float a_l = 0.0;
-    float a_w = 0.0;
     float wl = 0.0;
     float ww = 0.0;
-    for (int i = -10; i <= 10; i++) {
-        float o = float(i) * step_l;
-        float4 s = image.Sample(textureSampler, v_in.uv + float2(o * px.x, 0.0));
+    float wa = 0.0;
+    for (int i = -12; i <= 12; i++) {
+        float u = float(i) / 12.0;
+        float4 s = image.Sample(textureSampler, v_in.uv + float2(float(i) * step_l * px.x, 0.0));
         float y = dot(s.rgb, float3(0.299, 0.587, 0.114)) * s.a;
-        float kl = exp(-0.5 * (o / sigma_l) * (o / sigma_l));
-        float kw = exp(-0.5 * (o / sigma_w) * (o / sigma_w));
+        float sinc = i == 0 ? 1.0 : sin(12.566371 * u) / (12.566371 * u);
+        float kl = sinc * (0.42 + 0.5 * cos(3.1415927 * u) + 0.08 * cos(6.2831853 * u));
+        float kw = exp(-0.5 * (4.27 * u) * (4.27 * u));
+        float ka = exp(-0.5 * (10.67 * u) * (10.67 * u));
         y_l += kl * y;
-        a_l += kl * s.a;
         wl += kl;
         y_w += kw * y;
-        a_w += kw * s.a;
         ww += kw;
+        a_l += ka * s.a;
+        wa += ka;
     }
     y_l /= wl;
-    a_l /= wl;
+    a_l /= wa;
     y_w /= ww;
+    float sigma_c = 404.8 / max(Chroma_Resolution, 1.0);
 
     // The detail circuit: the luma's difference from the wider luma, scaled
-    // so a sharp edge overshoots Sharpening percent of its step.
-    float y_out = y_l + (Sharpening / 16.2) * (y_l - y_w);
+    // so a sharp edge overshoots Sharpening percent of its step more.
+    float y_out = y_l + (Sharpening / 24.1) * (y_l - y_w);
 
-    // Chroma: 15 samples across, half a standard deviation apart, on the
-    // line above and the one above that (playback averages two lines, and
-    // colour lands about a line low), late by Chroma_Delay.
+    // Chroma: 15 samples across, half a standard deviation apart, on this
+    // line and the one above (playback averages two lines, so colour lands
+    // half a line low), late by Chroma_Delay.
     // The samples are shifted by a different fraction of their spacing at
     // each pixel, so thin coloured detail smears smoothly (with a faint
     // grain, as tape colour has) rather than in copies.
@@ -132,7 +143,7 @@ float4 mainImage(VertData v_in) : TARGET
     float3 yiq_c = float3(0.0, 0.0, 0.0);
     float a_c = 0.0;
     for (int r = 0; r < 2; r++) {
-        float dy = -(float(r) + 0.5) * line_gap * px.y;
+        float dy = -float(r) * line_gap * px.y;
         for (int j = -7; j <= 7; j++) {
             float t = float(j) + jitter;
             float o = t * step_c - Chroma_Delay;
@@ -142,17 +153,23 @@ float4 mainImage(VertData v_in) : TARGET
             a_c += k * s.a;
         }
     }
-    // Colour of what's covered (straight, not premultiplied). It's kept
-    // wherever there's picture within the colour's reach (luma averaged the
-    // same way, above 3%), so colour smears past coloured edges, but fades
-    // out where everything round is black: black far from colour stays black.
-    yiq_c /= max(a_c, 0.0001);
-    float2 iq = yiq_c.yz * (Saturation * 0.01) * smoothstep(0.0, 0.03, yiq_c.x);
-
-    // Back to RGB, luma out of premultiplied. The detail circuit's undershoot
-    // can't go below black.
     if (a_l <= 0.0)
         return float4(0.0, 0.0, 0.0, 0.0);
-    float3 rgb = max(vhs_from_yiq(float3(y_out / a_l, iq)), 0.0);
+    float y_here = max(y_out / a_l, 0.0) * (White_Level * 0.01);
+
+    // The colour, half of it two ways. Half is tape colour as it is: the
+    // smeared average (straight, not premultiplied), kept wherever there's
+    // picture within its reach (luma averaged the same way, above 3%), so it
+    // bleeds past coloured edges but fades out where everything round is
+    // black. The other half is the same colour per unit of brightness, laid
+    // on this pixel's brightness: it follows the detail it belongs to, so
+    // thin coloured lettering keeps some colour where strict tape would lose
+    // nearly all of it. Black far from colour stays black.
+    float2 smeared = yiq_c.yz / max(a_c, 0.0001) * smoothstep(0.0, 0.03, yiq_c.x / max(a_c, 0.0001));
+    float2 follows = yiq_c.yz / max(yiq_c.x, 0.0001) * y_here;
+    float2 iq = (0.5 * smeared + 0.5 * follows) * (Saturation * 0.01);
+
+    // Back to RGB. The detail circuit's undershoot can't go below black.
+    float3 rgb = max(vhs_from_yiq(float3(y_here, iq)), 0.0);
     return float4(rgb, saturate(a_l));
 }
