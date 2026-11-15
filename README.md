@@ -94,6 +94,11 @@ Add the filter to any source through "Filters" when right-clicking it; it is cal
 - The shader's parameters follow, in a "*Shader* Settings" group. Shaders with a `<name>.presets.ini`
   next to them start the group with a **Preset** list: choosing a preset sets the
   sliders, which you can then adjust.
+- **Your own Looks:** **Save as a Look…** keeps a filter's settings (part ticks included) as a Look of your own, for
+  every filter using that shader; it's listed under **Your Looks** after the shader's own presets, and works for any
+  shader, with presets or without. Picking one sets everything it saved; after a change, **Update** saves the change
+  into it, and **Delete** removes it. They're kept in OBS's plugin settings folder (`obs-shaderfilter/looks/`), one
+  file per shader name.
 - **How much it costs:** the Shader list marks shaders that take noticeably more GPU time than a simple
   color filter (Medium, Heavy, Very Heavy), and a chosen shader's settings show the GPU time it actually
   takes on this computer, per frame and as a share of a frame.
