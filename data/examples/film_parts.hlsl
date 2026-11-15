@@ -11,6 +11,7 @@ uniform bool Print_On<
     string tooltip = "The print's tone and colour: its contrast, how it fades, how warm the light is, and its stock (colour, black and white, sepia, tinted).";
 > = true;
 uniform int Stock<
+    string from = "halation:Film";
     string label = "Stock";
     string group = "Print";
     string tooltip = "What the print is: colour; black and white; sepia toned; or tinted all over, amber or blue, as silent films were.";
@@ -108,6 +109,7 @@ uniform bool Halation_On<
     string tooltip = "The red-orange glow film gives round bright parts, from light scattering back through it.";
 > = true;
 uniform int Halation_Strength<
+    string from = "halation:Strength";
     string label = "Glow";
     string group = "Halation";
     string tooltip = "How bright the glow is: the share of the light above the threshold that spreads into it.";
@@ -118,6 +120,7 @@ uniform int Halation_Strength<
     int step = 1;
 > = 15;
 uniform float Halation_Size<
+    string from = "halation:Size";
     string label = "Size";
     string group = "Halation";
     string show = "more";
@@ -129,6 +132,7 @@ uniform float Halation_Size<
     float step = 0.5;
 > = 30.0;
 uniform int Halation_Threshold<
+    string from = "halation:Threshold";
     string label = "Threshold";
     string group = "Halation";
     string show = "more";
@@ -146,6 +150,7 @@ uniform bool Grain_On<
     string tooltip = "The film's grain, moving every frame.";
 > = true;
 uniform float Grain<
+    string from = "film_grain:Amount";
     string label = "Grain";
     string group = "Grain";
     string tooltip = "How strong the grain is (as Film Grain's Amount).";
@@ -166,6 +171,7 @@ uniform float Grain_Size<
     float step = 0.05;
 > = 2.4;
 uniform int Grain_Colour<
+    string from = "film_grain:Color_Amount";
     string label = "Colour";
     string group = "Grain";
     string show = "more";
@@ -177,6 +183,7 @@ uniform int Grain_Colour<
     int step = 1;
 > = 25;
 uniform int Grain_Shadows<
+    string from = "film_grain:Shadows";
     string label = "Shadows";
     string group = "Grain";
     string show = "more";
@@ -188,6 +195,7 @@ uniform int Grain_Shadows<
     int step = 1;
 > = 85;
 uniform int Grain_Highlights<
+    string from = "film_grain:Highlights";
     string label = "Highlights";
     string group = "Grain";
     string show = "more";
@@ -245,6 +253,7 @@ uniform int Light_Specks<
     int step = 1;
 > = 25;
 uniform int Dust_Strength<
+    string from = "dust_scratches:Strength";
     string label = "Strength";
     string group = "Dust & Scratches";
     string show = "more";

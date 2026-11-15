@@ -164,6 +164,12 @@ Settings most people won't need can be marked `string show = "more";`: they're s
 **Show All Settings** is ticked (which appears only for shaders that mark something), and still apply while hidden.
 `string suffix = " %";` puts units after a number.
 
+A `string` with `widget_type = "switch"` and a shader file (next to this one) as its value shows as a button that
+makes the filter that shader, keeping its settings: each setting of the new shader takes this one's value of the same
+name, or of a name its `string from = "film_grain:Amount, halation:Strength";` annotation gives for this shader; the
+rest take the Look this filter had (or their defaults). The film pack's filters use it for **Switch to Film Look**,
+and a run of Film, Projector and Lens filters can be combined into one Film Look the same way.
+
 #### Several passes
 
 A shader that needs a pass's result around each pixel (a blur of an earlier effect, say) can do it in stages:

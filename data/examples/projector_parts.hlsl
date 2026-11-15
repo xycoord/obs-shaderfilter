@@ -137,6 +137,7 @@ uniform float Inset<
     float step = 0.5;
 > = 6.0;
 uniform float Gate_Softness<
+    string from = "projector_gate:Edge_Softness";
     string label = "Edge Softness";
     string group = "Frame Edge";
     string show = "more";

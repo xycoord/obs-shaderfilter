@@ -12,6 +12,7 @@
  *   "shots": [ { "name": "five",
  *                "source": "Graphics",            source name in the title
  *                "filters": [ { "settings": {...}, "name": "...", "enabled": true } ],
+ *                (a "ui" step with "click": true presses the button named by "property")
  *                "ui": [ { "filter": 0, "property": "x", "value": ... } ],
  *                     values set as if through the UI (fires the property's
  *                     modified callback, then updates the filter)
@@ -108,6 +109,16 @@ static void apply_ui_value(obs_source_t *filter, obs_data_t *item)
 	const char *prop_name = obs_data_get_string(item, "property");
 	/* As in OBS: the panel is built first, then the person changes a control. */
 	obs_properties_t *props = obs_source_properties(filter);
+	if (obs_data_get_bool(item, "click")) {
+		/* A button pressed. */
+		obs_property_t *b = obs_properties_get(props, prop_name);
+		if (b)
+			obs_property_button_clicked(b, filter);
+		else
+			fprintf(stderr, "no button '%s'\n", prop_name);
+		obs_properties_destroy(props);
+		return;
+	}
 	obs_data_t *settings = obs_source_get_settings(filter);
 	obs_data_item_t *v = obs_data_item_byname(item, "value");
 	switch (obs_data_item_gettype(v)) {

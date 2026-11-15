@@ -48,6 +48,7 @@ uniform float Distortion<
     float step = 0.1;
 > = 2.0;
 uniform float Corner_Softness<
+    string from = "lens_softness:Edge_Softness";
     string label = "Corner Softness";
 #ifdef FILM_LOOK
     string group = "Lens";

@@ -37,6 +37,11 @@ uniform float Inset<
     float maximum = 100.0;
     float step = 0.5;
 > = 6.0;
+uniform string Full_Look<
+    string label = "Switch to Film Look";
+    string widget_type = "switch";
+    string tooltip = "Make this filter a Film Look (the film, projector and lens in one filter), keeping these settings: the parts this filter doesn't have are set to the same Look.";
+> = "film_look.shader";
 
 float4 mainImage(VertData v_in) : TARGET
 {

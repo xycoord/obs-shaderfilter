@@ -30,6 +30,11 @@ uniform float Edge_Softness<
     float maximum = 3.0;
     float step = 0.05;
 > = 1.0;
+uniform string Full_Look<
+    string label = "Switch to Film Look";
+    string widget_type = "switch";
+    string tooltip = "Make this filter a Film Look (the film, projector and lens in one filter), keeping these settings: the parts this filter doesn't have are set to the same Look.";
+> = "film_look.shader";
 
 // Near enough linear light for a blur, both ways: the square (a gamma of 2,
 // close to sRGB's 2.2) and its exact inverse, so a pixel left as it was comes
