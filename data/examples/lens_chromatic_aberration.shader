@@ -40,28 +40,36 @@ float3 lens_ca_from_linear(float3 c)
 
 float4 mainImage(VertData v_in) : TARGET
 {
-    // Size difference between red and blue: Fringing pixels over half the
-    // picture's width. 1.408 makes it the gap between the red and blue parts'
-    // centres, from the weights below; green stays where it is.
-    float spread = Fringing * (uv_size.y / 1080.0) / (0.5 * uv_size.x) * 1.408;
+    // Size difference between red and blue: Fringing pixels (on a 1080-line
+    // picture, scaled to the source's own height) over half its width. 1.408
+    // makes it the gap between the red and blue parts' centres, from the
+    // weights below; green stays where it is.
+    float spread = Fringing * 1.408 * 2.0 * uv_pixel_interval.x / (uv_pixel_interval.y * 1080.0);
+    if (spread == 0.0)
+        return image.Sample(textureSampler, v_in.uv);
     float2 d = v_in.uv - 0.5;
+
+    // Samples are kept inside the picture, half a pixel in from its edges
+    // (a projected frame's colours all reach its edge), unless this pixel is
+    // outside it, in added space.
+    float2 lo = min(v_in.uv, 0.5 * uv_pixel_interval);
+    float2 hi = max(v_in.uv, 1.0 - 0.5 * uv_pixel_interval);
 
     // Nine wavelengths from red (t = 0) to blue (t = 1), each a slightly
     // different size, summed per channel by how much of it that channel sees.
     float3 sum = float3(0.0, 0.0, 0.0);
     float3 cover = float3(0.0, 0.0, 0.0);
-    float3 weight = float3(0.0, 0.0, 0.0);
     for (int i = 0; i < 9; i++) {
         float t = float(i) / 8.0;
         float k = 3.0 * t - 1.5;
         float3 w = saturate(float3(-k, 1.0 - abs(k), k));
-        float4 s = image.Sample(textureSampler, 0.5 + d * (1.0 + spread * (0.5 - t)));
+        float4 s = image.Sample(textureSampler, clamp(0.5 + d * (1.0 + spread * (0.5 - t)), lo, hi));
         sum += w * lens_ca_to_linear(s.rgb) * s.a;
         cover += w * s.a;
-        weight += w;
     }
-    sum /= weight;
-    cover /= weight;
+    // (The weights' sums per channel.)
+    sum /= float3(3.125, 2.75, 3.125);
+    cover /= float3(3.125, 2.75, 3.125);
 
     // Each channel has its own coverage at a fringe; drawn as one colour at
     // the largest of them, which looks the same over black.
