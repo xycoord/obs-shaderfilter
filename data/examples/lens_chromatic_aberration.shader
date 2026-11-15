@@ -48,12 +48,14 @@ float4 mainImage(VertData v_in) : TARGET
 
     // Wavelengths from red (t = 0) to blue (t = 1), each a slightly different
     // size, summed per channel by how much of it that channel sees: nine, and
-    // more for wider fringes, so the steps between them stay about a pixel.
-    int n = clamp(int(abs(Fringing) * 1.2) + 4, 9, 29);
+    // more for wider fringes (always an odd number, for the gap below), so the
+    // steps between them stay about a pixel.
+    int n = 9 + 2 * int(clamp(abs(Fringing) * 0.6 - 2.5, 0.0, 10.0));
 
     // The gap between the red and blue parts' centres in t, from the weights
     // below (green stays in the middle), so Fringing is that gap in pixels:
-    // 0.71 for nine samples, towards 0.639 for many (within 0.2%).
+    // 0.71 for nine samples, towards 0.639 for many (within 0.2% for an odd
+    // number of them).
     float gap = 0.63889 + 0.569 / float(n - 1);
 
     // Size difference between red and blue: Fringing pixels (on a 1080-line
