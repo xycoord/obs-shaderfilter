@@ -427,8 +427,17 @@ struct shader_filter_data {
 	bool can_feed;
 	bool own_technique;
 	/* A multi-stage shader: stage1 ... stageN run in turn before mainImage,
-	 * each into its own texture, which is the next one's `image`. */
+	 * each into its own texture, which is the next one's `image`. A stage
+	 * can be drawn smaller ("#define STAGE<n>_SCALE <k>": 1/k of the size
+	 * each way), for a wide blur done cheaply; and any pass can read the
+	 * filter's input (source_image) and the stages before it
+	 * (stage<n>_image). stages_drawn is true in them all, so a shader can
+	 * fall back to one pass where a host draws only mainImage. */
 	int n_stages;
+	int stage_scale[SF_MAX_STAGES];
+	gs_eparam_t *param_source_image;
+	gs_eparam_t *param_stage_image[SF_MAX_STAGES];
+	gs_eparam_t *param_stages_drawn;
 	/* Settings to carry over once the shader being switched to is loaded
 	 * ("<shader>:<setting>" -> value), the shaders they're from in order,
 	 * and the Look to fill in the rest from; and a note for the panel. */
@@ -607,6 +616,10 @@ static void shader_filter_clear_params(struct shader_filter_data *filter)
 	filter->param_audio_peak = NULL;
 	filter->param_audio_magnitude = NULL;
 	filter->param_image = NULL;
+	filter->param_source_image = NULL;
+	for (int i = 0; i < SF_MAX_STAGES; i++)
+		filter->param_stage_image[i] = NULL;
+	filter->param_stages_drawn = NULL;
 	filter->param_previous_image = NULL;
 	filter->param_image_a = NULL;
 	filter->param_image_b = NULL;
@@ -875,6 +888,26 @@ static bool declares_stage(const char *text, int n)
 	return false;
 }
 
+/* A stage's scale from "#define STAGE<n>_SCALE <k>" at the start of a line:
+ * the stage is drawn at 1/k of the filter's size each way (1 to 8). */
+static int stage_scale_of(const char *text, int n)
+{
+	char key[32];
+	snprintf(key, sizeof(key), "STAGE%d_SCALE", n);
+	for (const char *at = strstr(text, key); at; at = strstr(at + 1, key)) {
+		const char *line = at;
+		while (line > text && line[-1] != '\n')
+			line--;
+		while (*line == ' ' || *line == '\t')
+			line++;
+		if (strncmp(line, "#define", 7) != 0)
+			continue;
+		const int k = atoi(at + strlen(key));
+		return k < 1 ? 1 : k > 8 ? 8 : k;
+	}
+	return 1;
+}
+
 static void shader_filter_reload_effect(struct shader_filter_data *filter)
 {
 	obs_data_t *settings = obs_source_get_settings(filter->context);
@@ -944,6 +977,8 @@ static void shader_filter_reload_effect(struct shader_filter_data *filter)
 		while (use_template && !filter->own_technique && !filter->transition && filter->n_stages < SF_MAX_STAGES &&
 		       declares_stage(shader_text, filter->n_stages + 1))
 			filter->n_stages++;
+		for (int i = 0; i < SF_MAX_STAGES; i++)
+			filter->stage_scale[i] = i < filter->n_stages ? stage_scale_of(shader_text, i + 1) : 1;
 		if (use_template && !filter->own_technique && !filter->transition && !filter->n_stages &&
 		    !strstr(shader_text, "USE_PM_ALPHA")) {
 			filter->shader_body = shader_text;
@@ -1084,6 +1119,13 @@ static void shader_filter_reload_effect(struct shader_filter_data *filter)
 			// Nothing.
 		} else if (strcmp(info.name, "image") == 0) {
 			filter->param_image = param;
+		} else if (strcmp(info.name, "source_image") == 0) {
+			filter->param_source_image = param;
+		} else if (strcmp(info.name, "stages_drawn") == 0) {
+			filter->param_stages_drawn = param;
+		} else if (strncmp(info.name, "stage", 5) == 0 && info.name[5] >= '1' && info.name[5] < '1' + SF_MAX_STAGES &&
+			   strcmp(info.name + 6, "_image") == 0) {
+			filter->param_stage_image[info.name[5] - '1'] = param;
 		} else if (strcmp(info.name, "previous_image") == 0) {
 			filter->param_previous_image = param;
 		} else if (strcmp(info.name, "previous_output") == 0) {
@@ -6423,18 +6465,34 @@ static gs_texture_t *draw_stage(struct shader_filter_data *filter, int i, gs_tex
 	filter->stage_render[i] = create_or_reset_texrender(filter->stage_render[i], GS_RGBA16F);
 	char tech[16];
 	snprintf(tech, sizeof(tech), "Stage%d", i + 1);
+	const int k = filter->stage_scale[i];
+	const uint32_t w = (filter->total_width + k - 1) / k;
+	const uint32_t h = (filter->total_height + k - 1) / k;
 	gs_blend_state_push();
 	gs_reset_blend_state();
 	gs_enable_blending(false);
 	gs_blend_function(GS_BLEND_ONE, GS_BLEND_ZERO);
-	if (gs_texrender_begin(filter->stage_render[i], filter->total_width, filter->total_height)) {
-		gs_ortho(0.0f, (float)filter->total_width, 0.0f, (float)filter->total_height, -100.0f, 100.0f);
+	if (gs_texrender_begin(filter->stage_render[i], w, h)) {
+		gs_ortho(0.0f, (float)w, 0.0f, (float)h, -100.0f, 100.0f);
 		while (gs_effect_loop(filter->effect, tech))
-			gs_draw_sprite(texture, 0, filter->total_width, filter->total_height);
+			gs_draw_sprite(texture, 0, w, h);
 		gs_texrender_end(filter->stage_render[i]);
 	}
 	gs_blend_state_pop();
 	return gs_texrender_get_texture(filter->stage_render[i]);
+}
+
+/* A multi-stage shader's extra inputs: the filter's input, the stages drawn
+ * so far, and whether stages are drawn at all. */
+static void bind_stage_textures(struct shader_filter_data *filter, gs_texture_t *source, gs_texture_t **stages)
+{
+	if (filter->param_source_image)
+		gs_effect_set_texture(filter->param_source_image, source);
+	for (int i = 0; i < SF_MAX_STAGES; i++)
+		if (filter->param_stage_image[i])
+			gs_effect_set_texture(filter->param_stage_image[i], stages[i]);
+	if (filter->param_stages_drawn)
+		gs_effect_set_bool(filter->param_stages_drawn, filter->n_stages > 0);
 }
 
 static void draw_shader(struct shader_filter_data *filter, gs_effect_t *effect, gs_texture_t *texture, enum out_form form,
@@ -6484,11 +6542,15 @@ static void render_shader(struct shader_filter_data *filter, gs_texture_t *textu
 	 * last pass. Every pass binds the parameters afresh: ending a technique
 	 * clears an effect's parameter values. */
 	struct gpu_timer_slot *timing = filter->n_stages ? gpu_timer_begin(filter) : NULL;
+	gs_texture_t *source = texture;
+	gs_texture_t *stages[SF_MAX_STAGES] = {0};
 	for (int i = 0; i < filter->n_stages && texture; i++) {
 		bind_shader_params(filter, texture, f, filter_to);
-		texture = draw_stage(filter, i, texture);
+		bind_stage_textures(filter, source, stages);
+		texture = stages[i] = draw_stage(filter, i, texture);
 	}
 	bind_shader_params(filter, texture, f, filter_to);
+	bind_stage_textures(filter, source, stages);
 	draw_shader(filter, filter->effect, texture, form, !filter->n_stages);
 	gpu_timer_end(filter, timing);
 }
