@@ -22,6 +22,18 @@ uniform float Corner_Falloff<
     float step = 1.0;
 > = 25.0;
 
+// The sRGB curve, both ways, carried on above 1.
+float3 vignette_to_linear(float3 c)
+{
+    c = max(c, 0.0);
+    return lerp(c / 12.92, pow((c + 0.055) / 1.055, float3(2.4, 2.4, 2.4)), step(0.04045, c));
+}
+float3 vignette_from_linear(float3 c)
+{
+    c = max(c, 0.0);
+    return lerp(c * 12.92, 1.055 * pow(c, float3(1.0 / 2.4, 1.0 / 2.4, 1.0 / 2.4)) - 0.055, step(0.0031308, c));
+}
+
 float4 mainImage(VertData v_in) : TARGET
 {
     float4 c = image.Sample(textureSampler, v_in.uv);
@@ -34,11 +46,10 @@ float4 mainImage(VertData v_in) : TARGET
     // cos^4 of the angle off the lens's axis is 1 / (1 + tan^2)^2, with tan^2
     // proportional to the distance squared, scaled so the corners lose
     // Corner_Falloff percent.
-    float k = (1.0 / sqrt(1.0 - Corner_Falloff * 0.01) - 1.0) / corner;
+    float k = (1.0 / sqrt(1.0 - min(Corner_Falloff, 99.0) * 0.01) - 1.0) / corner;
     float q = 1.0 + k * dot(d, d);
 
-    // Light multiplied in linear light: on the sRGB-encoded picture, nearly
-    // the same as multiplying by its power 1/2.2.
-    c.rgb *= pow(1.0 / (q * q), 1.0 / 2.2);
+    // Light multiplied in linear light.
+    c.rgb = vignette_from_linear(vignette_to_linear(c.rgb) / (q * q));
     return c;
 }
