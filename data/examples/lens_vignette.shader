@@ -13,6 +13,11 @@
 // only reads the pixel it draws, so it can be merged with neighbouring shader
 // filters. It goes last in a film look, with Lens Chromatic Aberration.
 
+uniform string Full_Look<
+    string label = "Switch to Film Look (adds the rest of the look)";
+    string widget_type = "switch";
+    string tooltip = "Make this filter a Film Look (the film, projector and lens in one filter), keeping these settings: the parts this filter doesn't have are set to the same Look.";
+> = "film_look.shader";
 uniform float Corner_Falloff<
     string label = "Corner Falloff";
     string tooltip = "How much of the light is lost in the corners, in percent: none in the middle, falling off smoothly. 15 for a cinema's lens, 25 for 16mm, 40 or more for an old or small projector.";

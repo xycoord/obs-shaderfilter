@@ -87,6 +87,9 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--locale", default=os.environ.get("OBS_FRONTEND_LOCALE"),
                     help="OBS frontend en-US.ini, for OBS's own widget strings")
+    ap.add_argument("--theme", default=os.environ.get("OBS_THEME"),
+                    help="an OBS 30 theme (.qss), e.g. /usr/share/obs/obs-studio/themes/Yami.qss, "
+                         "so the panel is drawn as OBS draws it")
     a = ap.parse_args()
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -95,7 +98,8 @@ def main():
     env = dict(os.environ, QT_QPA_PLATFORM="offscreen", LD_LIBRARY_PATH=f"{a.obs_prefix}/lib")
     r = subprocess.run([a.uishot, "--obs-prefix", a.obs_prefix, "--obs-plugin", a.plugin, "--data", a.data,
                         "--spec", str(out / "spec.json"), "--out", str(out)]
-                       + (["--locale", a.locale] if a.locale else []), env=env,
+                       + (["--locale", a.locale] if a.locale else [])
+                       + (["--theme", a.theme] if a.theme else []), env=env,
                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=600)
     (out / "uishot.log").write_text(r.stdout)
     print("\n".join(sorted(p.name for p in out.glob("*.png"))))

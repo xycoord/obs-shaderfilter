@@ -4,6 +4,12 @@
  * so the UI can be reviewed and compared between builds.
  *
  *   uishot --obs-prefix DIR --obs-plugin SO --data DIR --spec JSON --out DIR
+ *          [--theme FILE.qss]
+ *
+ * --theme: one of OBS 30's own themes (e.g. the default,
+ * /usr/share/obs/obs-studio/themes/Yami.qss), loaded as OBS loads it, so
+ * group boxes, ticks and spacing are the theme's. Without it, a rough
+ * stand-in style is used, which draws group boxes unlike any OBS theme.
  *
  * Run with QT_QPA_PLATFORM=offscreen and an X display for libobs (Xvfb).
  *
@@ -12,6 +18,7 @@
  *   "shots": [ { "name": "five",
  *                "source": "Graphics",            source name in the title
  *                "filters": [ { "settings": {...}, "name": "...", "enabled": true } ],
+ *                (a "ui" step with "click": true presses the button named by "property")
  *                "ui": [ { "filter": 0, "property": "x", "value": ... } ],
  *                     values set as if through the UI (fires the property's
  *                     modified callback, then updates the filter)
@@ -36,6 +43,7 @@
 #include <QListWidget>
 #include <QPainter>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QScrollArea>
 #include <QVBoxLayout>
 #include <obs.hpp>
@@ -98,6 +106,59 @@ public:
 	}
 };
 
+/* As OBS 30 does: a theme's OBSTheme blocks set the application's palette,
+ * and the file itself is the style sheet (its image paths are relative). */
+static bool load_obs_theme(QApplication &app, const QString &path)
+{
+	QFile f(path);
+	if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
+		return false;
+	const QString text = QString::fromUtf8(f.readAll());
+	static const std::map<QString, QPalette::ColorRole> roles = {
+		{"window", QPalette::Window},
+		{"windowText", QPalette::WindowText},
+		{"base", QPalette::Base},
+		{"alternateBase", QPalette::AlternateBase},
+		{"text", QPalette::Text},
+		{"button", QPalette::Button},
+		{"buttonText", QPalette::ButtonText},
+		{"brightText", QPalette::BrightText},
+		{"light", QPalette::Light},
+		{"mid", QPalette::Mid},
+		{"dark", QPalette::Dark},
+		{"shadow", QPalette::Shadow},
+		{"highlight", QPalette::Highlight},
+		{"highlightText", QPalette::HighlightedText},
+		{"link", QPalette::Link},
+		{"linkVisited", QPalette::LinkVisited},
+	};
+	QPalette pal = app.palette();
+	QRegularExpression block("OBSTheme(::(\\w+))?\\s*\\{([^}]*)\\}");
+	QRegularExpression entry("(\\w+)\\s*:\\s*rgb\\((\\d+)\\s*,\\s*(\\d+)\\s*,\\s*(\\d+)\\)");
+	for (auto b = block.globalMatch(text); b.hasNext();) {
+		const QRegularExpressionMatch bm = b.next();
+		const QString group = bm.captured(2);
+		for (auto e = entry.globalMatch(bm.captured(3)); e.hasNext();) {
+			const QRegularExpressionMatch em = e.next();
+			const auto role = roles.find(em.captured(1));
+			if (role == roles.end())
+				continue;
+			const QColor c(em.captured(2).toInt(), em.captured(3).toInt(), em.captured(4).toInt());
+			if (group == "disabled")
+				pal.setColor(QPalette::Disabled, role->second, c);
+			else if (group == "active")
+				pal.setColor(QPalette::Active, role->second, c);
+			else if (group == "inactive")
+				pal.setColor(QPalette::Inactive, role->second, c);
+			else
+				pal.setColor(role->second, c);
+		}
+	}
+	app.setPalette(pal);
+	app.setStyleSheet("file:///" + path);
+	return true;
+}
+
 static void update_cb(void *obj, obs_data_t *, obs_data_t *settings)
 {
 	obs_source_update((obs_source_t *)obj, settings);
@@ -108,6 +169,16 @@ static void apply_ui_value(obs_source_t *filter, obs_data_t *item)
 	const char *prop_name = obs_data_get_string(item, "property");
 	/* As in OBS: the panel is built first, then the person changes a control. */
 	obs_properties_t *props = obs_source_properties(filter);
+	if (obs_data_get_bool(item, "click")) {
+		/* A button pressed. */
+		obs_property_t *b = obs_properties_get(props, prop_name);
+		if (b)
+			obs_property_button_clicked(b, filter);
+		else
+			fprintf(stderr, "no button '%s'\n", prop_name);
+		obs_properties_destroy(props);
+		return;
+	}
 	obs_data_t *settings = obs_source_get_settings(filter);
 	obs_data_item_t *v = obs_data_item_byname(item, "value");
 	switch (obs_data_item_gettype(v)) {
@@ -159,7 +230,7 @@ static QImage source_preview(obs_source_t *source)
 int main(int argc, char **argv)
 {
 	const char *prefix = nullptr, *plugin = nullptr, *data = nullptr, *spec_path = nullptr, *out = nullptr,
-		   *locale = nullptr;
+		   *locale = nullptr, *theme = nullptr;
 	for (int i = 1; i + 1 < argc; i += 2) {
 		if (!strcmp(argv[i], "--obs-prefix"))
 			prefix = argv[i + 1];
@@ -173,6 +244,8 @@ int main(int argc, char **argv)
 			out = argv[i + 1];
 		else if (!strcmp(argv[i], "--locale"))
 			locale = argv[i + 1];
+		else if (!strcmp(argv[i], "--theme"))
+			theme = argv[i + 1];
 	}
 	if (!prefix || !plugin || !data || !spec_path || !out) {
 		fprintf(stderr, "usage: uishot --obs-prefix DIR --obs-plugin SO --data DIR --spec JSON --out DIR\n");
@@ -183,10 +256,17 @@ int main(int argc, char **argv)
 	font.setPointSize(10);
 	app.setFont(font);
 	app.setStyle("Fusion");
-	app.setStyleSheet(style);
-	QPalette pal = app.palette();
-	pal.setColor(QPalette::Link, QColor("#7BA6F5"));
-	app.setPalette(pal);
+	if (theme) {
+		if (!load_obs_theme(app, theme)) {
+			fprintf(stderr, "cannot read theme '%s'\n", theme);
+			return 2;
+		}
+	} else {
+		app.setStyleSheet(style);
+		QPalette pal = app.palette();
+		pal.setColor(QPalette::Link, QColor("#7BA6F5"));
+		app.setPalette(pal);
+	}
 	IniTranslator *tr = locale ? new IniTranslator(locale) : nullptr;
 	if (tr)
 		app.installTranslator(tr);

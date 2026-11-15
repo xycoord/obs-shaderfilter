@@ -6,50 +6,61 @@
 // It only reads the pixel it draws, so the plugin can merge it into a
 // neighbouring shader filter's pass.
 
+uniform string Full_Look<
+    string label = "Switch to Film Look (adds the rest of the look)";
+    string widget_type = "switch";
+    string tooltip = "Make this filter a Film Look (the film, projector and lens in one filter), keeping these settings: the parts this filter doesn't have are set to the same Look.";
+> = "film_look.shader";
 uniform float Amount<
-    string label = "Amount";
+    string label = "Strength";
     string tooltip = "How strong the grain is.";
     string widget_type = "slider";
+    string suffix = " %";
     float minimum = 0.0;
     float maximum = 100.0;
     float step = 0.1;
-> = 30.0;
+> = 23.0;
 uniform float Grain_Size<
     string label = "Grain Size";
     string tooltip = "Size of a grain, in pixels of a 1080-line picture. Grain belongs to the frame, so it scales with the source: twice as many pixels across at 4K, finer on smaller sources.";
     string widget_type = "slider";
+    string suffix = " px";
     float minimum = 1.0;
     float maximum = 6.0;
     float step = 0.05;
-> = 1.5;
+> = 1.9;
 uniform float Color_Amount<
-    string label = "Color";
+    string label = "Colour Grain";
     string tooltip = "0 gives black-and-white grain, as on most film; 100 gives each color channel its own grain.";
     string widget_type = "slider";
+    string suffix = " %";
     float minimum = 0.0;
     float maximum = 100.0;
     float step = 0.1;
-> = 0.0;
+> = 10.0;
 uniform float Shadows<
-    string label = "Shadows";
+    string label = "In Shadows";
     string tooltip = "Grain strength in the darkest parts, compared with the midtones (100).";
     string widget_type = "slider";
+    string suffix = " %";
     float minimum = 0.0;
     float maximum = 100.0;
     float step = 0.1;
-> = 60.0;
+> = 70.0;
 uniform float Highlights<
-    string label = "Highlights";
+    string label = "In Highlights";
     string tooltip = "Grain strength in the brightest parts, compared with the midtones (100).";
     string widget_type = "slider";
+    string suffix = " %";
     float minimum = 0.0;
     float maximum = 100.0;
     float step = 0.1;
-> = 25.0;
+> = 30.0;
 uniform int Speed<
-    string label = "Speed";
+    string label = "Frame Rate";
     string tooltip = "How many times a second the grain changes. 24 looks like film; 0 freezes it.";
     string widget_type = "slider";
+    string suffix = " fps";
     int minimum = 0;
     int maximum = 60;
     int step = 1;
@@ -124,7 +135,11 @@ float4 mainImage(VertData v_in) : TARGET
     float response = luma < 0.5 ? lerp(Shadows * 0.01, 1.0, smoothstep(0.0, 0.5, luma))
                                 : lerp(1.0, Highlights * 0.01, smoothstep(0.5, 1.0, luma));
 
-    // Kept above 0 but not clipped at 1, so HDR highlights survive.
+    // Fading to nothing below about 3% brightness, so black stays exactly
+    // black (grain clipped at 0 would lift it, and show a projector's picture
+    // edge on the wall). Kept above 0 but not clipped at 1, so HDR highlights
+    // survive.
+    response *= smoothstep(0.005, 0.03, luma);
     c.rgb = max(c.rgb + grain * (Amount * 0.0015 * response * fine), 0.0);
     return c;
 }

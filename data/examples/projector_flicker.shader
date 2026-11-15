@@ -26,6 +26,11 @@
 // only reads the pixel it draws, so the plugin can merge it into a
 // neighbouring shader filter's pass.
 
+uniform string Full_Look<
+    string label = "Switch to Film Look (adds the rest of the look)";
+    string widget_type = "switch";
+    string tooltip = "Make this filter a Film Look (the film, projector and lens in one filter), keeping these settings: the parts this filter doesn't have are set to the same Look.";
+> = "film_look.shader";
 uniform float Exposure_Flicker<
     string label = "Exposure Flicker";
     string tooltip = "How much brightness changes from one frame of film to the next, as each frame's density differs a little (in percent: about this much brighter or darker). 2% is a good print; 5% or more is old or badly printed film.";
@@ -49,7 +54,7 @@ uniform float Dark_Frames<
     float minimum = 0.0;
     float maximum = 60.0;
     float step = 0.5;
-> = 4.0;
+> = 2.0;
 uniform float Dark_Frame_Depth<
     string label = "Dark Frame Depth";
     string tooltip = "How much darker a dark frame is (in percent, each one a little more or less than this).";
@@ -67,9 +72,10 @@ uniform float Uneven_Illumination<
     float step = 0.1;
 > = 1.5;
 uniform int Speed<
-    string label = "Speed";
+    string label = "Frame Rate";
     string tooltip = "Frames of film a second: the flicker steps this often. 24 for sound film, 16 to 18 for silent film and Super 8. Use the same as Film Grain's Speed, so grain and flicker change at the same rate. 0 leaves only the lamp flicker.";
     string widget_type = "slider";
+    string suffix = " fps";
     int minimum = 0;
     int maximum = 60;
     int step = 1;

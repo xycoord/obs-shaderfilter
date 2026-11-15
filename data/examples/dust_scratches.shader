@@ -16,8 +16,13 @@
 // dirt is on the film, which weaves). Light marks show on a transparent
 // source too, as round a logo, with their own transparency.
 
+uniform string Full_Look<
+    string label = "Switch to Film Look (adds the rest of the look)";
+    string widget_type = "switch";
+    string tooltip = "Make this filter a Film Look (the film, projector and lens in one filter), keeping these settings: the parts this filter doesn't have are set to the same Look.";
+> = "film_look.shader";
 uniform float Dust<
-    string label = "Dust";
+    string label = "Specks per Frame";
     string tooltip = "How many specks of dust or hair are on each frame, on average (each is on screen for one frame). Under 1 for a kept print; 3 or more for a dirty one.";
     string widget_type = "slider";
     float minimum = 0.0;
@@ -49,7 +54,7 @@ uniform float Strength<
     float step = 1.0;
 > = 50.0;
 uniform float Scratches<
-    string label = "Scratches";
+    string label = "Scratches at Once";
     string tooltip = "How many scratches are on screen at once, on average (up to 3). Each lasts a second or so, wandering a little.";
     string widget_type = "slider";
     float minimum = 0.0;
@@ -57,9 +62,10 @@ uniform float Scratches<
     float step = 0.05;
 > = 0.0;
 uniform int Speed<
-    string label = "Speed";
+    string label = "Frame Rate";
     string tooltip = "Frames of film a second: the dust changes this often. 24 for sound film, 16 to 18 for silent film and Super 8. Use the same as Film Grain's, Gate Weave's and Projector Flicker's Speed.";
     string widget_type = "slider";
+    string suffix = " fps";
     int minimum = 1;
     int maximum = 60;
     int step = 1;

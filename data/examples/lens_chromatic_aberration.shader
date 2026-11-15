@@ -21,6 +21,11 @@
 // through). Where the source is transparent, as round a logo, the fringes are
 // drawn with their own transparency.
 
+uniform string Full_Look<
+    string label = "Switch to Film Look (adds the rest of the look)";
+    string widget_type = "switch";
+    string tooltip = "Make this filter a Film Look (the film, projector and lens in one filter), keeping these settings: the parts this filter doesn't have are set to the same Look.";
+> = "film_look.shader";
 uniform float Fringing<
     string label = "Fringing";
     string tooltip = "How far apart red and blue are at the left and right edges of the picture, in pixels on a 1080-line picture: none in the middle, more towards the edges, most in the corners. A real lens gives 1 or 2, too little to see on a centred logo; 5 shows at its edges. Negative swaps which side red and blue fall on.";

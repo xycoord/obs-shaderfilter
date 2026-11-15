@@ -19,6 +19,11 @@
 // past them. It treats the picture as an ordinary (SDR) one; on an HDR source
 // the threshold falls in a different place.
 
+uniform string Full_Look<
+    string label = "Switch to Film Look (adds the rest of the look)";
+    string widget_type = "switch";
+    string tooltip = "Make this filter a Film Look (the film, projector and lens in one filter), keeping these settings: the parts this filter doesn't have are set to the same Look.";
+> = "film_look.shader";
 uniform float Strength<
     string label = "Strength";
     string tooltip = "How bright the halo is (in percent): the share of the light above the threshold that spreads into it. Just outside a large white area it's about half this. Dark detail inside bright parts, such as thin lines narrower than the halo, fills with it too, as on film: keep it low for detailed logos.";
@@ -26,7 +31,7 @@ uniform float Strength<
     float minimum = 0.0;
     float maximum = 100.0;
     float step = 1.0;
-> = 15.0;
+> = 11.0;
 uniform float Size<
     string label = "Size";
     string tooltip = "How far the halo reaches from a bright edge (to a tenth of its brightness at the edge), in pixels on a 1080-line picture (it's scaled for other sizes). About 15 for 35mm film, 30 for 16mm, 55 for Super 8.";
@@ -34,7 +39,7 @@ uniform float Size<
     float minimum = 2.0;
     float maximum = 120.0;
     float step = 0.5;
-> = 30.0;
+> = 22.0;
 uniform float Threshold<
     string label = "Threshold";
     string tooltip = "How bright a part of the picture has to be to glow, in percent of white. Lower it for more of the picture to glow.";
@@ -42,7 +47,7 @@ uniform float Threshold<
     float minimum = 0.0;
     float maximum = 99.0;
     float step = 1.0;
-> = 70.0;
+> = 80.0;
 uniform int Film<
     string label = "Film";
     string tooltip = "Colour film's halo is red-orange; black-and-white film's is a plain lighter glow.";
@@ -103,7 +108,10 @@ float4 mainImage(VertData v_in) : TARGET
     // and doesn't show: a print is graded so the area has the colour it should.
     // So only what's more than the pixel would get from its own brightness is
     // drawn: the halo spilling onto darker parts round bright ones.
-    float own = c.a * max(dot(halation_to_linear(c.rgb), float3(0.2126, 0.7152, 0.0722)) - t, 0.0) / (1.0 - t);
+    // (The same close cubic as the samples, so in an even area the two cancel
+    // exactly.)
+    float3 c_lin = c.rgb * (c.rgb * (c.rgb * 0.305306011 + 0.682171111) + 0.012522878);
+    float own = c.a * max(dot(c_lin, float3(0.2126, 0.7152, 0.0722)) - t, 0.0) / (1.0 - t);
     glow = max(glow - own, 0.0) * Strength * 0.01;
 
     // The halo's colour: red-orange, or neutral for black and white, the two

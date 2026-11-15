@@ -17,6 +17,11 @@
 // screen. Give it the same Speed as both. The picture's edges stay where they
 // are: what moves in is transparent, as at the edge of a logo.
 
+uniform string Full_Look<
+    string label = "Switch to Film Look (adds the rest of the look)";
+    string widget_type = "switch";
+    string tooltip = "Make this filter a Film Look (the film, projector and lens in one filter), keeping these settings: the parts this filter doesn't have are set to the same Look.";
+> = "film_look.shader";
 uniform float Weave<
     string label = "Weave";
     string tooltip = "How far the picture floats from side to side (in pixels on a 1080-line picture, typical). It wanders over about half a second, with a little jitter each frame.";
@@ -34,9 +39,10 @@ uniform float Jump<
     float step = 0.1;
 > = 0.6;
 uniform int Speed<
-    string label = "Speed";
+    string label = "Frame Rate";
     string tooltip = "Frames of film a second: the picture moves this often. 24 for sound film, 16 to 18 for silent film and Super 8. Use the same as Film Grain's and Projector Flicker's Speed.";
     string widget_type = "slider";
+    string suffix = " fps";
     int minimum = 1;
     int maximum = 60;
     int step = 1;

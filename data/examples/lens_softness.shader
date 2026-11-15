@@ -14,6 +14,11 @@
 // reads as film. Where the source is transparent, as round a logo, the soft
 // edge is drawn with its own transparency.
 
+uniform string Full_Look<
+    string label = "Switch to Film Look (adds the rest of the look)";
+    string widget_type = "switch";
+    string tooltip = "Make this filter a Film Look (the film, projector and lens in one filter), keeping these settings: the parts this filter doesn't have are set to the same Look.";
+> = "film_look.shader";
 uniform float Softness<
     string label = "Softness";
     string tooltip = "How soft the whole picture is, in pixels on a 1080-line picture (the blur's standard deviation). About 0.5 for 35mm, 1 for 16mm, 1.5 or more for Super 8 and old film; past 2 it looks out of focus.";
@@ -21,7 +26,7 @@ uniform float Softness<
     float minimum = 0.0;
     float maximum = 3.0;
     float step = 0.05;
-> = 1.0;
+> = 0.8;
 uniform float Edge_Softness<
     string label = "Edge Softness";
     string tooltip = "How much softer the corners are than the middle, in pixels on a 1080-line picture: none in the middle, growing towards the edges, all of it in the corners, as a lens's focus falls off.";

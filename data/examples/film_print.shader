@@ -11,6 +11,11 @@
 // It goes first in a film look, before Halation and Film Grain. Brighter than
 // white (HDR) rolls off into the shoulder too.
 
+uniform string Full_Look<
+    string label = "Switch to Film Look (adds the rest of the look)";
+    string widget_type = "switch";
+    string tooltip = "Make this filter a Film Look (the film, projector and lens in one filter), keeping these settings: the parts this filter doesn't have are set to the same Look.";
+> = "film_look.shader";
 uniform int Stock<
     string label = "Stock";
     string tooltip = "What the print is: colour; black and white; black and white toned brown (sepia); or black and white tinted a colour all over, as silent films were (amber for daylight and interiors, blue for night).";
@@ -41,7 +46,7 @@ uniform float White<
     float minimum = 70.0;
     float maximum = 100.0;
     float step = 0.5;
-> = 96.0;
+> = 97.0;
 uniform float Roll_Off<
     string label = "Highlight Roll-off";
     string tooltip = "How softly the brightest parts roll off into White (the print's shoulder), in percent: 0 is a straight line up to White; more compresses the highlights and lifts the midtones a little.";
@@ -57,7 +62,7 @@ uniform float Fade<
     float minimum = 0.0;
     float maximum = 100.0;
     float step = 1.0;
-> = 30.0;
+> = 15.0;
 uniform float Warmth<
     string label = "Warmth";
     string tooltip = "How warm the projector's light is, in percent: 0 is neutral, 100 a tungsten lamp, as in 16mm and Super 8 projectors. Warmer in the shadows than the highlights, which turn cream.";

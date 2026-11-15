@@ -102,7 +102,12 @@ The shader list for a folder can be given categories, display names and cost rat
 next to the shaders; see [data/examples/library.ini](data/examples/library.ini). Presets go in a
 `<shader name>.presets.ini` beside the shader: one `[section]` per preset with `parameter = value` lines
 (`;` starts a comment); see
-[data/examples/film_grain.presets.ini](data/examples/film_grain.presets.ini).
+[data/examples/film_grain.presets.ini](data/examples/film_grain.presets.ini). The Preset list remembers the one
+picked, and after a change shows "*preset* — changed" rather than Custom (picking it again, or Back to, puts it back),
+naming any sections that are unticked. Before the first preset, a `default = <name>` line names the preset the
+shader's defaults are, shown (of several with the same values) until another is picked, and a `label = ...` line
+renames the list; a `description = ...` line in a preset is shown under the list.
+The film pack's presets are all written from one table by [tools/film_looks.py](tools/film_looks.py).
 
 Normally all that's required for OBS purposes is a pixel shader (a `.shader` file), and the plugin wraps it
 with a standard template that adds a basic vertex shader and other boilerplate. A full `.effect` file lets
@@ -146,6 +151,42 @@ A text field the user can not edit:
 uniform string notes<
     string widget_type = "info";
 > = "add notes here";
+```
+
+A group with a tick on its heading, to switch a part of the shader on and off: a `bool` with `widget_type = "section"`
+and the group's name. Unticked, the group folds to its heading; its settings
+keep their values.
+```
+uniform bool Dust_On<
+  string label = "Dust & Scratches";
+  string widget_type = "section";
+  string group = "Dust & Scratches";
+> = true;
+```
+Settings most people won't need can be marked `string show = "more";`: they're shown only when the filter's
+**Show All Settings** is ticked (which appears only for shaders that mark something), and still apply while hidden.
+`string suffix = " %";` puts units after a number.
+
+A `string` with `widget_type = "switch"` and a shader file (next to this one) as its value shows as a button that
+makes the filter that shader, keeping its settings: each setting of the new shader takes this one's value of the same
+name, or of a name its `string from = "film_grain:Amount, halation:Strength";` annotation gives for this shader; the
+rest take the preset this filter had (or their defaults). The film pack's filters use it for **Switch to Film Look**,
+and a run of Film, Projector and Lens filters can be combined into one Film Look the same way.
+
+#### Several passes
+
+A shader that needs a pass's result around each pixel (a blur of an earlier effect, say) can do it in stages:
+`float4 stage1(VertData v_in) : TARGET`, then `stage2` and so on (up to 4), before `mainImage`. Each stage is drawn
+in full, at 16 bits a channel, and is the next one's `image`; all of them share the shader's parameters.
+```
+float4 stage1(VertData v_in) : TARGET
+{
+    return image.Sample(textureSampler, v_in.uv) * 0.5; // the first pass
+}
+float4 mainImage(VertData v_in) : TARGET
+{
+    return image.Sample(textureSampler, v_in.uv + float2(4.0 * uv_pixel_interval.x, 0.0)); // sees stage1's result
+}
 ```
 
 #### Defaults
@@ -325,7 +366,9 @@ xvfb-run -a tests/run.sh bench
 See [tests/README.md](tests/README.md) for what is compared and how differences are judged.
 
 `tests/ui/` captures the filter's settings panel, drawn by OBS's own properties widget, in a set of fixed
-scenarios (`tests/ui/shots.py`), for reviewing the UI.
+scenarios (`tests/ui/shots.py`), for reviewing the UI. Pass `--theme` one of OBS's own themes (OBS 30's
+`themes/Yami.qss` is its default) so group boxes, ticks and spacing are drawn as OBS draws them; without it a rough
+stand-in style is used, whose group boxes look like no OBS theme's.
 
 ## Donations
 https://www.paypal.me/exeldro
