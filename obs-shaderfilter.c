@@ -440,6 +440,11 @@ struct shader_filter_data {
 	struct dstr carry_from;
 	char *carry_look;
 	char *switch_note;
+	/* Recently used as it was when this filter's panel was opened, so the
+	 * shaders passed over while trying several (↑/↓ on the list) don't
+	 * fill it: only the one kept goes on top. NULL until a shader is chosen
+	 * in this panel. */
+	obs_data_array_t *recent_base;
 	/* The section ticks the panel was last built with ('1'/'0' each);
 	 * whether the shader's settings were put straight in the panel (it has
 	 * sections), and the names of the properties they made there
@@ -1246,6 +1251,7 @@ static void shader_filter_destroy(void *data)
 	dstr_free(&filter->carry_from);
 	bfree(filter->carry_look);
 	bfree(filter->switch_note);
+	obs_data_array_release(filter->recent_base);
 	dstr_free(&filter->built_ticks);
 	dstr_free(&filter->panel_names);
 
@@ -1316,6 +1322,20 @@ static char *trimmed(const char *s, size_t len)
 
 static bool contains_ci(const char *haystack, const char *needle);
 
+/* Whether a comma-separated flags list has `flag` as one of its words. */
+static bool has_flag(const char *flags, const char *flag)
+{
+	bool found = false;
+	char **words = strlist_split(flags, ',', false);
+	for (char **w = words; w && *w && !found; w++) {
+		char *t = trimmed(*w, strlen(*w));
+		found = astrcmpi(t, flag) == 0;
+		bfree(t);
+	}
+	strlist_free(words);
+	return found;
+}
+
 static void library_load(const char *dir, library_t *lib)
 {
 	da_init((*lib));
@@ -1353,7 +1373,7 @@ static void library_load(const char *dir, library_t *lib)
 		if (bar2) {
 			char *flags = trimmed(bar2 + 1, strlen(bar2 + 1));
 			it.space = contains_ci(flags, "space");
-			it.more = contains_ci(flags, "more");
+			it.more = has_flag(flags, "more");
 			it.cost = contains_ci(flags, "very heavy") ? 3 : contains_ci(flags, "heavy") ? 2
 								   : contains_ci(flags, "medium") ? 1 : 0;
 			bfree(flags);
@@ -1893,17 +1913,37 @@ static void prefs_save(obs_data_t *d)
 	bfree(path);
 }
 
-/* The shaders used last, newest first, for filters or transitions. */
-static void recent_shaders(bool transitions, shader_list_t *out)
+static const char *recent_key(bool transitions)
+{
+	return transitions ? "recent_transitions" : "recent_filters";
+}
+
+static const struct shader_entry *find_entry(const shader_list_t *list, const char *path)
+{
+	for (size_t i = 0; i < list->num; i++)
+		if (strcmp(list->array[i].path, path) == 0)
+			return &list->array[i];
+	return NULL;
+}
+
+/* The shaders used last, newest first, for filters or transitions, leaving
+ * out `current` (so the list's selection, and ↑/↓, stay in its category).
+ * Names and costs come from the lists already loaded, where they're listed. */
+static void recent_shaders(bool transitions, const char *current, const shader_list_t *a_list,
+			   const shader_list_t *b_list, shader_list_t *out)
 {
 	da_init((*out));
 	obs_data_t *d = prefs_load();
-	obs_data_array_t *a = obs_data_get_array(d, transitions ? "recent_transitions" : "recent_filters");
+	obs_data_array_t *a = obs_data_get_array(d, recent_key(transitions));
 	for (size_t i = 0; a && i < obs_data_array_count(a) && out->num < SF_RECENT_MAX; i++) {
 		obs_data_t *item = obs_data_array_item(a, i);
 		const char *path = obs_data_get_string(item, "path");
-		if (*path && os_file_exists(path)) {
-			struct shader_entry e = {bstrdup(path), shader_display_name(path), bstrdup(""), 0, 0, false};
+		if (*path && !(current && strcmp(path, current) == 0) && os_file_exists(path)) {
+			const struct shader_entry *known = find_entry(a_list, path);
+			if (!known)
+				known = find_entry(b_list, path);
+			struct shader_entry e = {bstrdup(path), known ? bstrdup(known->label) : shader_display_name(path),
+						 bstrdup(""), 0, known ? known->cost : 0, false};
 			da_push_back((*out), &e);
 		}
 		obs_data_release(item);
@@ -1912,14 +1952,21 @@ static void recent_shaders(bool transitions, shader_list_t *out)
 	obs_data_release(d);
 }
 
-/* A shader was chosen: it goes to the top of Recent. */
-static void recent_note(const char *path, bool transitions)
+/* A shader was chosen: it goes on top of Recent as it was when the filter's
+ * panel was opened (`base`, taken now if NULL). */
+static void recent_note(const char *path, bool transitions, obs_data_array_t **base)
 {
 	if (!path || !*path)
 		return;
 	obs_data_t *d = prefs_load();
-	const char *key = transitions ? "recent_transitions" : "recent_filters";
-	obs_data_array_t *old = obs_data_get_array(d, key);
+	const char *key = recent_key(transitions);
+	if (!*base) {
+		*base = obs_data_get_array(d, key);
+		if (!*base)
+			*base = obs_data_array_create();
+	}
+	obs_data_array_t *old = *base;
+	obs_data_array_addref(old);
 	obs_data_array_t *a = obs_data_array_create();
 	obs_data_t *first = obs_data_create();
 	obs_data_set_string(first, "path", path);
@@ -1995,7 +2042,7 @@ static void choose_shader_file(struct shader_filter_data *filter, obs_data_t *se
 		filter->reload_effect = true;
 	dstr_copy(&filter->last_path, path);
 	auto_name_filter(filter, settings, path, false);
-	recent_note(path, filter->transition);
+	recent_note(path, filter->transition, &filter->recent_base);
 }
 
 /* A greyed heading in the Shader list, which can't be chosen. */
@@ -2065,15 +2112,11 @@ static size_t fill_shader_list(obs_property_t *pick, obs_data_t *settings, bool 
 	/* The shaders used last, first, unless the list is narrowed. */
 	if (!(search && *search) && !(category && *category)) {
 		shader_list_t recent;
-		recent_shaders(transition, &recent);
+		recent_shaders(transition, has_file ? file : NULL, &list, &mine, &recent);
 		if (recent.num)
 			add_list_heading(pick, obs_module_text("ShaderFilter.Recent"));
-		for (size_t i = 0; i < recent.num; i++) {
-			for (size_t k = 0; k < list.num; k++)
-				if (strcmp(list.array[k].path, recent.array[i].path) == 0)
-					recent.array[i].cost = list.array[k].cost;
+		for (size_t i = 0; i < recent.num; i++)
 			add_shader_entry(pick, &recent.array[i]);
-		}
 		free_shader_list(&recent);
 	}
 
@@ -4610,6 +4653,11 @@ static obs_properties_t *shader_filter_properties(void *data)
 	/* The browsing tools show on a filter with no shader yet. Once a filter
 	 * has a shader they're as the person last left them, on any filter. */
 	const bool refreshing = filter && os_gettime_ns() < filter->props_refresh_until;
+	if (filter && !refreshing) {
+		/* A panel opened afresh: a new go at choosing (see recent_base). */
+		obs_data_array_release(filter->recent_base);
+		filter->recent_base = NULL;
+	}
 	if (has_file || inline_code) {
 		if (!refreshing)
 			obs_data_set_bool(settings, "browse_shaders", remembered_browsing());
