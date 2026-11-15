@@ -31,6 +31,8 @@ Frames are compared pixel by pixel and each case gets a verdict:
 * **close**: rounding-level. Translucent pixels can't be bit-identical: the old filter boundary rounds through hardware sRGB conversions, and llvmpipe's are approximate (it disagrees with exact rounding on about a third of translucent values). Separately, the same shader compiled into a different program can round 1 LSB differently. A few LSB per link, accumulating along a chain, is expected.
 * **edge**: confined to a sliver of pixels where a translucent edge meets fully transparent pixels and a later shader samples across it. llvmpipe interpolates texture coordinates without snapping, so the reference picks up a ~1e-5 weight from the opaque neighbour and, after un-premultiplying, bleeds its colour into the alpha-0 pixel; real GPUs snap to 1/256 texel and don't.
 * **amplified**: a listed shader that turns a 1-LSB input difference into a large one by design (thresholds, histograms; see `AMPLIFIERS` in `shadertest.py`).
+* **staged**: a listed shader that draws a wide glow small, in quarter-size stages, where the release draws only its
+  full-size fallback; the two differ by the fallback's sampling noise (see `STAGED` in `shadertest.py`).
 * **FAIL**: anything else.
 
 Every non-exact case gets a montage (reference | new | difference × 16) in `diffs/` for a visual check.
