@@ -2424,6 +2424,12 @@ static void apply_param_visibility(const struct shader_filter_data *filter, obs_
 		for (obs_property_t *c = obs_properties_first(obs_property_group_content(g)); c; obs_property_next(&c))
 			any = any || obs_property_visible(c);
 		obs_property_set_visible(g, any);
+		struct dstr gap = {0};
+		dstr_printf(&gap, "shader_gap:%s", obs_property_name(g));
+		obs_property_t *gp = obs_properties_get(params, gap.array);
+		if (gp)
+			obs_property_set_visible(gp, any);
+		dstr_free(&gap);
 	}
 }
 
@@ -2468,6 +2474,15 @@ static bool look_restore_clicked(obs_properties_t *props, obs_property_t *proper
 	obs_source_update(filter->context, NULL);
 	obs_source_update_properties(filter->context);
 	return false;
+}
+
+/* A blank line, for room above a tick (a tick's row is shorter than a
+ * slider's, and OBS leaves little room above a group's heading). */
+static obs_property_t *add_gap(obs_properties_t *params, const char *name)
+{
+	obs_property_t *gap = obs_properties_add_text(params, name, " ", OBS_TEXT_INFO);
+	obs_property_text_set_info_word_wrap(gap, false);
+	return gap;
 }
 
 /* The "Show All Settings" tick, for a shader that hides some settings. */
@@ -4613,6 +4628,8 @@ static obs_properties_t *shader_filter_properties(void *data)
 		/* Show All Settings goes before the first hidden setting or group,
 		 * so it stays where it is when ticked. */
 		if (has_more && !all_added && (param_is_more(param) || (group_name && *group_name))) {
+			if (flat)
+				add_gap(params, "shader_gap:show_all");
 			add_show_all(params);
 			all_added = true;
 		}
@@ -4640,6 +4657,14 @@ static obs_properties_t *shader_filter_properties(void *data)
 					dstr_cat(&title, obs_module_text("ShaderFilter.SectionOff"));
 				dstr_replace(&title, "&", "&&");
 				group = obs_properties_create();
+				if (flat) {
+					/* (Room above a heading; named after its group, so it's
+					 * hidden with it.) */
+					struct dstr gap = {0};
+					dstr_printf(&gap, "shader_gap:%s", gname.array);
+					add_gap(params, gap.array);
+					dstr_free(&gap);
+				}
 				obs_property_t *p = obs_properties_add_group(params, gname.array, title.array,
 									    sec ? OBS_GROUP_CHECKABLE : OBS_GROUP_NORMAL, group);
 				if (p)
