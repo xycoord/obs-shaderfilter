@@ -2610,6 +2610,22 @@ static bool preset_bool(const char *v)
 	return astrcmpi(v, "true") == 0 || astrcmpi(v, "yes") == 0 || atof(v) != 0.0;
 }
 
+/* Whether a saved Look's setting is one of the shader's now ("name", or
+ * "name_0"… for a vector's parts): a setting the shader no longer has is
+ * left out, so the Look still matches after the shader changes. */
+static bool look_key_known(const struct shader_filter_data *filter, const char *key)
+{
+	for (size_t i = 0; i < filter->stored_param_list.num; i++) {
+		const struct dstr *n = &filter->stored_param_list.array[i].name;
+		if (strcmp(n->array, key) == 0)
+			return true;
+		if (strncmp(n->array, key, n->len) == 0 && key[n->len] == '_' && key[n->len + 1] >= '0' &&
+		    key[n->len + 1] <= '3' && !key[n->len + 2])
+			return true;
+	}
+	return false;
+}
+
 /* Whether a setting has the value a saved Look gives it. */
 static bool saved_value_matches(obs_data_t *settings, obs_data_item_t *saved)
 {
@@ -2634,6 +2650,8 @@ static bool preset_matches(struct shader_filter_data *filter, obs_data_t *settin
 	if (preset->mine) {
 		size_t n = 0;
 		for (obs_data_item_t *it = obs_data_first(preset->values); it; obs_data_item_next(&it)) {
+			if (!look_key_known(filter, obs_data_item_get_name(it)))
+				continue;
 			n++;
 			if (!saved_value_matches(settings, it)) {
 				obs_data_item_release(&it);
@@ -2673,7 +2691,7 @@ static void preset_apply_except(struct shader_filter_data *filter, obs_data_t *s
 		/* (Settings as saved; `skip` names shader settings, as below.) */
 		for (obs_data_item_t *it = obs_data_first(preset->values); it; obs_data_item_next(&it)) {
 			const char *key = obs_data_item_get_name(it);
-			if (skip && obs_data_get_bool(skip, key))
+			if ((skip && obs_data_get_bool(skip, key)) || !look_key_known(filter, key))
 				continue;
 			switch (obs_data_item_gettype(it)) {
 			case OBS_DATA_NUMBER:
@@ -2993,8 +3011,12 @@ static void look_store_current(struct shader_filter_data *filter, bool update)
 	} else {
 		char *typed = bstrdup(obs_data_get_string(settings, "look_new_name"));
 		char *t = trimmed(typed, strlen(typed));
+		/* (A leading ~ marks the list's "changed" entry, so it's dropped.) */
+		const char *start = t;
+		while (*start == '~' || *start == ' ')
+			start++;
 		/* (A shader's own preset of that name stays; the new one is "<name> 2".) */
-		wanted = new_look_name(&presets, t);
+		wanted = new_look_name(&presets, start);
 		bfree(t);
 		bfree(typed);
 	}
@@ -5149,7 +5171,9 @@ static obs_properties_t *shader_filter_properties(void *data)
 				const char *name = presets.array[i].name;
 				if (presets.array[i].mine && !mine_heading) {
 					struct dstr h = {0};
-					dstr_printf(&h, obs_module_text("ShaderFilter.Heading"), obs_module_text("ShaderFilter.YourLooks"));
+					dstr_printf(&h, obs_module_text("ShaderFilter.Heading"),
+						    obs_module_text((look_label && *look_label) || !any_file ? "ShaderFilter.YourLooks"
+											      : "ShaderFilter.YourPresets"));
 					size_t idx = obs_property_list_add_string(pl, h.array, "~");
 					obs_property_list_item_disable(pl, idx, true);
 					dstr_free(&h);
