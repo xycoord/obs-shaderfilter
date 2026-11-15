@@ -187,6 +187,23 @@ LOOKS = {
 }
 DEFAULT_LOOK = "Classic Film (16mm)"
 
+# One line for each Look, shown under the Look list: what it looks like.
+DESCRIPTIONS = {
+    "Subtle Film": "Barely there: fine grain, a touch of warmth and glow, a gentle rounded frame.",
+    "Projector Only (true colours)": "Your colours exactly as they are, shown on an old projector: rounded frame, a little wobble and flicker, lens fringes.",
+    "Vivid Colour": "Rich, punchy colour with fine grain and no fading: for colourful graphics.",
+    "Classic Film (16mm)": "The all-rounder: visible grain, warm cream whites, a soft glow and a rounded frame.",
+    "Faded Colour": "An old colour print whose colours have faded towards pink and warm.",
+    "Dreamy Glow": "A soft glow round everything bright, soft focus and a soft-edged frame.",
+    "Home Movie (Super 8)": "1970s home movies: big warm grain, rich colour, dark corners, a lively wobble.",
+    "Worn & Scratched": "A print that's been through the projector many times: dust, scratches, dark frames, a jumpier picture.",
+    "Black & White": "Clean black and white with fine grain, no wear.",
+    "Silent Film": "A 1920s silent film: black and white, dark corners, some dust, a slightly uneven hand-cranked speed.",
+    "Sepia (Old Photo)": "Brown-toned like an old photograph, with cream whites.",
+    "Amber Tint (Candlelight)": "Everything tinted warm amber, clean and gentle: lamplight.",
+    "Blue Tint (Moonlight)": "Everything tinted blue, as silent films did for night scenes.",
+}
+
 # Each shader's own setting names: its name -> Film Look's (or a function of
 # the Look's values).
 SAME = lambda *names: {n: n for n in names}
@@ -270,6 +287,7 @@ def set_defaults(name, values):
 
 
 def main():
+    assert set(DESCRIPTIONS) == set(LOOKS), set(DESCRIPTIONS) ^ set(LOOKS)
     for k, v in LOOKS.items():
         assert list(v) == KEYS, (k, [a for a in KEYS if a not in v], [a for a in v if a not in KEYS])
         assert v["Exposure_Flicker"] <= 5 and v["Dark_Frames"] <= 8 and v["Dark_Frame_Depth"] <= 20, k
@@ -286,7 +304,10 @@ def main():
             sections.append((extra, values))
         text = HEADER.format(name=name)
         for look, values in sections:
-            text += "\n[%s]\n" % look + "".join("%s = %s\n" % (k, fmt(v)) for k, v in values.items())
+            text += "\n[%s]\n" % look
+            if look in DESCRIPTIONS:
+                text += "description = %s\n" % DESCRIPTIONS[look]
+            text += "".join("%s = %s\n" % (k, fmt(v)) for k, v in values.items())
         (EX / (name + ".presets.ini")).write_text(text)
         set_defaults(name, dict(sections)[DEFAULT_LOOK])
         print("%-28s %s" % (name, ", ".join(s for s, _ in sections)))

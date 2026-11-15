@@ -53,7 +53,7 @@ uniform bool Flicker_On<
 #endif
     string widget_type = "section";
     string group = "Flicker";
-    string tooltip = "The picture's brightness changing from frame to frame: the film's density and the projector's lamp. Kept gentle, as fast flashing across a big picture can be uncomfortable to watch.";
+    string tooltip = "The picture's brightness changing from frame to frame: the film's density and the projector's lamp. Kept gentle, as fast flashing across a big picture can be uncomfortable to watch: an Amount above 100% doesn't strengthen it.";
 > = true;
 uniform float Exposure_Flicker<
     string label = "Frame Flicker";
@@ -237,8 +237,11 @@ float projector_light(float2 uv, float frame, float a)
     float side = dot(dd, float2(cos(angle), sin(angle))) * 2.0;
     float middle = 0.5 - 2.0 * dot(dd, dd);
     gain += Uneven_Illumination * 0.0245 * ((r.y - 0.5) * side * 2.0 + (r.z - 0.5) * middle * 2.0);
+    // The flicker itself never goes past its settings (Amount above 100
+    // doesn't strengthen it): fast flashing over a big picture is
+    // uncomfortable to watch.
     float lamp_level = lerp(1.0, Lamp_Brightness * 0.01, min(a, 1.0));
-    return lamp_level * max(1.0 + gain * a, 0.0);
+    return lamp_level * max(1.0 + gain * min(a, 1.0), 0.0);
 }
 
 // How much of the picture the gate lets through at uv (the frame's own,

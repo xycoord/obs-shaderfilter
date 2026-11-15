@@ -2332,6 +2332,30 @@ static bool param_visibility_changed(obs_properties_t *props, obs_property_t *p,
 	return true;
 }
 
+/* Put the Look picked last back: its values, and every section ticked. */
+static bool look_restore_clicked(obs_properties_t *props, obs_property_t *property, void *data)
+{
+	UNUSED_PARAMETER(props);
+	UNUSED_PARAMETER(property);
+	struct shader_filter_data *filter = data;
+	obs_data_t *settings = obs_source_get_settings(filter->context);
+	const char *name = obs_data_get_string(settings, "shader_look");
+	preset_list_t presets;
+	presets_load(obs_data_get_string(settings, "shader_file_name"), &presets);
+	for (size_t i = 0; i < presets.num; i++)
+		if (strcmp(presets.array[i].name, name) == 0)
+			preset_apply(filter, settings, &presets.array[i]);
+	presets_free(&presets);
+	for (size_t i = 0; i < filter->stored_param_list.num; i++) {
+		const struct effect_param_data *q = filter->stored_param_list.array + i;
+		if (param_is_section(q))
+			obs_data_set_bool(settings, q->name.array, true);
+	}
+	obs_data_release(settings);
+	obs_source_update(filter->context, NULL);
+	return true;
+}
+
 static bool section_toggled(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
 {
 	UNUSED_PARAMETER(props);
@@ -4332,6 +4356,26 @@ static obs_properties_t *shader_filter_properties(void *data)
 				obs_data_set_string(settings, "shader_look", current);
 			obs_data_set_string(settings, "shader_preset", selected);
 			obs_property_set_modified_callback(pl, shader_preset_changed);
+			/* Under a Look list: what the Look is like (its "description"),
+			 * and, once it's changed or a part is off, a button putting it
+			 * back. */
+			for (size_t i = 0; looks && *base && i < presets.num; i++) {
+				if (strcmp(presets.array[i].name, base) != 0)
+					continue;
+				const char *about = obs_data_get_string(presets.array[i].values, "description");
+				if (about && *about) {
+					obs_property_t *t = obs_properties_add_text(params, "look_description", about, OBS_TEXT_INFO);
+					obs_property_text_set_info_word_wrap(t, true);
+				}
+				if (!*current || offs.len) {
+					struct dstr label = {0};
+					dstr_printf(&label, obs_module_text("ShaderFilter.LookRestore"), base);
+					obs_property_t *b = obs_properties_add_button2(params, "look_restore", label.array,
+										     look_restore_clicked, filter);
+					obs_property_set_long_description(b, obs_module_text("ShaderFilter.LookRestoreHelp"));
+					dstr_free(&label);
+				}
+			}
 			dstr_free(&marker);
 			dstr_free(&offs);
 		}
