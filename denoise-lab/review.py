@@ -31,8 +31,7 @@ ap.add_argument("--clips", nargs="*")
 ap.add_argument("--tiff", action="store_true", help="also write DWG/DI TIFFs for Resolve")
 args = ap.parse_args()
 
-meta = json.loads((Path(args.testset) / "meta.json").read_text())
-clips = args.clips or meta["clips"]
+clips = args.clips or sorted(p.stem for p in (Path(args.testset) / "review").glob("*.npy"))
 out_dir = Path("review_out") / args.run
 out_dir.mkdir(parents=True, exist_ok=True)
 

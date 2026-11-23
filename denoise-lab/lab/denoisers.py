@@ -288,3 +288,8 @@ def bm3d_planes(planes, sigma_y, sigma_c, mode="basic", block_step=8, bm_range=9
 
 
 DENOISERS["mdegrain_vst_blend"] = (mdegrain_vst_blend, {})
+
+
+# The climb's result (records/climb_log.md, round 6).
+BEST_PARAMS = {"tr": 6, "light_tr": 2, "thsad": 300, "thsadc": 300, "spatial_sigma_y": 0.4, "spatial_sigma_c": 0.8}
+DENOISERS["best"] = (mdegrain_vst_blend, BEST_PARAMS)

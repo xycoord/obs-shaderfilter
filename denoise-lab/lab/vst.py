@@ -53,10 +53,36 @@ class NoiseTransform:
         m = rot @ whiten
         return cls(grid, curves, m, np.linalg.inv(m))
 
+    # Fast lookups: both directions use uniform tables with linear interpolation, which
+    # is what a GPU texture lookup would do. (np.interp's binary search was most of
+    # the pipeline's run time.)
+
+    @staticmethod
+    def _lerp(x, lo, step, table):
+        f = (x - lo) / step
+        np.clip(f, 0, len(table) - 1.000001, out=f)
+        i = f.astype(np.int32)
+        f -= i
+        return table[i] * (1 - f) + table[i + 1] * f
+
+    def _inverse_tables(self, n=65536):
+        if getattr(self, "_inv", None) is None:
+            tabs = []
+            for c in range(3):
+                lo, hi = self.curves[c][0], self.curves[c][-1]
+                u = np.linspace(lo, hi, n)
+                tabs.append((lo, (hi - lo) / (n - 1), np.interp(u, self.curves[c], self.grid).astype(np.float32)))
+            self._inv = tabs
+        return self._inv
+
     def forward(self, x: np.ndarray) -> np.ndarray:
-        y = np.stack([np.interp(x[..., c], self.grid, self.curves[c]) for c in range(3)], -1)
-        return np.einsum("...c,dc->...d", y, self.matrix).astype(np.float32)
+        x = np.asarray(x, np.float32)
+        step = (self.grid[-1] - self.grid[0]) / (len(self.grid) - 1)
+        y = np.stack([self._lerp(x[..., c], np.float32(self.grid[0]), np.float32(step),
+                                 self.curves[c].astype(np.float32)) for c in range(3)], -1)
+        return (y @ self.matrix.T.astype(np.float32)).astype(np.float32)
 
     def backward(self, z: np.ndarray) -> np.ndarray:
-        y = np.einsum("...c,dc->...d", z, self.inverse)
-        return np.stack([np.interp(y[..., c], self.curves[c], self.grid) for c in range(3)], -1).astype(np.float32)
+        y = np.asarray(z, np.float32) @ self.inverse.T.astype(np.float32)
+        return np.stack([self._lerp(y[..., c], np.float32(lo), np.float32(st), tab)
+                         for c, (lo, st, tab) in enumerate(self._inverse_tables())], -1).astype(np.float32)

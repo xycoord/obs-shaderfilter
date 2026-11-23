@@ -1,1 +1,3 @@
 {"when": "2026-11-23T18:47:29", "label": "mdegrain-default", "milestone": "starting point: default MDegrain, before any tuning", "score": 2.957736570152508}
+{"when": "2026-11-23T23:25:45", "label": "best-final", "milestone": "final: climb reached target at round 6", "score": 6.104798217034271}
+{"when": "2026-11-23T23:27:13", "label": "mdegrain-default-final", "milestone": "final: reference rerun of the starting point alongside the final candidate", "score": 2.957736570152508}
