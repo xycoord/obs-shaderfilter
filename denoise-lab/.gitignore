@@ -1,0 +1,9 @@
+.venv/
+footage/
+testset/scored/
+testset/review/
+results/
+review_out/
+inspect/
+build.log
+__pycache__/

@@ -1,0 +1,139 @@
+"""Denoisers under test. Each takes and returns DWG/DI frames, float32 [T, H, W, 3].
+
+Add one by writing a function ``name(frames, **params)`` and registering it in
+DENOISERS with its default parameters.
+"""
+
+from __future__ import annotations
+
+import subprocess
+
+import numpy as np
+
+OFFSET, SCALE = 0.1, 1.2  # map DI (which dips slightly below 0 in noise) into [0, 1] for 16-bit tools
+
+
+# --- VapourSynth bridge -------------------------------------------------------
+
+def _vs():
+    import vapoursynth as vs
+    return vs, vs.core
+
+
+def to_clip(frames: np.ndarray):
+    """[T, H, W, 3] float32 -> VapourSynth RGBS clip."""
+    vs, core = _vs()
+    t, h, w, _ = frames.shape
+    blank = core.std.BlankClip(format=vs.RGBS, width=w, height=h, length=t, fpsnum=24000, fpsden=1001)
+    arr = np.ascontiguousarray(frames, dtype=np.float32)
+
+    def fill(n, f):
+        fout = f.copy()
+        for p in range(3):
+            np.asarray(fout[p])[:] = arr[n, :, :, p]
+        return fout
+
+    return core.std.ModifyFrame(blank, blank, fill)
+
+
+def from_clip(clip) -> np.ndarray:
+    vs, core = _vs()
+    if clip.format.id != vs.RGBS:
+        clip = core.resize.Point(clip, format=vs.RGBS, matrix_in_s="709")
+    out = np.empty((clip.num_frames, clip.height, clip.width, 3), np.float32)
+    for n in range(clip.num_frames):
+        f = clip.get_frame(n)
+        for p in range(3):
+            out[n, :, :, p] = np.asarray(f[p])
+    return out
+
+
+def _to_yuv16(frames):
+    """DI RGB -> YUV444P16 (BT.709 matrix used purely to separate brightness from colour)."""
+    vs, core = _vs()
+    c = to_clip((frames + OFFSET) / SCALE)
+    return core.resize.Point(c, format=vs.YUV444P16, matrix_s="709", range_s="full")
+
+
+def _from_yuv16(clip):
+    vs, core = _vs()
+    return from_clip(core.resize.Point(clip, format=vs.RGBS, matrix_in_s="709", range_in_s="full")) * SCALE - OFFSET
+
+
+# --- Denoisers --------------------------------------------------------------
+
+def none(frames):
+    return frames
+
+
+def ffmpeg_filter(frames, vf: str):
+    t, h, w, _ = frames.shape
+    data = (np.clip((frames + OFFSET) / SCALE, 0, 1) * 65535 + 0.5).astype("<u2").tobytes()
+    raw = subprocess.run(
+        ["ffmpeg", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb48le", "-s", f"{w}x{h}", "-r", "24",
+         "-i", "-", "-vf", f"format=gbrp16le,{vf},format=rgb48le", "-f", "rawvideo", "-pix_fmt", "rgb48le", "-"],
+        input=data, check=True, capture_output=True,
+    ).stdout
+    out = np.frombuffer(raw, "<u2").reshape(t, h, w, 3).astype(np.float32) / 65535
+    return out * SCALE - OFFSET
+
+
+def hqdn3d(frames, luma_spatial=4.0, chroma_spatial=3.0, luma_tmp=6.0, chroma_tmp=4.5):
+    return ffmpeg_filter(frames, f"hqdn3d={luma_spatial}:{chroma_spatial}:{luma_tmp}:{chroma_tmp}")
+
+
+def atadenoise(frames, s=9, thr_a=0.02, thr_b=0.04):
+    return ffmpeg_filter(frames, f"atadenoise=s={s}:0a={thr_a}:0b={thr_b}:1a={thr_a}:1b={thr_b}:2a={thr_a}:2b={thr_b}")
+
+
+def mdegrain(frames, tr=2, blksize=16, overlap=8, pel=2, thsad=400, thsadc=None, search=4,
+             searchparam=2, prefilter_sigma=0.0):
+    """MVTools motion-compensated temporal averaging (MDegrain), tr = frames each side (1-6)."""
+    vs, core = _vs()
+    clip = _to_yuv16(frames)
+    search_clip = clip
+    if prefilter_sigma > 0:  # motion search on a blurred copy is more robust in heavy noise
+        search_clip = core.std.Convolution(clip, matrix=[1, 2, 1, 2, 4, 2, 1, 2, 1])
+    sup_search = core.mv.Super(search_clip, pel=pel, sharp=2)
+    sup = core.mv.Super(clip, pel=pel, sharp=2, levels=1)
+    vecs = []
+    for d in range(1, tr + 1):
+        for back in (True, False):
+            vecs.append(core.mv.Analyse(sup_search, isb=back, delta=d, blksize=blksize, overlap=overlap,
+                                        search=search, searchparam=searchparam, truemotion=False))
+    thsadc = thsad if thsadc is None else thsadc
+    fn = getattr(core.mv, f"Degrain{tr}")
+    out = fn(clip, sup, *vecs, thsad=thsad, thsadc=thsadc)
+    return _from_yuv16(out)
+
+
+def vbm3d(frames, sigma_y=6.0, sigma_c=6.0, radius=1, final=True, block_step=8, bm_range=9, ps_num=2, ps_range=4):
+    """Video BM3D (VS-BM3D, CPU). sigma is on the 0-255 scale of the [0, 1] working signal."""
+    vs, core = _vs()
+    c = to_clip((frames + OFFSET) / SCALE)
+    opp = core.bm3d.RGB2OPP(c, sample=1)
+    sig = [sigma_y, sigma_c, sigma_c]
+    basic = core.bm3d.VBasic(opp, sigma=sig, radius=radius, block_step=block_step, bm_range=bm_range,
+                             ps_num=ps_num, ps_range=ps_range, matrix=100)
+    basic = core.bm3d.VAggregate(basic, radius=radius, sample=1)
+    out = basic
+    if final:
+        fin = core.bm3d.VFinal(opp, ref=basic, sigma=sig, radius=radius, block_step=block_step,
+                               bm_range=bm_range, ps_num=ps_num, ps_range=ps_range, matrix=100)
+        out = core.bm3d.VAggregate(fin, radius=radius, sample=1)
+    rgb = core.bm3d.OPP2RGB(out, sample=1)
+    return from_clip(rgb) * SCALE - OFFSET
+
+
+DENOISERS = {
+    "none": (none, {}),
+    "hqdn3d": (hqdn3d, {}),
+    "atadenoise": (atadenoise, {}),
+    "mdegrain": (mdegrain, {}),
+    "vbm3d": (vbm3d, {}),
+}
+
+
+def run(name: str, frames: np.ndarray, **params) -> np.ndarray:
+    fn, defaults = DENOISERS[name]
+    return fn(np.asarray(frames, np.float32), **{**defaults, **params}).astype(np.float32)

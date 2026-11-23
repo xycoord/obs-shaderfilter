@@ -1,0 +1,87 @@
+{
+  "_note": "Provisional scored set: the brightest gig clips stand in for clean footage until well-lit clips are available. crop is [y, x] of the top-left corner at 4K; tint multiplies linear R, G, B.",
+  "footage": "footage",
+  "out": "testset",
+  "frames": 33,
+  "crop_size": [
+    540,
+    960
+  ],
+  "seed": 1234,
+  "scored": [
+    {
+      "id": "wall-handheld-warm",
+      "clip": "01_C028_wall-closeup.MP4",
+      "start": 40,
+      "crop": [
+        810,
+        1440
+      ],
+      "darken_stops": 2.0,
+      "tint": [
+        1.0,
+        0.8,
+        0.55
+      ]
+    },
+    {
+      "id": "wall-handheld-blue",
+      "clip": "01_C028_wall-closeup.MP4",
+      "start": 40,
+      "crop": [
+        200,
+        300
+      ],
+      "darken_stops": 3.0,
+      "tint": [
+        0.45,
+        0.6,
+        1.0
+      ]
+    },
+    {
+      "id": "ceiling-pan-dim",
+      "clip": "02_C028_ceiling-static.MP4",
+      "start": 40,
+      "crop": [
+        700,
+        1200
+      ],
+      "darken_stops": 2.5,
+      "pan_px_per_frame": [
+        2,
+        7
+      ]
+    },
+    {
+      "id": "ceiling-static-dark",
+      "clip": "02_C028_ceiling-static.MP4",
+      "start": 40,
+      "crop": [
+        1300,
+        300
+      ],
+      "darken_stops": 3.5,
+      "tint": [
+        1.0,
+        0.6,
+        0.8
+      ]
+    },
+    {
+      "id": "rack-defocus-red",
+      "clip": "03_C028_rack-to-stage.MP4",
+      "start": 40,
+      "crop": [
+        300,
+        2600
+      ],
+      "darken_stops": 2.5,
+      "tint": [
+        1.0,
+        0.35,
+        0.3
+      ]
+    }
+  ]
+}

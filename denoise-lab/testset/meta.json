@@ -1,0 +1,113 @@
+{
+  "frames": 33,
+  "scored": [
+    {
+      "id": "wall-handheld-warm",
+      "clip": "01_C028_wall-closeup.MP4",
+      "start": 40,
+      "crop": [
+        810,
+        1440
+      ],
+      "darken_stops": 2.0,
+      "tint": [
+        1.0,
+        0.8,
+        0.55
+      ],
+      "median_di_luma": 0.14040514826774597,
+      "source_di_luma": 0.2893647253513336,
+      "reference_noise_ratio": null
+    },
+    {
+      "id": "wall-handheld-blue",
+      "clip": "01_C028_wall-closeup.MP4",
+      "start": 40,
+      "crop": [
+        200,
+        300
+      ],
+      "darken_stops": 3.0,
+      "tint": [
+        0.45,
+        0.6,
+        1.0
+      ],
+      "median_di_luma": 0.12120487540960312,
+      "source_di_luma": 0.3515225946903229,
+      "reference_noise_ratio": null
+    },
+    {
+      "id": "ceiling-pan-dim",
+      "clip": "02_C028_ceiling-static.MP4",
+      "start": 40,
+      "crop": [
+        700,
+        1200
+      ],
+      "darken_stops": 2.5,
+      "pan_px_per_frame": [
+        2,
+        7
+      ],
+      "median_di_luma": 0.13780814409255981,
+      "source_di_luma": 0.29517045617103577,
+      "reference_noise_ratio": null
+    },
+    {
+      "id": "ceiling-static-dark",
+      "clip": "02_C028_ceiling-static.MP4",
+      "start": 40,
+      "crop": [
+        1300,
+        300
+      ],
+      "darken_stops": 3.5,
+      "tint": [
+        1.0,
+        0.6,
+        0.8
+      ],
+      "median_di_luma": 0.04970432445406914,
+      "source_di_luma": 0.24235956370830536,
+      "reference_noise_ratio": null
+    },
+    {
+      "id": "rack-defocus-red",
+      "clip": "03_C028_rack-to-stage.MP4",
+      "start": 40,
+      "crop": [
+        300,
+        2600
+      ],
+      "darken_stops": 2.5,
+      "tint": [
+        1.0,
+        0.35,
+        0.3
+      ],
+      "median_di_luma": 0.02859111875295639,
+      "source_di_luma": 0.1578410416841507,
+      "reference_noise_ratio": null
+    }
+  ],
+  "review": [
+    "01_C028_wall-closeup",
+    "02_C028_ceiling-static",
+    "03_C028_rack-to-stage",
+    "04_C030_dark-sign",
+    "05_C030_pan-to-stage",
+    "06_C029_wide-fiddle",
+    "07_C029_mid-amp",
+    "08_C032_static-curtain",
+    "09_C031_guitar-close",
+    "10_C032_defocus-end"
+  ],
+  "clips": [
+    "wall-handheld-warm",
+    "wall-handheld-blue",
+    "ceiling-pan-dim",
+    "ceiling-static-dark",
+    "rack-defocus-red"
+  ]
+}
