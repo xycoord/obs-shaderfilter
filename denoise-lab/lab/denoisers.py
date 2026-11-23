@@ -190,22 +190,41 @@ def from_vst(planes):
 
 
 def mdegrain_planes(planes, tr=2, blksize=16, overlap=8, pel=2, thsad=400, thsadc=None, search=4,
-                    searchparam=2, chroma_search=True, limit=None, limitc=None):
-    """MDegrain on three planes already in [0, 1] (no colour conversion)."""
+                    searchparam=2, chroma_search=True, limit=None, limitc=None, search_blur=0.0,
+                    truemotion=False, recalc_blksize=None, light_tr=None):
+    """MDegrain on three planes already in [0, 1] (no colour conversion).
+
+    search_blur > 0 estimates motion on a Gaussian-blurred copy (so coarse noise blotches
+    don't steer the vectors) while still averaging the original pixels. recalc_blksize
+    refines the vectors with smaller blocks.
+    """
     vs, core = _vs()
     clip = to_clip16(planes)
-    sup = core.mv.Super(clip, pel=pel, sharp=2)
+    sup = core.mv.Super(clip, pel=pel, sharp=2, levels=1 if search_blur > 0 else 0)
+    if search_blur > 0:
+        from scipy import ndimage
+        blurred = ndimage.gaussian_filter(planes, (0, search_blur, search_blur, 0))
+        sup_search = core.mv.Super(to_clip16(blurred), pel=pel, sharp=2)
+    else:
+        sup_search = sup
     vecs = []
     for d in range(1, tr + 1):
         for back in (True, False):
-            vecs.append(core.mv.Analyse(sup, isb=back, delta=d, blksize=blksize, overlap=overlap, search=search,
-                                        searchparam=searchparam, chroma=chroma_search))
+            v = core.mv.Analyse(sup_search, isb=back, delta=d, blksize=blksize, overlap=overlap, search=search,
+                                searchparam=searchparam, chroma=chroma_search, truemotion=truemotion)
+            if recalc_blksize:
+                v = core.mv.Recalculate(sup_search, v, blksize=recalc_blksize, overlap=recalc_blksize // 2,
+                                        thsad=thsad, truemotion=truemotion)
+            vecs.append(v)
     kw = {"thsad": thsad, "thsadc": thsad if thsadc is None else thsadc}
     if limit is not None:
         kw["limit"] = limit
     if limitc is not None:
         kw["limitc"] = limitc
     out = getattr(core.mv, f"Degrain{tr}")(clip, sup, *vecs, **kw)
+    if light_tr:
+        light = getattr(core.mv, f"Degrain{light_tr}")(clip, sup, *vecs[: 2 * light_tr], **kw)
+        return from_clip16(out), from_clip16(light)
     return from_clip16(out)
 
 
@@ -215,3 +234,23 @@ def mdegrain_vst(frames, **params):
 
 
 DENOISERS["mdegrain_vst"] = (mdegrain_vst, {})
+
+
+def mdegrain_vst_blend(frames, tr=4, light_tr=2, tex_lo=0.3, tex_hi=1.0, hp_sigma=1.5, energy_sigma=3.0, **params):
+    """Strong MDegrain where the picture is flat, lighter where there is fine texture.
+
+    Both results share one motion analysis. Texture is detected on the light result's
+    brightness plane in the noise-equalised space (noise std 1), as local energy of its
+    fine band; tex_lo/tex_hi are in those units squared.
+    """
+    from scipy import ndimage
+    planes = to_vst(frames)
+    strong, light = mdegrain_planes(planes, tr=tr, light_tr=light_tr, **params)
+    y = light[..., 0] * VST_SCALE
+    hp = y - ndimage.gaussian_filter(y, (0, hp_sigma, hp_sigma))
+    energy = ndimage.gaussian_filter(hp ** 2, (0, energy_sigma, energy_sigma))
+    m = np.clip((energy - tex_lo) / (tex_hi - tex_lo), 0, 1)[..., None]
+    return from_vst(strong * (1 - m) + light * m)
+
+
+DENOISERS["mdegrain_vst_blend"] = (mdegrain_vst_blend, {})
