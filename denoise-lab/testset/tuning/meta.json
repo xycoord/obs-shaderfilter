@@ -1,0 +1,106 @@
+{
+  "set": "tuning",
+  "frames": 33,
+  "synthetic": [
+    {
+      "id": "dinner-warm",
+      "set": "tuning",
+      "source": "sources/DinnerScene.y4m",
+      "target_di_luma": 0.11,
+      "tint": [
+        1.0,
+        0.8,
+        0.55
+      ],
+      "crop": [
+        776,
+        652
+      ],
+      "stops_applied": 1.0,
+      "median_di_luma": 0.081
+    },
+    {
+      "id": "dancers-blue",
+      "set": "tuning",
+      "source": "sources/Dancers.y4m",
+      "target_di_luma": 0.09,
+      "tint": [
+        0.45,
+        0.6,
+        1.0
+      ],
+      "crop": [
+        548,
+        984
+      ],
+      "stops_applied": 1.0,
+      "median_di_luma": 0.004
+    },
+    {
+      "id": "fountain-dim",
+      "set": "tuning",
+      "source": "sources/ToddlerFountain.y4m",
+      "target_di_luma": 0.08,
+      "crop": [
+        484,
+        840
+      ],
+      "stops_applied": -2.55,
+      "median_di_luma": 0.08
+    },
+    {
+      "id": "market-magenta",
+      "set": "tuning",
+      "source": "sources/FoodMarket.y4m",
+      "target_di_luma": 0.1,
+      "tint": [
+        1.0,
+        0.55,
+        0.85
+      ],
+      "crop": [
+        72,
+        148
+      ],
+      "stops_applied": 0.25,
+      "median_di_luma": 0.099
+    },
+    {
+      "id": "coaster-dark",
+      "set": "tuning",
+      "source": "sources/RollerCoaster.y4m",
+      "target_di_luma": 0.06,
+      "crop": [
+        420,
+        156
+      ],
+      "stops_applied": -5.23,
+      "median_di_luma": 0.06
+    },
+    {
+      "id": "boat-red",
+      "set": "tuning",
+      "source": "sources/Boat.y4m",
+      "target_di_luma": 0.12,
+      "tint": [
+        1.0,
+        0.4,
+        0.35
+      ],
+      "crop": [
+        1616,
+        0
+      ],
+      "stops_applied": 0.85,
+      "median_di_luma": 0.121
+    }
+  ],
+  "real": [
+    "02_C028_ceiling-static_t090",
+    "02_C028_ceiling-static_t078",
+    "06_C029_wide-fiddle_t054",
+    "06_C029_wide-fiddle_t042",
+    "07_C029_mid-amp_t018",
+    "07_C029_mid-amp_t090"
+  ]
+}

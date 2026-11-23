@@ -1,87 +1,23 @@
 {
-  "_note": "Provisional scored set: the brightest gig clips stand in for clean footage until well-lit clips are available. crop is [y, x] of the top-left corner at 4K; tint multiplies linear R, G, B.",
+  "_note": "Split by source sequence and by camera take. Tuning: what the climb optimises. Heldout: scored only at agreed milestones. Synthetic sources are Xiph/Netflix 4K test sequences (CC BY-NC-ND, personal use only); frame_step 2 turns 59.94 fps into ~30 fps. target_di_luma sets gig-like exposure; tint multiplies linear R, G, B (stage lighting).",
   "footage": "footage",
   "out": "testset",
   "frames": 33,
-  "crop_size": [
-    540,
-    960
+  "crop_size": [540, 960],
+  "seeds": {"tuning": 1000, "heldout": 9000},
+  "real_items_per_clip": 2,
+  "synthetic": [
+    {"id": "dinner-warm",     "set": "tuning",  "source": "sources/DinnerScene.y4m",     "target_di_luma": 0.11, "tint": [1.0, 0.8, 0.55]},
+    {"id": "dancers-blue",    "set": "tuning",  "source": "sources/Dancers.y4m",         "target_di_luma": 0.09, "tint": [0.45, 0.6, 1.0]},
+    {"id": "fountain-dim",    "set": "tuning",  "source": "sources/ToddlerFountain.y4m", "target_di_luma": 0.08},
+    {"id": "market-magenta",  "set": "tuning",  "source": "sources/FoodMarket.y4m",      "target_di_luma": 0.10, "tint": [1.0, 0.55, 0.85]},
+    {"id": "coaster-dark",    "set": "tuning",  "source": "sources/RollerCoaster.y4m",   "target_di_luma": 0.06},
+    {"id": "boat-red",        "set": "tuning",  "source": "sources/Boat.y4m",            "target_di_luma": 0.12, "tint": [1.0, 0.4, 0.35]},
+    {"id": "bar-warm",        "set": "heldout", "source": "sources/BarScene.y4m",        "target_di_luma": 0.10, "tint": [1.0, 0.75, 0.5]},
+    {"id": "tango-dim",       "set": "heldout", "source": "sources/Tango.y4m",           "target_di_luma": 0.07, "tint": [0.7, 0.7, 1.0]}
   ],
-  "seed": 1234,
-  "scored": [
-    {
-      "id": "wall-handheld-warm",
-      "clip": "01_C028_wall-closeup.MP4",
-      "start": 40,
-      "crop": [
-        810,
-        1440
-      ],
-      "darken_stops": 2.0,
-      "tint": [
-        1.0,
-        0.8,
-        0.55
-      ]
-    },
-    {
-      "id": "wall-handheld-blue",
-      "clip": "01_C028_wall-closeup.MP4",
-      "start": 40,
-      "crop": [
-        200,
-        300
-      ],
-      "darken_stops": 3.0,
-      "tint": [
-        0.45,
-        0.6,
-        1.0
-      ]
-    },
-    {
-      "id": "ceiling-pan-dim",
-      "clip": "02_C028_ceiling-static.MP4",
-      "start": 40,
-      "crop": [
-        700,
-        1200
-      ],
-      "darken_stops": 2.5,
-      "pan_px_per_frame": [
-        2,
-        7
-      ]
-    },
-    {
-      "id": "ceiling-static-dark",
-      "clip": "02_C028_ceiling-static.MP4",
-      "start": 40,
-      "crop": [
-        1300,
-        300
-      ],
-      "darken_stops": 3.5,
-      "tint": [
-        1.0,
-        0.6,
-        0.8
-      ]
-    },
-    {
-      "id": "rack-defocus-red",
-      "clip": "03_C028_rack-to-stage.MP4",
-      "start": 40,
-      "crop": [
-        300,
-        2600
-      ],
-      "darken_stops": 2.5,
-      "tint": [
-        1.0,
-        0.35,
-        0.3
-      ]
-    }
-  ]
+  "real": {
+    "tuning": ["02_C028_ceiling-static.MP4", "06_C029_wide-fiddle.MP4", "07_C029_mid-amp.MP4"],
+    "heldout": ["08_C032_static-curtain.MP4", "09_C031_guitar-close.MP4"]
+  }
 }

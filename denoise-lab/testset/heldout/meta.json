@@ -1,0 +1,46 @@
+{
+  "set": "heldout",
+  "frames": 33,
+  "synthetic": [
+    {
+      "id": "bar-warm",
+      "set": "heldout",
+      "source": "sources/BarScene.y4m",
+      "target_di_luma": 0.1,
+      "tint": [
+        1.0,
+        0.75,
+        0.5
+      ],
+      "crop": [
+        0,
+        252
+      ],
+      "stops_applied": 1.0,
+      "median_di_luma": 0.01
+    },
+    {
+      "id": "tango-dim",
+      "set": "heldout",
+      "source": "sources/Tango.y4m",
+      "target_di_luma": 0.07,
+      "tint": [
+        0.7,
+        0.7,
+        1.0
+      ],
+      "crop": [
+        0,
+        96
+      ],
+      "stops_applied": -2.01,
+      "median_di_luma": 0.068
+    }
+  ],
+  "real": [
+    "08_C032_static-curtain_t042",
+    "08_C032_static-curtain_t078",
+    "09_C031_guitar-close_t042",
+    "09_C031_guitar-close_t066"
+  ]
+}
