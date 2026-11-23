@@ -26,6 +26,11 @@ for key, rule in rules["guards"].items():
     b, c = best.get(key), cand.get(key)
     if b is None or c is None:
         continue
+    if rule.get("kind") == "floor":
+        passed = c >= rule["floor"] if rule["better"] == "higher" else c <= rule["floor"]
+        ok &= passed
+        print(f"  {key:28s} {b:9.4f} -> {c:9.4f}  {'ok' if passed else 'BELOW FLOOR'} (floor {rule['floor']})")
+        continue
     if rule["better"] == "higher":
         worse_by = b - c
     else:

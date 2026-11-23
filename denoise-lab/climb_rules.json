@@ -1,14 +1,39 @@
 {
-  "_note": "Acceptance rules for the hill climb (compare.py). Tolerances are provisional until the measure's noise has been estimated (see README).",
+  "_note": "Acceptance rules for the hill climb (compare.py). Score: must beat the best by score_min_gain. Guards: 'step' guards may not get worse than the best by more than their tolerance; 'floor' guards must stay at or above their floor. Measured run-to-run noise of the measure (different synthetic noise seeds) is under 0.005 dB, so tolerances are about real change, not noise. Speed is measured on the 4-core cloud machine.",
   "score_min_gain": 0.05,
   "guards": {
-    "psnr_worst5":    {"better": "higher", "tolerance": 0.15},
-    "psnr_moving":    {"better": "higher", "tolerance": 0.15},
-    "detail_texture": {"better": "higher", "tolerance": 0.01},
-    "ssim":           {"better": "higher", "tolerance": 0.002},
-    "flicker":        {"better": "lower",  "tolerance": 0.03, "kind": "relative"},
-    "colour_noise":   {"better": "lower",  "tolerance": 0.03, "kind": "relative"},
-    "real_gain_db":   {"better": "higher", "tolerance": 0.15}
+    "psnr_worst5": {
+      "better": "higher",
+      "tolerance": 0.15
+    },
+    "psnr_moving": {
+      "better": "higher",
+      "tolerance": 0.15
+    },
+    "detail_texture": {
+      "better": "higher",
+      "kind": "floor",
+      "floor": 0.72
+    },
+    "ssim": {
+      "better": "higher",
+      "tolerance": 0.002
+    },
+    "flicker": {
+      "better": "lower",
+      "tolerance": 0.03,
+      "kind": "relative"
+    },
+    "colour_noise": {
+      "better": "lower",
+      "tolerance": 0.03,
+      "kind": "relative"
+    },
+    "real_gain_db": {
+      "better": "higher",
+      "tolerance": 0.15
+    }
   },
-  "max_seconds_per_megapixel_frame": null
+  "max_seconds_per_megapixel_frame": 1.5,
+  "target_score": 7.0
 }
