@@ -1,0 +1,7 @@
+# Climb log (tuning set; held-back set not used for decisions)
+
+| Round | Candidate | Score | Texture | Decision | Note |
+|---|---|---|---|---|---|
+| 0 | MDegrain default | +3.72 | 0.746 | start | |
+| 1 | Frequency split (2 and 3 levels, several radii) | +3.82 to +4.44 | 0.70-0.71 | rejected | texture below floor; 3-level also worse in moving areas and flicker |
+| 2 | MDegrain in noise-equalised space (lab/vst.py) | +4.18 | 0.752 | **accepted** | every guard held or improved |

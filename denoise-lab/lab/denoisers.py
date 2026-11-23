@@ -137,3 +137,81 @@ DENOISERS = {
 def run(name: str, frames: np.ndarray, **params) -> np.ndarray:
     fn, defaults = DENOISERS[name]
     return fn(np.asarray(frames, np.float32), **{**defaults, **params}).astype(np.float32)
+
+
+# --- Denoising in the noise-equalised space (lab/vst.py) ---------------------
+
+_TRANSFORM = None
+VST_SCALE, VST_OFFSET = 130.0, (10.0, 65.0, 65.0)  # unit noise -> ~2 8-bit steps; fits [0, 1]
+
+
+def noise_transform():
+    global _TRANSFORM
+    if _TRANSFORM is None:
+        from pathlib import Path
+        from .noise_model import NoiseModel
+        from .vst import NoiseTransform
+        _TRANSFORM = NoiseTransform.from_model(NoiseModel.load(Path(__file__).resolve().parents[1] / "testset" / "noise_model.json"))
+    return _TRANSFORM
+
+
+def to_clip16(planes: np.ndarray):
+    """[T, H, W, 3] values in [0, 1] -> YUV444P16 clip, planes passed through untouched."""
+    vs, core = _vs()
+    t, h, w, _ = planes.shape
+    blank = core.std.BlankClip(format=vs.YUV444P16, width=w, height=h, length=t, fpsnum=24000, fpsden=1001)
+    arr = np.ascontiguousarray((np.clip(planes, 0, 1) * 65535 + 0.5).astype(np.uint16))
+
+    def fill(n, f):
+        fout = f.copy()
+        for p in range(3):
+            np.asarray(fout[p])[:] = arr[n, :, :, p]
+        return fout
+
+    return core.std.ModifyFrame(blank, blank, fill)
+
+
+def from_clip16(clip) -> np.ndarray:
+    out = np.empty((clip.num_frames, clip.height, clip.width, 3), np.float32)
+    for n in range(clip.num_frames):
+        f = clip.get_frame(n)
+        for p in range(3):
+            out[n, :, :, p] = np.asarray(f[p])
+    return out / 65535
+
+
+def to_vst(frames):
+    z = noise_transform().forward(frames)
+    return (z + np.array(VST_OFFSET, np.float32)) / VST_SCALE
+
+
+def from_vst(planes):
+    return noise_transform().backward(planes * VST_SCALE - np.array(VST_OFFSET, np.float32))
+
+
+def mdegrain_planes(planes, tr=2, blksize=16, overlap=8, pel=2, thsad=400, thsadc=None, search=4,
+                    searchparam=2, chroma_search=True, limit=None, limitc=None):
+    """MDegrain on three planes already in [0, 1] (no colour conversion)."""
+    vs, core = _vs()
+    clip = to_clip16(planes)
+    sup = core.mv.Super(clip, pel=pel, sharp=2)
+    vecs = []
+    for d in range(1, tr + 1):
+        for back in (True, False):
+            vecs.append(core.mv.Analyse(sup, isb=back, delta=d, blksize=blksize, overlap=overlap, search=search,
+                                        searchparam=searchparam, chroma=chroma_search))
+    kw = {"thsad": thsad, "thsadc": thsad if thsadc is None else thsadc}
+    if limit is not None:
+        kw["limit"] = limit
+    if limitc is not None:
+        kw["limitc"] = limitc
+    out = getattr(core.mv, f"Degrain{tr}")(clip, sup, *vecs, **kw)
+    return from_clip16(out)
+
+
+def mdegrain_vst(frames, **params):
+    """MDegrain in the noise-equalised, decorrelated space."""
+    return from_vst(mdegrain_planes(to_vst(frames), **params))
+
+
+DENOISERS["mdegrain_vst"] = (mdegrain_vst, {})
