@@ -7,3 +7,4 @@
 | 2 | MDegrain in noise-equalised space (lab/vst.py) | +4.18 | 0.752 | **accepted** | every guard held or improved |
 | 3 | Noise-equalised MDegrain: radius 3 | +4.49 | 0.722 | **accepted** | radius 4 scored +5.06 but texture 0.700; stricter/looser block matching, stronger colour matching and blurred motion search all scored lower |
 | 4 | Texture-aware blend: radius 4 in flat areas, radius 2 on fine texture (one shared motion analysis) | +5.11 | 0.734 | **accepted** | radius 6 / 3 blend scored +5.77 but texture 0.701 |
+| 5 | Same blend with stricter block matching (thSAD 300): radius 6 flat, radius 2 texture | +5.81 | 0.780 | **accepted** | stricter matching kept far more texture, which allowed radius 6; plain radius 6 at thSAD 250 scored +5.71 (texture 0.790) |

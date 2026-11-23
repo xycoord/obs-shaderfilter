@@ -236,7 +236,8 @@ def mdegrain_vst(frames, **params):
 DENOISERS["mdegrain_vst"] = (mdegrain_vst, {})
 
 
-def mdegrain_vst_blend(frames, tr=4, light_tr=2, tex_lo=0.3, tex_hi=1.0, hp_sigma=1.5, energy_sigma=3.0, **params):
+def mdegrain_vst_blend(frames, tr=4, light_tr=2, tex_lo=0.3, tex_hi=1.0, hp_sigma=1.5, energy_sigma=3.0,
+                       spatial_sigma_y=0.0, spatial_sigma_c=0.0, spatial_mode="basic", **params):
     """Strong MDegrain where the picture is flat, lighter where there is fine texture.
 
     Both results share one motion analysis. Texture is detected on the light result's
@@ -250,7 +251,40 @@ def mdegrain_vst_blend(frames, tr=4, light_tr=2, tex_lo=0.3, tex_hi=1.0, hp_sigm
     hp = y - ndimage.gaussian_filter(y, (0, hp_sigma, hp_sigma))
     energy = ndimage.gaussian_filter(hp ** 2, (0, energy_sigma, energy_sigma))
     m = np.clip((energy - tex_lo) / (tex_hi - tex_lo), 0, 1)[..., None]
-    return from_vst(strong * (1 - m) + light * m)
+    out = strong * (1 - m) + light * m
+    if spatial_sigma_y > 0 or spatial_sigma_c > 0:
+        out = bm3d_planes(out, spatial_sigma_y, spatial_sigma_c, spatial_mode)
+    return from_vst(out)
+
+
+def bm3d_planes(planes, sigma_y, sigma_c, mode="basic", block_step=8, bm_range=9):
+    """Spatial BM3D on planes in the noise-equalised space (no colour conversion).
+
+    sigma_* are in units of the original noise std (1.0 = the camera's full noise).
+    """
+    vs, core = _vs()
+    t, h, w, _ = planes.shape
+    blank = core.std.BlankClip(format=vs.YUV444PS, width=w, height=h, length=t)
+    arr = np.ascontiguousarray(planes, dtype=np.float32)
+
+    def fill(n, f):
+        fout = f.copy()
+        for p in range(3):
+            np.asarray(fout[p])[:] = arr[n, :, :, p]
+        return fout
+
+    clip = core.std.ModifyFrame(blank, blank, fill)
+    unit = 255.0 / VST_SCALE  # one noise std on BM3D's 0-255 sigma scale
+    sig = [sigma_y * unit, sigma_c * unit, sigma_c * unit]
+    basic = core.bm3d.Basic(clip, sigma=sig, block_step=block_step, bm_range=bm_range)
+    out = basic if mode == "basic" else core.bm3d.Final(clip, ref=basic, sigma=sig, block_step=block_step,
+                                                        bm_range=bm_range)
+    res = np.empty_like(arr)
+    for n in range(t):
+        f = out.get_frame(n)
+        for p in range(3):
+            res[n, :, :, p] = np.asarray(f[p])
+    return res
 
 
 DENOISERS["mdegrain_vst_blend"] = (mdegrain_vst_blend, {})
