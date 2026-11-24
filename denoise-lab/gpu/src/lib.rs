@@ -6,7 +6,8 @@
 //! parallel, so predictors come only from the coarser level (no left/top neighbours).
 
 use bytemuck::{Pod, Zeroable};
-use numpy::{IntoPyArray, PyArray4, PyReadonlyArray1, PyReadonlyArray2, PyReadonlyArray4};
+use numpy::ndarray::{s, ArrayView4, ArrayViewMut4};
+use numpy::{PyReadonlyArray1, PyReadonlyArray2, PyReadonlyArray4, PyReadwriteArray4};
 use pyo3::prelude::*;
 use wgpu::util::DeviceExt;
 
@@ -138,7 +139,8 @@ impl Gpu {
         }
     }
 
-    fn read(&self, buf: &wgpu::Buffer, n_words: usize) -> Vec<f32> {
+    /// Map a copy of `buf` and hand its contents to `f` (no intermediate copy).
+    fn read_with(&self, buf: &wgpu::Buffer, n_words: usize, f: impl FnOnce(&[f32])) {
         let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
             size: (n_words * 4) as u64,
@@ -152,9 +154,33 @@ impl Gpu {
         slice.map_async(wgpu::MapMode::Read, |_| {});
         self.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         let view = slice.get_mapped_range().expect("map");
-        let out = bytemuck::cast_slice::<u8, f32>(&view).to_vec();
-        drop(view);
-        out
+        f(bytemuck::cast_slice::<u8, f32>(&view));
+    }
+
+    /// Storage buffer filled row by row from a (possibly strided) [T][H][W][3] view.
+    fn upload_frames(&self, v: &ArrayView4<f32>) -> wgpu::Buffer {
+        let (t, h, w, c) = v.dim();
+        let buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: (t * h * w * c * 4) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: true,
+        });
+        {
+            let mut map = buf.slice(..).get_mapped_range_mut().expect("map");
+            let row_bytes = w * c * 4;
+            let mut tmp: Vec<f32> = vec![];
+            for i in 0..t * h {
+                let src = v.slice(s![i / h, i % h, .., ..]);
+                let sl = match src.as_slice() {
+                    Some(sl) => sl,
+                    None => { tmp.clear(); tmp.extend(src.iter()); &tmp[..] }
+                };
+                map.slice(i * row_bytes..(i + 1) * row_bytes).copy_from_slice(bytemuck::cast_slice(sl));
+            }
+        }
+        buf.unmap();
+        buf
     }
 }
 
@@ -172,12 +198,13 @@ fn groups(n: u32) -> u32 {
 
 #[allow(clippy::too_many_arguments)]
 pub fn run(
-    gpu: &Gpu, input: &[f32], t_len: usize, h: usize, w: usize,
+    gpu: &Gpu, input: ArrayView4<f32>, out: &mut ArrayViewMut4<f32>, crop: (usize, usize, usize),
     fwd_tab: &[f32], fwd_lo: f32, fwd_step: f32, mat: &[f32], imat: &[f32],
     inv_tab: &[f32], inv_lo: [f32; 3], inv_step: [f32; 3],
     tr: usize, light_tr: usize, th_y: f32, th_c: f32, tex_lo: f32, tex_hi: f32,
     hp_sigma: f32, energy_sigma: f32, range: u32,
-) -> Vec<f32> {
+) {
+    let (t_len, h, w, _) = input.dim();
     let (t, hh, ww) = (t_len as u32, h as u32, w as u32);
     let nbx = (ww + 8) / 8 + 1;
     let nby = (hh + 8) / 8 + 1;
@@ -206,7 +233,10 @@ pub fn run(
         range,
         ..Default::default()
     };
-    let b_in = gpu.storage(bytemuck::cast_slice(input));
+    let prof = std::env::var_os("GIGDENOISE_PROFILE").is_some();
+    let t_up = std::time::Instant::now();
+    let b_in = gpu.upload_frames(&input);
+    if prof { PROFILE.with(|m| *m.borrow_mut().entry("host_upload".into()).or_insert(0.0) += t_up.elapsed().as_secs_f64()); }
     let b_ftab = gpu.storage(bytemuck::cast_slice(fwd_tab));
     let b_mat = gpu.storage(bytemuck::cast_slice(mat));
     let b_imat = gpu.storage(bytemuck::cast_slice(imat));
@@ -289,7 +319,23 @@ pub fn run(
     base.pad1 = 0;
     gpu.dispatch(&mut enc, "final", &base, &[&b_strong, &b_light, &energy, &b_imat, &b_itab, &b_out], groups(ww), groups(hh), t);
     gpu.queue.submit([enc.finish()]);
-    gpu.read(&b_out, plane_words)
+    let t_rd = std::time::Instant::now();
+    // Copy the wanted part of the result (out's shape, starting at crop) straight into out.
+    gpu.read_with(&b_out, plane_words, |res| {
+        let (ot, oh, ow, _) = out.dim();
+        for ti in 0..ot {
+            for y in 0..oh {
+                let at = (((ti + crop.0) * h + y + crop.1) * w + crop.2) * 3;
+                let src = &res[at..at + ow * 3];
+                let mut dst = out.slice_mut(s![ti, y, .., ..]);
+                match dst.as_slice_mut() {
+                    Some(d) => d.copy_from_slice(src),
+                    None => dst.iter_mut().zip(src).for_each(|(d, s)| *d = *s),
+                }
+            }
+        }
+    });
+    if prof { PROFILE.with(|m| *m.borrow_mut().entry("host_read".into()).or_insert(0.0) += t_rd.elapsed().as_secs_f64()); }
 }
 
 thread_local! {
@@ -323,21 +369,29 @@ fn max_binding() -> PyResult<u64> {
     })
 }
 
+/// Denoise `frames` ([T][H][W][3], may be a strided view) and write the part of the result that
+/// starts at `crop` (t, y, x) and has `out`'s shape into `out` (may be a strided view).
 #[pyfunction]
 #[allow(clippy::too_many_arguments)]
-#[pyo3(signature = (frames, fwd_tables, fwd_lo, fwd_step, matrix, inv_matrix, inv_tables, inv_lo, inv_step,
+#[pyo3(signature = (frames, out, crop, fwd_tables, fwd_lo, fwd_step, matrix, inv_matrix, inv_tables, inv_lo, inv_step,
                     tr=6, light_tr=2, th_y=2.39, th_c=3.58, tex_lo=0.3, tex_hi=1.0, hp_sigma=1.5,
                     energy_sigma=3.0, search_range=4))]
-fn denoise<'py>(
-    py: Python<'py>, frames: PyReadonlyArray4<'py, f32>, fwd_tables: PyReadonlyArray2<'py, f32>,
+fn denoise_into<'py>(
+    py: Python<'py>, frames: PyReadonlyArray4<'py, f32>, mut out: PyReadwriteArray4<'py, f32>, crop: (usize, usize, usize),
+    fwd_tables: PyReadonlyArray2<'py, f32>,
     fwd_lo: f32, fwd_step: f32, matrix: PyReadonlyArray2<'py, f32>, inv_matrix: PyReadonlyArray2<'py, f32>,
     inv_tables: PyReadonlyArray2<'py, f32>, inv_lo: PyReadonlyArray1<'py, f32>, inv_step: PyReadonlyArray1<'py, f32>,
     tr: usize, light_tr: usize, th_y: f32, th_c: f32, tex_lo: f32, tex_hi: f32, hp_sigma: f32,
     energy_sigma: f32, search_range: u32,
-) -> PyResult<Bound<'py, PyArray4<f32>>> {
+) -> PyResult<()> {
+    let _ = py;
     let fr = frames.as_array();
-    let (t_len, h, w, _) = fr.dim();
-    let input: Vec<f32> = fr.iter().cloned().collect();
+    let (t_len, h, w, c) = fr.dim();
+    let mut ov = out.as_array_mut();
+    let (ot, oh, ow, oc) = ov.dim();
+    if c != 3 || oc != 3 || crop.0 + ot > t_len || crop.1 + oh > h || crop.2 + ow > w {
+        return Err(pyo3::exceptions::PyValueError::new_err("out and crop must fit inside frames' [T][H][W][3]"));
+    }
     let ft: Vec<f32> = fwd_tables.as_array().iter().cloned().collect();
     let m: Vec<f32> = matrix.as_array().iter().cloned().collect();
     let mi: Vec<f32> = inv_matrix.as_array().iter().cloned().collect();
@@ -345,20 +399,18 @@ fn denoise<'py>(
     let il = inv_lo.as_array();
     let is = inv_step.as_array();
     let (il, is) = ([il[0], il[1], il[2]], [is[0], is[1], is[2]]);
-    let out = GPU.with(|g| -> Result<Vec<f32>, String> {
+    GPU.with(|g| -> Result<(), String> {
         let gpu = g.get_or_init(Gpu::new).as_ref().map_err(|e| e.clone())?;
-        Ok(run(gpu, &input, t_len, h, w, &ft, fwd_lo, fwd_step, &m, &mi, &it, il, is, tr, light_tr, th_y, th_c,
-               tex_lo, tex_hi, hp_sigma, energy_sigma, search_range))
+        run(gpu, fr, &mut ov, crop, &ft, fwd_lo, fwd_step, &m, &mi, &it, il, is, tr, light_tr, th_y, th_c,
+            tex_lo, tex_hi, hp_sigma, energy_sigma, search_range);
+        Ok(())
     })
-    .map_err(pyo3::exceptions::PyRuntimeError::new_err)?;
-    let arr = numpy::ndarray::Array4::from_shape_vec((t_len, h, w, 3), out)
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-    Ok(arr.into_pyarray(py))
+    .map_err(pyo3::exceptions::PyRuntimeError::new_err)
 }
 
 #[pymodule]
 fn gigdenoise_gpu(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(denoise, m)?)?;
+    m.add_function(wrap_pyfunction!(denoise_into, m)?)?;
     m.add_function(wrap_pyfunction!(adapter, m)?)?;
     m.add_function(wrap_pyfunction!(max_binding, m)?)?;
     m.add_function(wrap_pyfunction!(profile, m)?)?;

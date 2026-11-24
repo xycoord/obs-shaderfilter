@@ -406,20 +406,19 @@ def gpu_blend(frames, tr=6, light_tr=2, thsad=300, thsadc=450, tex_lo=0.3, tex_h
             for s in range(0, t_len, span):
                 e = min(s + span, t_len)
                 S, E = max(s - tr, 0), min(e + tr, t_len)
-                res = _gpu_call(frames[S:E, Y0:Y1, X0:X1], tr, light_tr, thsad, thsadc, tex_lo, tex_hi,
-                                hp_sigma, energy_sigma, search_range)
-                out[s:e, y0:y1, x0:x1] = res[s - S:e - S, y0 - Y0:y1 - Y0, x0 - X0:x1 - X0]
+                _gpu_call(frames[S:E, Y0:Y1, X0:X1], out[s:e, y0:y1, x0:x1], (s - S, y0 - Y0, x0 - X0),
+                          tr, light_tr, thsad, thsadc, tex_lo, tex_hi, hp_sigma, energy_sigma, search_range)
     return out
 
 
-def _gpu_call(frames, tr, light_tr, thsad, thsadc, tex_lo, tex_hi, hp_sigma, energy_sigma, search_range):
+def _gpu_call(frames, out, crop, tr, light_tr, thsad, thsadc, tex_lo, tex_hi, hp_sigma, energy_sigma, search_range):
     import gigdenoise_gpu
     T = noise_transform()
     inv = T._inverse_tables()
     unit = 64 * 255.0 / VST_SCALE
     step = (T.grid[-1] - T.grid[0]) / (len(T.grid) - 1)
-    return gigdenoise_gpu.denoise(
-        np.ascontiguousarray(frames, np.float32), T.curves.astype(np.float32), float(T.grid[0]), float(step),
+    gigdenoise_gpu.denoise_into(
+        frames, out, crop, T.curves.astype(np.float32), float(T.grid[0]), float(step),
         T.matrix.astype(np.float32), T.inverse.astype(np.float32),
         np.stack([t[2] for t in inv]).astype(np.float32),
         np.array([t[0] for t in inv], np.float32), np.array([t[1] for t in inv], np.float32),
