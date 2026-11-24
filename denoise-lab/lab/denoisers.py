@@ -10,7 +10,8 @@ import subprocess
 
 import numpy as np
 
-OFFSET, SCALE = 0.1, 1.2  # map DI (which dips slightly below 0 in noise) into [0, 1] for 16-bit tools
+OFFSET, SCALE = 0.1, 1.2
+PREFETCH = 4  # frames VapourSynth renders in parallel (one per core); MVTools itself is single-threaded  # map DI (which dips slightly below 0 in noise) into [0, 1] for 16-bit tools
 
 
 # --- VapourSynth bridge -------------------------------------------------------
@@ -41,8 +42,7 @@ def from_clip(clip) -> np.ndarray:
     if clip.format.id != vs.RGBS:
         clip = core.resize.Point(clip, format=vs.RGBS, matrix_in_s="709")
     out = np.empty((clip.num_frames, clip.height, clip.width, 3), np.float32)
-    for n in range(clip.num_frames):
-        f = clip.get_frame(n)
+    for n, f in enumerate(clip.frames(prefetch=PREFETCH)):
         for p in range(3):
             out[n, :, :, p] = np.asarray(f[p])
     return out
@@ -173,20 +173,30 @@ def to_clip16(planes: np.ndarray):
 
 def from_clip16(clip) -> np.ndarray:
     out = np.empty((clip.num_frames, clip.height, clip.width, 3), np.float32)
-    for n in range(clip.num_frames):
-        f = clip.get_frame(n)
+    for n, f in enumerate(clip.frames(prefetch=PREFETCH)):
         for p in range(3):
             out[n, :, :, p] = np.asarray(f[p])
     return out / 65535
 
 
+def per_frame_chunks(fn, *arrays, workers=4):
+    """Apply fn to matching chunks of frames on several threads (numpy releases the GIL)."""
+    from concurrent.futures import ThreadPoolExecutor
+    t = arrays[0].shape[0]
+    bounds = np.linspace(0, t, min(workers, t) + 1).astype(int)
+    with ThreadPoolExecutor(len(bounds) - 1) as ex:
+        parts = list(ex.map(lambda ab: fn(*(a[ab[0]:ab[1]] for a in arrays)), zip(bounds[:-1], bounds[1:])))
+    return np.concatenate(parts)
+
+
 def to_vst(frames):
-    z = noise_transform().forward(frames)
-    return (z + np.array(VST_OFFSET, np.float32)) / VST_SCALE
+    off = np.array(VST_OFFSET, np.float32)
+    return per_frame_chunks(lambda f: (noise_transform().forward(f) + off) / VST_SCALE, np.asarray(frames, np.float32))
 
 
 def from_vst(planes):
-    return noise_transform().backward(planes * VST_SCALE - np.array(VST_OFFSET, np.float32))
+    off = np.array(VST_OFFSET, np.float32)
+    return per_frame_chunks(lambda p: noise_transform().backward(p * VST_SCALE - off), np.asarray(planes, np.float32))
 
 
 def mdegrain_planes(planes, tr=2, blksize=16, overlap=8, pel=2, thsad=400, thsadc=None, search=4,
@@ -247,11 +257,14 @@ def mdegrain_vst_blend(frames, tr=4, light_tr=2, tex_lo=0.3, tex_hi=1.0, hp_sigm
     from scipy import ndimage
     planes = to_vst(frames)
     strong, light = mdegrain_planes(planes, tr=tr, light_tr=light_tr, **params)
-    y = light[..., 0] * VST_SCALE
-    hp = y - ndimage.gaussian_filter(y, (0, hp_sigma, hp_sigma))
-    energy = ndimage.gaussian_filter(hp ** 2, (0, energy_sigma, energy_sigma))
-    m = np.clip((energy - tex_lo) / (tex_hi - tex_lo), 0, 1)[..., None]
-    out = strong * (1 - m) + light * m
+    def blend(st, li):
+        y = li[..., 0] * VST_SCALE
+        hp = y - ndimage.gaussian_filter(y, (0, hp_sigma, hp_sigma))
+        energy = ndimage.gaussian_filter(hp ** 2, (0, energy_sigma, energy_sigma))
+        m = np.clip((energy - tex_lo) / (tex_hi - tex_lo), 0, 1)[..., None]
+        return st * (1 - m) + li * m
+
+    out = per_frame_chunks(blend, strong, light)
     if spatial_sigma_y > 0 or spatial_sigma_c > 0:
         out = bm3d_planes(out, spatial_sigma_y, spatial_sigma_c, spatial_mode)
     return from_vst(out)
@@ -280,8 +293,7 @@ def bm3d_planes(planes, sigma_y, sigma_c, mode="basic", block_step=8, bm_range=9
     out = basic if mode == "basic" else core.bm3d.Final(clip, ref=basic, sigma=sig, block_step=block_step,
                                                         bm_range=bm_range)
     res = np.empty_like(arr)
-    for n in range(t):
-        f = out.get_frame(n)
+    for n, f in enumerate(out.frames(prefetch=PREFETCH)):
         for p in range(3):
             res[n, :, :, p] = np.asarray(f[p])
     return res

@@ -11,3 +11,4 @@ testset_seed2/
 testset/*/synthetic/
 testset/*/real/
 fetch.log
+bench_input.npy
