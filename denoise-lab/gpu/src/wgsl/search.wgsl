@@ -19,6 +19,19 @@ fn px(f: u32, x: i32, y: i32) -> f32 {
 fn sad(cur: u32, rf: u32, ox: i32, oy: i32, dx: i32, dy: i32) -> f32 {
     var s = 0.0;
     let b = i32(P.bsl);
+    let wl = i32(P.wl); let hl = i32(P.hl);
+    // Fast path when both blocks lie inside the level: no clamping (same values, same order).
+    if (min(min(ox, ox + dx), min(oy, oy + dy)) >= 0 && max(ox, ox + dx) + b <= wl && max(oy, oy + dy) + b <= hl) {
+        var ci = (cur * P.hl + u32(oy)) * P.wl + u32(ox);
+        var ri = (rf * P.hl + u32(oy + dy)) * P.wl + u32(ox + dx);
+        for (var j = 0; j < b; j++) {
+            for (var i = 0u; i < u32(b); i++) {
+                s += abs(lum[ci + i] - lum[ri + i]);
+            }
+            ci += P.wl; ri += P.wl;
+        }
+        return s / f32(b * b);
+    }
     for (var j = 0; j < b; j++) {
         for (var i = 0; i < b; i++) {
             s += abs(px(cur, ox + i, oy + j) - px(rf, ox + i + dx, oy + j + dy));
