@@ -51,3 +51,21 @@ judges preferred Rust (cleaner colour noise, crisper moving hair); one preferred
 colour shift in the darkest panning shot. Averaged over all frames there is no colour bias (R-G +0.2, B-G +0.7,
 brightness +0.8 levels for Rust against -0.1, +0.7, +0.7 for MVTools): the per-frame difference is Rust removing
 more of the coarse colour mottle. Both lift near-blacks by under a level on average.
+
+## GPU version (wgpu compute shaders)
+
+`gpu/` runs the round-5 pipeline on the GPU (Vulkan, DirectX 12 or Metal through wgpu), processing the clip in
+tiles that fit the GPU's buffer limits (tiled and untiled output are identical). Tested here only on a software
+Vulkan driver (llvmpipe), so no meaningful speed yet; `bench_laptop.py` and LAPTOP.md measure it on real hardware.
+
+Quality against the round-5 start (tuning set):
+
+| Version | Score | Worst 5 % | Moving | Flicker | Texture | Result |
+|---|---|---|---|---|---|---|
+| CPU Rust v3 (reference) | +6.30 | 30.52 | 33.47 | 0.0068 | 0.809 | accepted |
+| GPU v1: motion search predicts only from the coarser level | +6.26 | 30.37 | 33.28 | 0.0072 | 0.817 | rejected (worst regions, moving, flicker, one clip's texture) |
+| GPU v2: plus one pass using neighbours' vectors | +6.17 | 30.38 | 33.34 | 0.0072 | 0.810 | rejected (worst regions -0.28 dB, flicker +7 %) |
+
+The remaining gap is in the motion search: blocks are searched in parallel, so they can't build on their
+neighbours' finished vectors the way the CPU version does. Next to try on real hardware, where iterations are
+fast: more refinement passes, a wider search, and vector smoothness costs.

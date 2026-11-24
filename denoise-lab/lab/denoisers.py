@@ -372,7 +372,7 @@ DENOISERS["round8"] = (with_axis("grey", "rust_blend"), ROUND8_PARAMS)
 # --- GPU implementation (gpu/, built with `maturin develop --release`) ---------
 
 def gpu_blend(frames, tr=6, light_tr=2, thsad=300, thsadc=450, tex_lo=0.3, tex_hi=1.0, hp_sigma=1.5,
-              energy_sigma=3.0, search_range=4, max_mb=96, margin=96):
+              energy_sigma=3.0, search_range=4, max_mb=96, margin=96, refine_passes=1):
     """Round 5 on the GPU (wgpu compute shaders); same parameters as rust_blend.
 
     GPUs cap how big one buffer binding can be (128 MB on some drivers), so the clip is
@@ -402,12 +402,12 @@ def gpu_blend(frames, tr=6, light_tr=2, thsad=300, thsadc=450, tex_lo=0.3, tex_h
                 e = min(s + span, t_len)
                 S, E = max(s - tr, 0), min(e + tr, t_len)
                 res = _gpu_call(frames[S:E, Y0:Y1, X0:X1], tr, light_tr, thsad, thsadc, tex_lo, tex_hi,
-                                hp_sigma, energy_sigma, search_range)
+                                hp_sigma, energy_sigma, search_range, refine_passes)
                 out[s:e, y0:y1, x0:x1] = res[s - S:e - S, y0 - Y0:y1 - Y0, x0 - X0:x1 - X0]
     return out
 
 
-def _gpu_call(frames, tr, light_tr, thsad, thsadc, tex_lo, tex_hi, hp_sigma, energy_sigma, search_range):
+def _gpu_call(frames, tr, light_tr, thsad, thsadc, tex_lo, tex_hi, hp_sigma, energy_sigma, search_range, refine_passes):
     import gigdenoise_gpu
     T = noise_transform()
     inv = T._inverse_tables()
@@ -419,7 +419,7 @@ def _gpu_call(frames, tr, light_tr, thsad, thsadc, tex_lo, tex_hi, hp_sigma, ene
         np.stack([t[2] for t in inv]).astype(np.float32),
         np.array([t[0] for t in inv], np.float32), np.array([t[1] for t in inv], np.float32),
         tr=tr, light_tr=light_tr, th_y=thsad / unit, th_c=thsadc / unit, tex_lo=tex_lo, tex_hi=tex_hi,
-        hp_sigma=hp_sigma, energy_sigma=energy_sigma, search_range=search_range)
+        hp_sigma=hp_sigma, energy_sigma=energy_sigma, search_range=search_range, refine_passes=refine_passes)
 
 
 DENOISERS["gpu_blend"] = (gpu_blend, {})

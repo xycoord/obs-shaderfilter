@@ -159,7 +159,7 @@ pub fn run(
     fwd_tab: &[f32], fwd_lo: f32, fwd_step: f32, mat: &[f32], imat: &[f32],
     inv_tab: &[f32], inv_lo: [f32; 3], inv_step: [f32; 3],
     tr: usize, light_tr: usize, th_y: f32, th_c: f32, tex_lo: f32, tex_hi: f32,
-    hp_sigma: f32, energy_sigma: f32, range: u32,
+    hp_sigma: f32, energy_sigma: f32, range: u32, refine_passes: u32,
 ) -> Vec<f32> {
     let (t, hh, ww) = (t_len as u32, h as u32, w as u32);
     let nbx = (ww + 8) / 8 + 1;
@@ -233,6 +233,21 @@ pub fn run(
             None => (&dummy, &dummy),
         };
         gpu.dispatch(&mut enc, "search", &p, &[lum, &b_pairs, cvx, cvy, &bvx, &bvy, &bsad], groups(nbxl), groups(nbyl), npairs);
+        // Second pass: neighbours' vectors from the first pass as extra candidates.
+        let (bvx, bvy, bsad) = if refine_passes > 0 {
+            let (mut cx, mut cy) = (bvx, bvy);
+            let mut last_sad = bsad;
+            for _ in 0..refine_passes {
+                let (nvx, nvy, nsad) = (gpu.empty(n), gpu.empty(n), gpu.empty(n));
+                let mut p2 = p;
+                p2.has_coarse = 2;
+                gpu.dispatch(&mut enc, "search", &p2, &[lum, &b_pairs, &cx, &cy, &nvx, &nvy, &nsad], groups(nbxl), groups(nbyl), npairs);
+                cx = nvx; cy = nvy; last_sad = nsad;
+            }
+            (cx, cy, last_sad)
+        } else {
+            (bvx, bvy, bsad)
+        };
         if l == 0 {
             finest = Some((bvx, bvy, bsad));
         } else {
@@ -285,13 +300,13 @@ fn adapter() -> PyResult<String> {
 #[allow(clippy::too_many_arguments)]
 #[pyo3(signature = (frames, fwd_tables, fwd_lo, fwd_step, matrix, inv_matrix, inv_tables, inv_lo, inv_step,
                     tr=6, light_tr=2, th_y=2.39, th_c=3.58, tex_lo=0.3, tex_hi=1.0, hp_sigma=1.5,
-                    energy_sigma=3.0, search_range=4))]
+                    energy_sigma=3.0, search_range=4, refine_passes=1))]
 fn denoise<'py>(
     py: Python<'py>, frames: PyReadonlyArray4<'py, f32>, fwd_tables: PyReadonlyArray2<'py, f32>,
     fwd_lo: f32, fwd_step: f32, matrix: PyReadonlyArray2<'py, f32>, inv_matrix: PyReadonlyArray2<'py, f32>,
     inv_tables: PyReadonlyArray2<'py, f32>, inv_lo: PyReadonlyArray1<'py, f32>, inv_step: PyReadonlyArray1<'py, f32>,
     tr: usize, light_tr: usize, th_y: f32, th_c: f32, tex_lo: f32, tex_hi: f32, hp_sigma: f32,
-    energy_sigma: f32, search_range: u32,
+    energy_sigma: f32, search_range: u32, refine_passes: u32,
 ) -> PyResult<Bound<'py, PyArray4<f32>>> {
     let fr = frames.as_array();
     let (t_len, h, w, _) = fr.dim();
@@ -306,7 +321,7 @@ fn denoise<'py>(
     let out = GPU.with(|g| -> Result<Vec<f32>, String> {
         let gpu = g.get_or_init(Gpu::new).as_ref().map_err(|e| e.clone())?;
         Ok(run(gpu, &input, t_len, h, w, &ft, fwd_lo, fwd_step, &m, &mi, &it, il, is, tr, light_tr, th_y, th_c,
-               tex_lo, tex_hi, hp_sigma, energy_sigma, search_range))
+               tex_lo, tex_hi, hp_sigma, energy_sigma, search_range, refine_passes))
     })
     .map_err(pyo3::exceptions::PyRuntimeError::new_err)?;
     let arr = numpy::ndarray::Array4::from_shape_vec((t_len, h, w, 3), out)

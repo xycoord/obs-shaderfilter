@@ -37,6 +37,20 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     let lim = 128;
     var best = vec2<i32>(0, 0);
     var best_s = sad(cur, rf, ox, oy, 0, 0);
+    if (P.has_coarse == 2u) {
+        // Second pass on the same level: the block's own first-pass vector and its 8
+        // neighbours' (the parallel stand-in for the CPU version's left/top predictors).
+        for (var dy = -1; dy <= 1; dy++) {
+            for (var dx = -1; dx <= 1; dx++) {
+                let qx = clamp(i32(bx) + dx, 0, i32(P.nbxl) - 1);
+                let qy = clamp(i32(by) + dy, 0, i32(P.nbyl) - 1);
+                let ci = pi * P.nbxl * P.nbyl + u32(qy) * P.nbxl + u32(qx);
+                let c = vec2<i32>(cvx[ci], cvy[ci]);
+                let s = sad(cur, rf, ox, oy, c.x, c.y);
+                if (s < best_s) { best_s = s; best = c; }
+            }
+        }
+    }
     if (P.has_coarse == 1u) {
         let cxb = clamp((ox + i32(P.bsl) / 2) / 2 / 8, 0, i32(P.nbxc) - 1);
         let cyb = clamp((oy + i32(P.bsl) / 2) / 2 / 8, 0, i32(P.nbyc) - 1);
