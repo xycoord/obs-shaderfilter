@@ -40,6 +40,19 @@ fn sad(cur: u32, rf: u32, ox: i32, oy: i32, dx: i32, dy: i32) -> f32 {
     return s / f32(b * b);
 }
 
+const NSEEN: u32 = 32u;
+var<private> seen: array<vec2<i32>, 32>;
+var<private> nseen: u32 = 0u;
+
+// True if v was scored already (its SAD can't beat best_s, so scoring it again changes nothing).
+fn was_seen(v: vec2<i32>) -> bool {
+    for (var i = 0u; i < nseen; i++) {
+        if (all(seen[i] == v)) { return true; }
+    }
+    if (nseen < NSEEN) { seen[nseen] = v; nseen++; }
+    return false;
+}
+
 @compute @workgroup_size(8, 8, 1)
 fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     let bx = id.x; let by = id.y; let pi = id.z;
@@ -50,6 +63,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     let lim = 128;
     var best = vec2<i32>(0, 0);
     var best_s = sad(cur, rf, ox, oy, 0, 0);
+    _ = was_seen(best);
     if (P.has_coarse == 1u) {
         let cxb = clamp((ox + i32(P.bsl) / 2) / 2 / 8, 0, i32(P.nbxc) - 1);
         let cyb = clamp((oy + i32(P.bsl) / 2) / 2 / 8, 0, i32(P.nbyc) - 1);
@@ -59,6 +73,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
             let qy = clamp(cyb + offs[k].y, 0, i32(P.nbyc) - 1);
             let ci = pi * P.nbxc * P.nbyc + u32(qy) * P.nbxc + u32(qx);
             let c = clamp(vec2<i32>(cvx[ci] * 2, cvy[ci] * 2), vec2(-lim), vec2(lim));
+            if (was_seen(c)) { continue; }
             let s = sad(cur, rf, ox, oy, c.x, c.y);
             if (s < best_s) { best_s = s; best = c; }
         }
@@ -70,6 +85,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         var improved = false;
         for (var k = 0u; k < 4u; k++) {
             let c = clamp(centre + dia[k], vec2(-lim), vec2(lim));
+            if (was_seen(c)) { continue; }
             let s = sad(cur, rf, ox, oy, c.x, c.y);
             if (s < best_s) { best_s = s; best = c; improved = true; }
         }
@@ -78,6 +94,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     let centre = best;
     for (var k = 0u; k < 4u; k++) {
         let c = clamp(centre + diag[k], vec2(-lim), vec2(lim));
+        if (was_seen(c)) { continue; }
         let s = sad(cur, rf, ox, oy, c.x, c.y);
         if (s < best_s) { best_s = s; best = c; }
     }
