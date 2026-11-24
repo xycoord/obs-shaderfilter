@@ -22,3 +22,25 @@ measure falls on the held-back clips (0.575 to 0.408), more than on the tuning s
 the tuning set's average hid a similar fall on the dim warm interior (dinner: 0.550 to 0.436). On the darkest
 held-back clip (bar, median DI luma 0.01) the clean reference's own grain makes up much of what the texture
 measure counts, so part of that fall is the measure, not the denoiser.
+
+## Load sharing (after the user chose round 5)
+
+Goal: the same noise reduction as round 5 with less detail removed, by easing temporal averaging and adding a
+light spatial pass. Judged by `tradeoff.py` (noise left in flat areas, colour error on detail, texture kept) and
+by blind council checks on real footage.
+
+| Round | Change | Flat brightness noise | Flat colour noise | Texture (worst clip) | Council (blind, real footage) |
+|---|---|---|---|---|---|
+| 5 | chosen version | 0.0143 | 0.0260 | 0.780 (0.531) | |
+| 7 | stricter matching (thSAD 220) + BM3D 0.25 / 0.8 | 0.0140 | 0.0194 | 0.850 (0.697) | 4 of 4 preferred round 5: wood grain flattened, pink/green tints on fine bright detail |
+| 8 | Rust, grey-aligned axis, thSAD 220 + DCT 0.4 / 0.8 | 0.0142 | 0.0164 | 0.899 (0.835) | 4 of 4 preferred round 5: waxier on real footage, colour shift in the darkest scene, 4x4-pixel colour block steps from the DCT stage |
+
+Findings:
+- The noise-equalised space's two colour planes carried about 40 % of neutral (grey) detail, so anything that
+  treated colour more strongly than brightness tinted fine detail. Fixed with a grey-aligned brightness axis
+  (`axis="grey"` in lab/vst.py): the leak falls to 0-7 %. Not yet applied to round 5 itself.
+- The synthetic measures matched round 5's noise reduction, but on real gig noise the round-8 settings remove far
+  more (real gain +12.9 dB against +7.1 dB), which is why it looks waxier. Equal noise reduction has to be
+  matched on real footage, not only on the synthetic clips.
+- The Rust DCT spatial stage leaves visible colour block steps at its 4-pixel stride; it needs smoother
+  aggregation (more overlap or windowed blocks) before reuse.

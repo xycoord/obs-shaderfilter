@@ -136,7 +136,7 @@ DENOISERS = {
 
 def run(name: str, frames: np.ndarray, **params) -> np.ndarray:
     fn, defaults = DENOISERS[name]
-    return fn(np.asarray(frames, np.float32), **{**defaults, **params}).astype(np.float32)
+    return fn(np.asarray(frames, np.float32), **{**defaults, **params}).astype(np.float32, copy=False)
 
 
 # --- Denoising in the noise-equalised space (lab/vst.py) ---------------------

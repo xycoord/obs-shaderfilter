@@ -40,3 +40,8 @@ one multi-threaded call. Built with `maturin develop --release`; used as the `ru
 | round5_fast (MVTools, step 3e) | 0.232 | accepted earlier | |
 | Rust v1 | ~0.18 | worst regions -0.16 dB, flicker +3.0 % (just outside tolerance) | rejected |
 | Rust v2: cheaper diamond search, zero-copy input | 0.124 | all held; score +6.30 dB (start +5.81), texture 0.809 | **accepted** (1.9x over MVTools fast, 3.4x over the round-5 start) |
+
+| Rust v3 (single-pass averaging restored, no output copy) | 0.127 | identical output to v2 | accepted |
+
+Rust v3 is 3.3x faster than the round-5 start (0.425) and 9x faster than the original round-6 timing (1.18),
+on the same benchmark.
