@@ -2,7 +2,7 @@
 // Blocks of bsl x bsl every 8 pixels starting at -offl. Predictors: zero, and the
 // coarser level's vector (x2) for the block under this one's centre and its four
 // neighbours. Then a small-diamond descent and one diagonal polish.
-@group(0) @binding(1) var<storage, read> lum: array<f32>;      // this level, [T][hl][wl]
+@group(0) @binding(1) var<storage, read> lum: array<u32>;      // this level, half floats in pairs [T][hl][(wl+1)/2]
 @group(0) @binding(2) var<storage, read> pairs: array<u32>;    // [npairs][2] (cur, ref)
 @group(0) @binding(3) var<storage, read> cvx: array<i32>;      // coarser vectors [npairs][nbyc][nbxc]
 @group(0) @binding(4) var<storage, read> cvy: array<i32>;
@@ -13,7 +13,9 @@
 fn px(f: u32, x: i32, y: i32) -> f32 {
     let cx = clamp(x, 0, i32(P.wl) - 1);
     let cy = clamp(y, 0, i32(P.hl) - 1);
-    return lum[(f * P.hl + u32(cy)) * P.wl + u32(cx)];
+    let w2 = (P.wl + 1u) / 2u;
+    let v = unpack2x16float(lum[(f * P.hl + u32(cy)) * w2 + u32(cx) / 2u]);
+    return select(v.x, v.y, (cx & 1) == 1);
 }
 
 // SAD of the block at (ox, oy) against the reference block moved by (dx, dy), or a value
@@ -24,16 +26,30 @@ fn sad(cur: u32, rf: u32, ox: i32, oy: i32, dx: i32, dy: i32, best: f32) -> f32 
     let b = i32(P.bsl);
     let bb = f32(b * b);
     let wl = i32(P.wl); let hl = i32(P.hl);
-    // Fast path when both blocks lie inside the level: no clamping (same values, same order).
-    if (min(min(ox, ox + dx), min(oy, oy + dy)) >= 0 && max(ox, ox + dx) + b <= wl && max(oy, oy + dy) + b <= hl) {
-        var ci = (cur * P.hl + u32(oy)) * P.wl + u32(ox);
-        var ri = (rf * P.hl + u32(oy + dy)) * P.wl + u32(ox + dx);
+    // Fast path when both blocks (and the reference's extra word) lie inside the level: whole
+    // words, no clamping. The current block starts on an even pixel; an odd reference start takes
+    // each pair from the high half of one word and the low half of the next.
+    let w2 = (P.wl + 1u) / 2u;
+    let rx = ox + dx;
+    if ((ox & 1) == 0 && min(min(ox, rx), min(oy, oy + dy)) >= 0 && max(ox, rx) + b + 1 < wl
+        && max(oy, oy + dy) + b <= hl) {
+        let odd = (rx & 1) == 1;
+        var ci = (cur * P.hl + u32(oy)) * w2 + u32(ox) / 2u;
+        var ri = (rf * P.hl + u32(oy + dy)) * w2 + u32(rx) / 2u;
+        let nw = u32(b) / 2u;
         for (var j = 0; j < b; j++) {
-            for (var i = 0u; i < u32(b); i++) {
-                s += abs(lum[ci + i] - lum[ri + i]);
+            var prev = unpack2x16float(lum[ri]);
+            for (var k = 0u; k < nw; k++) {
+                let c = unpack2x16float(lum[ci + k]);
+                let nxt = unpack2x16float(lum[ri + k + 1u]);
+                let r0 = select(prev.x, prev.y, odd);
+                let r1 = select(prev.y, nxt.x, odd);
+                s += abs(c.x - r0);
+                s += abs(c.y - r1);
+                prev = nxt;
             }
             if (s / bb >= best) { return s / bb; }
-            ci += P.wl; ri += P.wl;
+            ci += w2; ri += w2;
         }
         return s / bb;
     }

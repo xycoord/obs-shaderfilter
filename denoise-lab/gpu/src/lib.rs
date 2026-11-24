@@ -62,6 +62,7 @@ impl Gpu {
             ("forward", include_str!("wgsl/forward.wgsl")),
             ("down", include_str!("wgsl/down.wgsl")),
             ("search", include_str!("wgsl/search.wgsl")),
+            ("pack", include_str!("wgsl/pack.wgsl")),
             ("degrain", include_str!("wgsl/degrain.wgsl")),
             ("blur", include_str!("wgsl/blur.wgsl")),
             ("hp2", include_str!("wgsl/hp2.wgsl")),
@@ -233,7 +234,13 @@ pub fn run(
     let mut coarse: Option<(u32, u32, wgpu::Buffer, wgpu::Buffer)> = None;
     let mut finest: Option<(wgpu::Buffer, wgpu::Buffer, wgpu::Buffer)> = None;
     for l in (0..levels.len()).rev() {
-        let (wl, hl, ref lum) = levels[l];
+        let (wl, hl, ref lum32) = levels[l];
+        let lum = &gpu.empty((((wl + 1) / 2) * hl * t) as usize);
+        {
+            let mut p = base;
+            p.wl = wl; p.hl = hl;
+            gpu.dispatch(&mut enc, "pack", &p, &[lum32, lum], groups((wl + 1) / 2), groups(hl), t);
+        }
         let (bsl, offl) = if l == 0 { (16u32, 8u32) } else { (8, 0) };
         let (nbxl, nbyl) = if l == 0 { (nbx, nby) } else { ((wl + 7) / 8, (hl + 7) / 8) };
         let n = (nbxl * nbyl * npairs) as usize;
