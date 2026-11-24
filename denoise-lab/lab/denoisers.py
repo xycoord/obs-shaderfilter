@@ -314,3 +314,31 @@ DENOISERS["round6"] = (mdegrain_vst_blend, BEST_PARAMS)
 # Round 5 with the speed climb's accepted search settings (records/speed_log.md, step 3e).
 ROUND5_FAST_PARAMS = {**ROUND5_PARAMS, "thsadc": 450, "chroma_search": False, "pel": 1}
 DENOISERS["round5_fast"] = (mdegrain_vst_blend, ROUND5_FAST_PARAMS)
+
+
+# --- Rust implementation (rust/, built with `maturin develop --release`) -------
+
+def rust_blend(frames, tr=6, light_tr=2, thsad=300, thsadc=450, tex_lo=0.3, tex_hi=1.0, hp_sigma=1.5,
+               energy_sigma=3.0, search_range=4):
+    """Round 5 re-implemented from scratch in Rust: same structure as mdegrain_vst_blend with
+    brightness-only, whole-pixel motion search. thsad/thsadc use MVTools' scale (8x8 block, 8-bit)."""
+    import gigdenoise
+    T = noise_transform()
+    inv = T._inverse_tables()
+    unit = 64 * 255.0 / VST_SCALE  # MVTools thSAD per one unit of noise std, per pixel
+    step = (T.grid[-1] - T.grid[0]) / (len(T.grid) - 1)
+    return gigdenoise.denoise(
+        np.ascontiguousarray(frames, np.float32), T.curves.astype(np.float32), float(T.grid[0]), float(step),
+        T.matrix.astype(np.float32), T.inverse.astype(np.float32),
+        np.stack([t[2] for t in inv]).astype(np.float32),
+        np.array([t[0] for t in inv], np.float32), np.array([t[1] for t in inv], np.float32),
+        tr=tr, light_tr=light_tr, th_y=thsad / unit, th_c=thsadc / unit, tex_lo=tex_lo, tex_hi=tex_hi,
+        hp_sigma=hp_sigma, energy_sigma=energy_sigma, search_range=search_range)
+
+
+DENOISERS["rust_blend"] = (rust_blend, {})
+
+# Load sharing (records/climb_log.md, round 7): stricter temporal matching keeps detail, a light
+# spatial pass (mostly on colour) makes up the noise reduction.
+ROUND7_PARAMS = {**ROUND5_FAST_PARAMS, "thsad": 220, "spatial_sigma_y": 0.25, "spatial_sigma_c": 0.8}
+DENOISERS["round7"] = (mdegrain_vst_blend, ROUND7_PARAMS)

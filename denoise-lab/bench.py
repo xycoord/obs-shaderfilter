@@ -23,7 +23,7 @@ from lab import colour_pipeline as cp, denoisers, video_io as vio  # noqa: E402
 ap = argparse.ArgumentParser()
 ap.add_argument("denoiser")
 ap.add_argument("--params", default="{}")
-ap.add_argument("--repeats", type=int, default=3)
+ap.add_argument("--repeats", type=int, default=5)
 args = ap.parse_args()
 
 cache = Path("bench_input.npy")

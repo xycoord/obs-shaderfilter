@@ -27,3 +27,16 @@ clip, and at least 1.10x faster than the current fastest.
 | 3c | Whole-pixel motion search (colour still used) | 0.338 | 1.26x | all held | accepted |
 | 3d | ...and a narrower search refinement | 0.324 | 1.31x | all held | (superseded) |
 | 3e | Brightness-only, whole-pixel search, colour matching loosened to compensate (thSADC 450) | 0.250 | 1.70x | all held; score +0.36 dB, texture 0.780 to 0.817 | **accepted** |
+
+## Rust rewrite (bold option, approved overnight)
+
+`rust/` reimplements the round-5 pipeline from scratch (no MVTools, no VapourSynth): noise-equalising
+transform, hierarchical whole-pixel block matching on brightness (16x16 blocks every 8 px), MDegrain-style
+weighted averaging for the strong and light results in one pass, texture blend, inverse transform, all in
+one multi-threaded call. Built with `maturin develop --release`; used as the `rust_blend` denoiser.
+
+| Version | s/MP-frame (median of 5) | Quality vs round-5 start | Result |
+|---|---|---|---|
+| round5_fast (MVTools, step 3e) | 0.232 | accepted earlier | |
+| Rust v1 | ~0.18 | worst regions -0.16 dB, flicker +3.0 % (just outside tolerance) | rejected |
+| Rust v2: cheaper diamond search, zero-copy input | 0.124 | all held; score +6.30 dB (start +5.81), texture 0.809 | **accepted** (1.9x over MVTools fast, 3.4x over the round-5 start) |
