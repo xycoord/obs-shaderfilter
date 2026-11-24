@@ -305,3 +305,8 @@ DENOISERS["mdegrain_vst_blend"] = (mdegrain_vst_blend, {})
 # The climb's result (records/climb_log.md, round 6).
 BEST_PARAMS = {"tr": 6, "light_tr": 2, "thsad": 300, "thsadc": 300, "spatial_sigma_y": 0.4, "spatial_sigma_c": 0.8}
 DENOISERS["best"] = (mdegrain_vst_blend, BEST_PARAMS)
+
+# Named versions from the climb, for side-by-side comparisons.
+ROUND5_PARAMS = {"tr": 6, "light_tr": 2, "thsad": 300, "thsadc": 300}
+DENOISERS["round5"] = (mdegrain_vst_blend, ROUND5_PARAMS)
+DENOISERS["round6"] = (mdegrain_vst_blend, BEST_PARAMS)
