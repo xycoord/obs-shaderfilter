@@ -16,9 +16,13 @@ fn px(f: u32, x: i32, y: i32) -> f32 {
     return lum[(f * P.hl + u32(cy)) * P.wl + u32(cx)];
 }
 
-fn sad(cur: u32, rf: u32, ox: i32, oy: i32, dx: i32, dy: i32) -> f32 {
+// SAD of the block at (ox, oy) against the reference block moved by (dx, dy), or a value
+// >= best when it can't beat best: abs differences are never negative, so the running sum only
+// grows and a row-end partial already at or past best decides the comparison exactly.
+fn sad(cur: u32, rf: u32, ox: i32, oy: i32, dx: i32, dy: i32, best: f32) -> f32 {
     var s = 0.0;
     let b = i32(P.bsl);
+    let bb = f32(b * b);
     let wl = i32(P.wl); let hl = i32(P.hl);
     // Fast path when both blocks lie inside the level: no clamping (same values, same order).
     if (min(min(ox, ox + dx), min(oy, oy + dy)) >= 0 && max(ox, ox + dx) + b <= wl && max(oy, oy + dy) + b <= hl) {
@@ -28,16 +32,18 @@ fn sad(cur: u32, rf: u32, ox: i32, oy: i32, dx: i32, dy: i32) -> f32 {
             for (var i = 0u; i < u32(b); i++) {
                 s += abs(lum[ci + i] - lum[ri + i]);
             }
+            if (s / bb >= best) { return s / bb; }
             ci += P.wl; ri += P.wl;
         }
-        return s / f32(b * b);
+        return s / bb;
     }
     for (var j = 0; j < b; j++) {
         for (var i = 0; i < b; i++) {
             s += abs(px(cur, ox + i, oy + j) - px(rf, ox + i + dx, oy + j + dy));
         }
+        if (s / bb >= best) { return s / bb; }
     }
-    return s / f32(b * b);
+    return s / bb;
 }
 
 const NSEEN: u32 = 32u;
@@ -62,7 +68,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     let oy = i32(by * 8u) - i32(P.offl);
     let lim = 128;
     var best = vec2<i32>(0, 0);
-    var best_s = sad(cur, rf, ox, oy, 0, 0);
+    var best_s = sad(cur, rf, ox, oy, 0, 0, 3.0e38);
     _ = was_seen(best);
     if (P.has_coarse == 1u) {
         let cxb = clamp((ox + i32(P.bsl) / 2) / 2 / 8, 0, i32(P.nbxc) - 1);
@@ -74,7 +80,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
             let ci = pi * P.nbxc * P.nbyc + u32(qy) * P.nbxc + u32(qx);
             let c = clamp(vec2<i32>(cvx[ci] * 2, cvy[ci] * 2), vec2(-lim), vec2(lim));
             if (was_seen(c)) { continue; }
-            let s = sad(cur, rf, ox, oy, c.x, c.y);
+            let s = sad(cur, rf, ox, oy, c.x, c.y, best_s);
             if (s < best_s) { best_s = s; best = c; }
         }
     }
@@ -86,7 +92,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         for (var k = 0u; k < 4u; k++) {
             let c = clamp(centre + dia[k], vec2(-lim), vec2(lim));
             if (was_seen(c)) { continue; }
-            let s = sad(cur, rf, ox, oy, c.x, c.y);
+            let s = sad(cur, rf, ox, oy, c.x, c.y, best_s);
             if (s < best_s) { best_s = s; best = c; improved = true; }
         }
         if (!improved) { break; }
@@ -95,7 +101,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     for (var k = 0u; k < 4u; k++) {
         let c = clamp(centre + diag[k], vec2(-lim), vec2(lim));
         if (was_seen(c)) { continue; }
-        let s = sad(cur, rf, ox, oy, c.x, c.y);
+        let s = sad(cur, rf, ox, oy, c.x, c.y, best_s);
         if (s < best_s) { best_s = s; best = c; }
     }
     let o = pi * P.nbxl * P.nbyl + by * P.nbxl + bx;
