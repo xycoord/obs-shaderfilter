@@ -363,6 +363,152 @@ fn degrain2(
     )
 }
 
+#[inline]
+fn degrain_weight(s: f32, th: f32) -> f32 {
+    if s >= th {
+        0.0
+    } else {
+        (th * th - s * s) / (th * th + s * s)
+    }
+}
+
+/// Light average of the brightness plane only (references within light_tr).
+fn degrain_light_y(planes: &[[Plane; 3]], t: usize, refs: &[(usize, &Field)], th: f32) -> Vec<f32> {
+    let p0 = &planes[t][0];
+    let (w, h, stride) = (p0.w, p0.h, p0.stride);
+    let win = window();
+    let mut acc = vec![0f32; stride * (h + 2 * PAD)];
+    let (nbx, nby) = grid(w, h);
+    let nr = refs.len();
+    let mut wts = vec![0f32; nr];
+    let mut offs = vec![0isize; nr];
+    for by in 0..nby {
+        for bx in 0..nbx {
+            let i = by * nbx + bx;
+            let (ox, oy) = origin(bx, by);
+            let base = p0.idx(ox, oy);
+            let mut norm = 1f32;
+            for k in 0..nr {
+                let f = refs[k].1;
+                offs[k] = f.vy[i] as isize * stride as isize + f.vx[i] as isize;
+                wts[k] = degrain_weight(f.sad[i], th);
+                norm += wts[k];
+            }
+            let inv = 1.0 / norm;
+            for r in 0..BS {
+                let row = base + r * stride;
+                let mut v: [f32; BS] = p0.data[row..row + BS].try_into().unwrap();
+                for k in 0..nr {
+                    if wts[k] > 0.0 {
+                        let rr = (row as isize + offs[k]) as usize;
+                        let rd: &[f32; BS] = planes[refs[k].0][0].data[rr..rr + BS].try_into().unwrap();
+                        for c in 0..BS {
+                            v[c] += wts[k] * rd[c];
+                        }
+                    }
+                }
+                let d: &mut [f32] = &mut acc[row..row + BS];
+                for c in 0..BS {
+                    d[c] += win[r] * win[c] * v[c] * inv;
+                }
+            }
+        }
+    }
+    let mut o = vec![0f32; w * h];
+    for y in 0..h {
+        let s0 = (y + PAD) * stride + PAD;
+        o[y * w..(y + 1) * w].copy_from_slice(&acc[s0..s0 + w]);
+    }
+    o
+}
+
+/// Final average of all three planes: per pixel, mix of light and strong by `mask`
+/// (1 = light). `mask` is unpadded [h][w]. Returns three unpadded planes.
+fn degrain_mixed(
+    planes: &[[Plane; 3]],
+    t: usize,
+    refs: &[(usize, &Field)],
+    n_light: usize,
+    th_y: f32,
+    th_c: f32,
+    mask: &[f32],
+) -> [Vec<f32>; 3] {
+    let p0 = &planes[t][0];
+    let (w, h, stride) = (p0.w, p0.h, p0.stride);
+    let win = window();
+    // Mask on the padded grid (0 in the padding, which is cropped away anyway).
+    let mut mpad = vec![0f32; stride * (h + 2 * PAD)];
+    for y in 0..h {
+        let s0 = (y + PAD) * stride + PAD;
+        mpad[s0..s0 + w].copy_from_slice(&mask[y * w..(y + 1) * w]);
+    }
+    let mut acc: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0f32; stride * (h + 2 * PAD)]);
+    let (nbx, nby) = grid(w, h);
+    let nr = refs.len();
+    let mut wts = vec![0f32; nr];
+    let mut offs = vec![0isize; nr];
+    for by in 0..nby {
+        for bx in 0..nbx {
+            let i = by * nbx + bx;
+            let (ox, oy) = origin(bx, by);
+            let base = p0.idx(ox, oy);
+            for k in 0..nr {
+                let f = refs[k].1;
+                offs[k] = f.vy[i] as isize * stride as isize + f.vx[i] as isize;
+            }
+            for p in 0..3 {
+                let th = if p == 0 { th_y } else { th_c };
+                let (mut nl, mut ns) = (1f32, 1f32);
+                for k in 0..nr {
+                    wts[k] = degrain_weight(refs[k].1.sad[i], th);
+                    if k < n_light {
+                        nl += wts[k];
+                    }
+                    ns += wts[k];
+                }
+                let (il, is) = (1.0 / nl, 1.0 / ns);
+                let src = &planes[t][p].data;
+                for r in 0..BS {
+                    let row = base + r * stride;
+                    let mut v: [f32; BS] = src[row..row + BS].try_into().unwrap();
+                    let mut vl = v;
+                    for k in 0..nr {
+                        if k == n_light {
+                            vl = v;
+                        }
+                        if wts[k] > 0.0 {
+                            let rr = (row as isize + offs[k]) as usize;
+                            let rd: &[f32; BS] = planes[refs[k].0][p].data[rr..rr + BS].try_into().unwrap();
+                            let wk = wts[k];
+                            for c in 0..BS {
+                                v[c] += wk * rd[c];
+                            }
+                        }
+                    }
+                    if n_light >= nr {
+                        vl = v;
+                    }
+                    let mk: &[f32; BS] = mpad[row..row + BS].try_into().unwrap();
+                    let d: &mut [f32] = &mut acc[p][row..row + BS];
+                    let wr = win[r];
+                    for c in 0..BS {
+                        let mixed = v[c] * is + mk[c] * (vl[c] * il - v[c] * is);
+                        d[c] += wr * win[c] * mixed;
+                    }
+                }
+            }
+        }
+    }
+    std::array::from_fn(|p| {
+        let mut o = vec![0f32; w * h];
+        for y in 0..h {
+            let s0 = (y + PAD) * stride + PAD;
+            o[y * w..(y + 1) * w].copy_from_slice(&acc[p][s0..s0 + w]);
+        }
+        o
+    })
+}
+
 fn gaussian(src: &[f32], w: usize, h: usize, sigma: f32) -> Vec<f32> {
     let r = (4.0 * sigma + 0.5) as usize;
     let mut k: Vec<f32> = (0..=2 * r)
@@ -412,6 +558,89 @@ fn gaussian(src: &[f32], w: usize, h: usize, sigma: f32) -> Vec<f32> {
     out
 }
 
+/// Sliding-window DCT shrinkage: 8x8 blocks every `step` pixels, coefficients below
+/// lambda * sigma set to zero (DC kept), blocks aggregated with weight 1 / kept-count,
+/// as in BM3D's first stage but without grouping similar blocks.
+fn dct_shrink(src: &[f32], w: usize, h: usize, sigma: f32, lambda: f32, step: usize) -> Vec<f32> {
+    if sigma <= 0.0 || w < 8 || h < 8 {
+        return src.to_vec();
+    }
+    let mut d = [[0f32; 8]; 8];
+    for k in 0..8 {
+        for n in 0..8 {
+            let a = if k == 0 { (1.0f32 / 8.0).sqrt() } else { (2.0f32 / 8.0).sqrt() };
+            d[k][n] = a * (std::f32::consts::PI * (2 * n + 1) as f32 * k as f32 / 16.0).cos();
+        }
+    }
+    let thr = lambda * sigma;
+    let mut num = vec![0f32; w * h];
+    let mut den = vec![0f32; w * h];
+    let pos = |n: usize| -> Vec<usize> {
+        let mut v: Vec<usize> = (0..=n - 8).step_by(step).collect();
+        if *v.last().unwrap() != n - 8 {
+            v.push(n - 8);
+        }
+        v
+    };
+    let (xs, ys) = (pos(w), pos(h));
+    for &y0 in &ys {
+        for &x0 in &xs {
+            let mut b = [[0f32; 8]; 8];
+            for r in 0..8 {
+                b[r].copy_from_slice(&src[(y0 + r) * w + x0..(y0 + r) * w + x0 + 8]);
+            }
+            // C = D B D^T
+            let mut t = [[0f32; 8]; 8];
+            for k in 0..8 {
+                for c in 0..8 {
+                    let mut a = 0f32;
+                    for n in 0..8 {
+                        a += d[k][n] * b[n][c];
+                    }
+                    t[k][c] = a;
+                }
+            }
+            let mut cf = [[0f32; 8]; 8];
+            let mut kept = 0usize;
+            for k in 0..8 {
+                for l in 0..8 {
+                    let mut a = 0f32;
+                    for n in 0..8 {
+                        a += t[k][n] * d[l][n];
+                    }
+                    if (k == 0 && l == 0) || a.abs() >= thr {
+                        cf[k][l] = a;
+                        kept += 1;
+                    }
+                }
+            }
+            // B' = D^T C D
+            for k in 0..8 {
+                for c in 0..8 {
+                    let mut a = 0f32;
+                    for l in 0..8 {
+                        a += cf[k][l] * d[l][c];
+                    }
+                    t[k][c] = a;
+                }
+            }
+            let wt = 1.0 / kept as f32;
+            for r in 0..8 {
+                for c in 0..8 {
+                    let mut a = 0f32;
+                    for k in 0..8 {
+                        a += d[k][r] * t[k][c];
+                    }
+                    let o = (y0 + r) * w + x0 + c;
+                    num[o] += wt * a;
+                    den[o] += wt;
+                }
+            }
+        }
+    }
+    num.iter().zip(den.iter()).map(|(a, b)| a / b).collect()
+}
+
 #[inline]
 fn lerp(table: &[f32], lo: f32, step: f32, x: f32) -> f32 {
     let n = table.len();
@@ -426,7 +655,8 @@ fn lerp(table: &[f32], lo: f32, step: f32, x: f32) -> f32 {
 #[allow(clippy::too_many_arguments)]
 #[pyo3(signature = (frames, fwd_tables, fwd_lo, fwd_step, matrix, inv_matrix, inv_tables, inv_lo, inv_step,
                     tr=6, light_tr=2, th_y=2.39, th_c=3.58, tex_lo=0.3, tex_hi=1.0, hp_sigma=1.5,
-                    energy_sigma=3.0, search_range=4))]
+                    energy_sigma=3.0, search_range=4, spatial_y=0.0, spatial_c=0.0, spatial_lambda=2.7,
+                    spatial_step=4, spatial_pre=false))]
 fn denoise<'py>(
     py: Python<'py>,
     frames: PyReadonlyArray4<'py, f32>,
@@ -447,6 +677,11 @@ fn denoise<'py>(
     hp_sigma: f32,
     energy_sigma: f32,
     search_range: i32,
+    spatial_y: f32,
+    spatial_c: f32,
+    spatial_lambda: f32,
+    spatial_step: usize,
+    spatial_pre: bool,
 ) -> PyResult<Bound<'py, PyArray4<f32>>> {
     let fr = frames.as_array();
     let (t_len, h, w, _) = fr.dim();
@@ -484,6 +719,16 @@ fn denoise<'py>(
                     }
                     for p in 0..3 {
                         z[p][i] = m[[p, 0]] * y[0] + m[[p, 1]] * y[1] + m[[p, 2]] * y[2];
+                    }
+                }
+                if spatial_pre {
+                    // Spatial pass on every input frame, before temporal averaging, so the
+                    // averaging smooths out frame-to-frame differences the spatial pass makes.
+                    for p in 0..3 {
+                        let sg = if p == 0 { spatial_y } else { spatial_c };
+                        if sg > 0.0 {
+                            z[p] = dct_shrink(&z[p], w, h, sg, spatial_lambda, spatial_step);
+                        }
                     }
                 }
                 [Plane::from_slice(&z[0], w, h), Plane::from_slice(&z[1], w, h), Plane::from_slice(&z[2], w, h)]
@@ -524,41 +769,40 @@ fn denoise<'py>(
             .collect();
         lap("motion search");
         // 3-5. Per frame: strong and light averages, texture blend, inverse transform.
-        let results: Vec<Vec<f32>> = (0..t_len)
-            .into_par_iter()
-            .map(|t| {
-                let mut refs: Vec<(usize, &Field)> = fields
-                    .iter()
-                    .filter(|((a, b), _)| *a == t && (*b as isize - t as isize).unsigned_abs() <= tr)
-                    .map(|((_, b), f)| (*b, f))
-                    .collect();
-                refs.sort_by_key(|(b, _)| (*b as isize - t as isize).unsigned_abs());
-                let n_light = refs
-                    .iter()
-                    .filter(|(b, _)| (*b as isize - t as isize).unsigned_abs() <= light_tr)
-                    .count();
-                let (light, strong) = degrain2(&planes, t, &refs, n_light, th_y, th_c);
-                let ly = &light[0];
-                let g = gaussian(ly, w, h, hp_sigma);
-                let hp2: Vec<f32> = ly.iter().zip(g.iter()).map(|(a, b)| (a - b) * (a - b)).collect();
-                let energy = gaussian(&hp2, w, h, energy_sigma);
-                let mut out = vec![0f32; w * h * 3];
-                for i in 0..w * h {
-                    let mk = ((energy[i] - tex_lo) / (tex_hi - tex_lo)).clamp(0.0, 1.0);
-                    let mut zz = [0f32; 3];
-                    for p in 0..3 {
-                        zz[p] = strong[p][i] * (1.0 - mk) + light[p][i] * mk;
-                    }
-                    for c in 0..3 {
-                        let y = mi[[c, 0]] * zz[0] + mi[[c, 1]] * zz[1] + mi[[c, 2]] * zz[2];
-                        out[i * 3 + c] = lerp(&inv_rows[c], inv_lo[c], inv_step[c], y);
-                    }
+        let mut out = vec![0f32; t_len * h * w * 3];
+        out.par_chunks_mut(h * w * 3).enumerate().for_each(|(t, out)| {
+            let mut refs: Vec<(usize, &Field)> = fields
+                .iter()
+                .filter(|((a, b), _)| *a == t && (*b as isize - t as isize).unsigned_abs() <= tr)
+                .map(|((_, b), f)| (*b, f))
+                .collect();
+            refs.sort_by_key(|(b, _)| (*b as isize - t as isize).unsigned_abs());
+            let n_light = refs
+                .iter()
+                .filter(|(b, _)| (*b as isize - t as isize).unsigned_abs() <= light_tr)
+                .count();
+            let ly = degrain_light_y(&planes, t, &refs[..n_light], th_y);
+            let g = gaussian(&ly, w, h, hp_sigma);
+            let hp2: Vec<f32> = ly.iter().zip(g.iter()).map(|(a, b)| (a - b) * (a - b)).collect();
+            let energy = gaussian(&hp2, w, h, energy_sigma);
+            let mask: Vec<f32> = energy.iter().map(|e| ((e - tex_lo) / (tex_hi - tex_lo)).clamp(0.0, 1.0)).collect();
+            let mut zz3 = degrain_mixed(&planes, t, &refs, n_light, th_y, th_c, &mask);
+            for p in 0..3 {
+                let sg = if p == 0 { spatial_y } else { spatial_c };
+                if sg > 0.0 && !spatial_pre {
+                    zz3[p] = dct_shrink(&zz3[p], w, h, sg, spatial_lambda, spatial_step);
                 }
-                out
-            })
-            .collect();
+            }
+            for i in 0..w * h {
+                let zz = [zz3[0][i], zz3[1][i], zz3[2][i]];
+                for c in 0..3 {
+                    let y = mi[[c, 0]] * zz[0] + mi[[c, 1]] * zz[1] + mi[[c, 2]] * zz[2];
+                    out[i * 3 + c] = lerp(&inv_rows[c], inv_lo[c], inv_step[c], y);
+                }
+            }
+        });
         lap("averaging, blend, inverse");
-        results.concat()
+        out
     });
     let arr = numpy::ndarray::Array4::from_shape_vec((t_len, h, w, 3), out)
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;

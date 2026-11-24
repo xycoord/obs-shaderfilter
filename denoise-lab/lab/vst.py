@@ -30,7 +30,12 @@ class NoiseTransform:
     inverse: np.ndarray
 
     @classmethod
-    def from_model(cls, model: NoiseModel, lo=-0.1, hi=1.0, n=4096) -> "NoiseTransform":
+    def from_model(cls, model: NoiseModel, lo=-0.1, hi=1.0, n=4096, axis="noise", ref_level=0.1) -> "NoiseTransform":
+        """axis="noise": brightness axis = whitened (1, 1, 1), the original choice.
+        axis="grey": brightness axis = the direction a neutral (grey) change takes after the
+        curves and whitening, at DI level ref_level. With "noise", about 40 % of neutral
+        detail lands in the two colour planes, so anything that treats colour more strongly
+        than brightness tints fine neutral detail; "grey" keeps neutral detail in plane 0."""
         grid = np.linspace(lo, hi, n)
         sig = np.sqrt(np.einsum("bii->bi", model.cov))           # [B, 3]
         curves = []
@@ -44,7 +49,11 @@ class NoiseTransform:
         evals, evecs = np.linalg.eigh(corr)
         whiten = evecs @ np.diag(evals ** -0.5) @ evecs.T         # symmetric R^-1/2
         # Rotate so the first axis is brightness: Gram-Schmidt starting from W @ (1,1,1).
-        a = whiten @ np.ones(3)
+        if axis == "grey":
+            slope = 1.0 / np.array([np.interp(ref_level, model.bins, sig[:, c]) for c in range(3)])
+            a = whiten @ slope
+        else:
+            a = whiten @ np.ones(3)
         q0 = a / np.linalg.norm(a)
         b = np.array([1.0, 0.0, -1.0]) - q0 * (q0 @ np.array([1.0, 0.0, -1.0]))
         q1 = b / np.linalg.norm(b)

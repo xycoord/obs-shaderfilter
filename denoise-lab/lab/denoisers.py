@@ -141,18 +141,20 @@ def run(name: str, frames: np.ndarray, **params) -> np.ndarray:
 
 # --- Denoising in the noise-equalised space (lab/vst.py) ---------------------
 
-_TRANSFORM = None
+_TRANSFORMS = {}
+VST_AXIS = "noise"  # which brightness axis the noise-equalised space uses (see lab/vst.py)
 VST_SCALE, VST_OFFSET = 130.0, (10.0, 65.0, 65.0)  # unit noise -> ~2 8-bit steps; fits [0, 1]
 
 
-def noise_transform():
-    global _TRANSFORM
-    if _TRANSFORM is None:
+def noise_transform(axis=None):
+    axis = axis or VST_AXIS
+    if axis not in _TRANSFORMS:
         from pathlib import Path
         from .noise_model import NoiseModel
         from .vst import NoiseTransform
-        _TRANSFORM = NoiseTransform.from_model(NoiseModel.load(Path(__file__).resolve().parents[1] / "testset" / "noise_model.json"))
-    return _TRANSFORM
+        _TRANSFORMS[axis] = NoiseTransform.from_model(
+            NoiseModel.load(Path(__file__).resolve().parents[1] / "testset" / "noise_model.json"), axis=axis)
+    return _TRANSFORMS[axis]
 
 
 def to_clip16(planes: np.ndarray):
@@ -319,7 +321,7 @@ DENOISERS["round5_fast"] = (mdegrain_vst_blend, ROUND5_FAST_PARAMS)
 # --- Rust implementation (rust/, built with `maturin develop --release`) -------
 
 def rust_blend(frames, tr=6, light_tr=2, thsad=300, thsadc=450, tex_lo=0.3, tex_hi=1.0, hp_sigma=1.5,
-               energy_sigma=3.0, search_range=4):
+               energy_sigma=3.0, search_range=4, spatial_y=0.0, spatial_c=0.0, spatial_lambda=2.7, spatial_step=4, spatial_pre=False):
     """Round 5 re-implemented from scratch in Rust: same structure as mdegrain_vst_blend with
     brightness-only, whole-pixel motion search. thsad/thsadc use MVTools' scale (8x8 block, 8-bit)."""
     import gigdenoise
@@ -333,7 +335,8 @@ def rust_blend(frames, tr=6, light_tr=2, thsad=300, thsadc=450, tex_lo=0.3, tex_
         np.stack([t[2] for t in inv]).astype(np.float32),
         np.array([t[0] for t in inv], np.float32), np.array([t[1] for t in inv], np.float32),
         tr=tr, light_tr=light_tr, th_y=thsad / unit, th_c=thsadc / unit, tex_lo=tex_lo, tex_hi=tex_hi,
-        hp_sigma=hp_sigma, energy_sigma=energy_sigma, search_range=search_range)
+        hp_sigma=hp_sigma, energy_sigma=energy_sigma, search_range=search_range, spatial_y=spatial_y,
+        spatial_c=spatial_c, spatial_lambda=spatial_lambda, spatial_step=spatial_step, spatial_pre=spatial_pre)
 
 
 DENOISERS["rust_blend"] = (rust_blend, {})
@@ -342,3 +345,25 @@ DENOISERS["rust_blend"] = (rust_blend, {})
 # spatial pass (mostly on colour) makes up the noise reduction.
 ROUND7_PARAMS = {**ROUND5_FAST_PARAMS, "thsad": 220, "spatial_sigma_y": 0.25, "spatial_sigma_c": 0.8}
 DENOISERS["round7"] = (mdegrain_vst_blend, ROUND7_PARAMS)
+
+
+def with_axis(axis, name):
+    """Run another denoiser with the given brightness axis for the noise-equalised space."""
+    def run_it(frames, **params):
+        global VST_AXIS
+        old, VST_AXIS = VST_AXIS, axis
+        try:
+            fn, defaults = DENOISERS[name]
+            return fn(frames, **{**defaults, **params})
+        finally:
+            VST_AXIS = old
+    return run_it
+
+
+for _n in ("round5", "round5_fast", "round7", "rust_blend"):
+    DENOISERS[_n + "_grey"] = (with_axis("grey", _n), {})
+
+# Round 8: Rust pipeline, grey-aligned brightness axis, stricter temporal matching plus a light
+# spatial DCT pass. Matches round 5's brightness noise reduction with far more detail kept.
+ROUND8_PARAMS = {"thsad": 220, "spatial_y": 0.4, "spatial_c": 0.8}
+DENOISERS["round8"] = (with_axis("grey", "rust_blend"), ROUND8_PARAMS)
