@@ -265,11 +265,11 @@ pub fn run(
     let mut finest: Option<(wgpu::Buffer, wgpu::Buffer, wgpu::Buffer)> = None;
     for l in (0..levels.len()).rev() {
         let (wl, hl, ref lum32) = levels[l];
-        let lum = &gpu.empty((((wl + 1) / 2) * hl * t) as usize);
+        let lum = &gpu.empty((((wl + 3) / 4) * hl * t) as usize);
         {
             let mut p = base;
             p.wl = wl; p.hl = hl;
-            gpu.dispatch(&mut enc, "pack", &p, &[lum32, lum], groups((wl + 1) / 2), groups(hl), t);
+            gpu.dispatch(&mut enc, "pack", &p, &[lum32, lum], groups((wl + 3) / 4), groups(hl), t);
         }
         let (bsl, offl) = if l == 0 { (16u32, 8u32) } else { (8, 0) };
         let (nbxl, nbyl) = if l == 0 { (nbx, nby) } else { ((wl + 7) / 8, (hl + 7) / 8) };
