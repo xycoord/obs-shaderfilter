@@ -310,3 +310,7 @@ DENOISERS["best"] = (mdegrain_vst_blend, BEST_PARAMS)
 ROUND5_PARAMS = {"tr": 6, "light_tr": 2, "thsad": 300, "thsadc": 300}
 DENOISERS["round5"] = (mdegrain_vst_blend, ROUND5_PARAMS)
 DENOISERS["round6"] = (mdegrain_vst_blend, BEST_PARAMS)
+
+# Round 5 with the speed climb's accepted search settings (records/speed_log.md, step 3e).
+ROUND5_FAST_PARAMS = {**ROUND5_PARAMS, "thsadc": 450, "chroma_search": False, "pel": 1}
+DENOISERS["round5_fast"] = (mdegrain_vst_blend, ROUND5_FAST_PARAMS)
