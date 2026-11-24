@@ -321,7 +321,7 @@ DENOISERS["round5_fast"] = (mdegrain_vst_blend, ROUND5_FAST_PARAMS)
 # --- Rust implementation (rust/, built with `maturin develop --release`) -------
 
 def rust_blend(frames, tr=6, light_tr=2, thsad=300, thsadc=450, tex_lo=0.3, tex_hi=1.0, hp_sigma=1.5,
-               energy_sigma=3.0, search_range=4, spatial_y=0.0, spatial_c=0.0, spatial_lambda=2.7, spatial_step=4, spatial_pre=False):
+               energy_sigma=3.0, search_range=4, spatial_y=0.0, spatial_c=0.0, spatial_lambda=2.7, spatial_step=4, spatial_pre=False, colour_sad=False):
     """Round 5 re-implemented from scratch in Rust: same structure as mdegrain_vst_blend with
     brightness-only, whole-pixel motion search. thsad/thsadc use MVTools' scale (8x8 block, 8-bit)."""
     import gigdenoise
@@ -336,7 +336,7 @@ def rust_blend(frames, tr=6, light_tr=2, thsad=300, thsadc=450, tex_lo=0.3, tex_
         np.array([t[0] for t in inv], np.float32), np.array([t[1] for t in inv], np.float32),
         tr=tr, light_tr=light_tr, th_y=thsad / unit, th_c=thsadc / unit, tex_lo=tex_lo, tex_hi=tex_hi,
         hp_sigma=hp_sigma, energy_sigma=energy_sigma, search_range=search_range, spatial_y=spatial_y,
-        spatial_c=spatial_c, spatial_lambda=spatial_lambda, spatial_step=spatial_step, spatial_pre=spatial_pre)
+        spatial_c=spatial_c, spatial_lambda=spatial_lambda, spatial_step=spatial_step, spatial_pre=spatial_pre, colour_sad=colour_sad)
 
 
 DENOISERS["rust_blend"] = (rust_blend, {})

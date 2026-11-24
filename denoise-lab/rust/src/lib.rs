@@ -519,7 +519,7 @@ fn lerp(table: &[f32], lo: f32, step: f32, x: f32) -> f32 {
 #[pyo3(signature = (frames, fwd_tables, fwd_lo, fwd_step, matrix, inv_matrix, inv_tables, inv_lo, inv_step,
                     tr=6, light_tr=2, th_y=2.39, th_c=3.58, tex_lo=0.3, tex_hi=1.0, hp_sigma=1.5,
                     energy_sigma=3.0, search_range=4, spatial_y=0.0, spatial_c=0.0, spatial_lambda=2.7,
-                    spatial_step=4, spatial_pre=false))]
+                    spatial_step=4, spatial_pre=false, colour_sad=false))]
 fn denoise<'py>(
     py: Python<'py>,
     frames: PyReadonlyArray4<'py, f32>,
@@ -545,6 +545,7 @@ fn denoise<'py>(
     spatial_lambda: f32,
     spatial_step: usize,
     spatial_pre: bool,
+    colour_sad: bool,
 ) -> PyResult<Bound<'py, PyArray4<f32>>> {
     let fr = frames.as_array();
     let (t_len, h, w, _) = fr.dim();
@@ -628,7 +629,26 @@ fn denoise<'py>(
             .collect();
         let fields: Vec<((usize, usize), Field)> = jobs
             .par_iter()
-            .map(|&(t, r)| ((t, r), estimate(&pyr[t], &pyr[r], search_range)))
+            .map(|&(t, r)| {
+                let mut f = estimate(&pyr[t], &pyr[r], search_range);
+                if colour_sad {
+                    // Weights use brightness + colour difference (averaged per plane), so blocks
+                    // whose colour doesn't match are rejected even where brightness can't tell
+                    // them apart (dark, flat areas). The search itself stays brightness-only.
+                    let (nbx, nby) = grid(w, h);
+                    for by in 0..nby {
+                        for bx in 0..nbx {
+                            let i = by * nbx + bx;
+                            let (ox, oy) = origin(bx, by);
+                            let (vx, vy) = (f.vx[i] as isize, f.vy[i] as isize);
+                            let c1 = sad_n::<16>(&planes[t][1], ox, oy, &planes[r][1], ox + vx, oy + vy);
+                            let c2 = sad_n::<16>(&planes[t][2], ox, oy, &planes[r][2], ox + vx, oy + vy);
+                            f.sad[i] = (f.sad[i] + c1 + c2) / 3.0;
+                        }
+                    }
+                }
+                ((t, r), f)
+            })
             .collect();
         lap("motion search");
         // 3-5. Per frame: strong and light averages, texture blend, inverse transform.

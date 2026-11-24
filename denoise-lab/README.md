@@ -36,3 +36,15 @@ milestones and every run is logged to `records/heldout_log.jsonl` (committed). I
 
 `python review.py none mdegrain --run <name>` renders 1:1 comparisons on the real footage.
 `python tests/test_colour.py` checks the colour maths. Denoisers live in `lab/denoisers.py`.
+
+## Rust implementation
+
+`rust/` holds a from-scratch Rust version of the round-5 denoiser (no MVTools or VapourSynth), about 2x faster
+than the tuned MVTools pipeline and 3.3x faster than the round-5 start at equal quality. Build it into the lab's
+environment with:
+
+    cd rust && maturin develop --release
+
+It is the `rust_blend` denoiser (`round8` and the `*_grey` variants also use it). It is compiled for this
+machine's CPU (`target-cpu=native` in rust/.cargo/config.toml); remove that line to build a portable copy.
+Set `GIGDENOISE_PROFILE=1` to print stage timings.
