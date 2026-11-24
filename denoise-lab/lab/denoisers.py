@@ -371,31 +371,40 @@ DENOISERS["round8"] = (with_axis("grey", "rust_blend"), ROUND8_PARAMS)
 
 # --- GPU implementation (gpu/, built with `maturin develop --release`) ---------
 
+def _gpu_plan(t_len, h, w, tr, margin, mem_mb, max_binding_mb):
+    """Tiles and frame windows for gpu_blend: the split that processes the fewest pixels in all
+    (tile margins and each window's tr frames of context each side are extra work), with a
+    window's working set (about 96 bytes per pixel per frame) inside mem_mb and its largest
+    buffer (12 bytes per pixel per frame) inside the device's binding limit."""
+    best = None
+    for ny in range(1, 9):
+        for nx in range(1, 9):
+            th_, tw_ = -(-h // ny), -(-w // nx)
+            px = (th_ + (2 * margin if ny > 1 else 0)) * (tw_ + (2 * margin if nx > 1 else 0))
+            frames_fit = int(min(mem_mb * 2 ** 20 / (96 * px), max_binding_mb * 2 ** 20 / (12 * px)))
+            if frames_fit < min(t_len, 2 * tr + 1):
+                continue
+            span = t_len if frames_fit >= t_len else frames_fit - 2 * tr
+            work = sum(min(s + span + tr, t_len) - max(s - tr, 0) for s in range(0, t_len, span)) * px * ny * nx
+            if best is None or work < best[0]:
+                best = (work, ny, nx, span)
+    if best is None:
+        raise MemoryError("gpu_blend: no tiling fits mem_mb")
+    return best[1:]
+
+
 def gpu_blend(frames, tr=6, light_tr=2, thsad=300, thsadc=450, tex_lo=0.3, tex_hi=1.0, hp_sigma=1.5,
-              energy_sigma=3.0, search_range=4, max_mb=96, margin=96, window_budget_mb=256):
+              energy_sigma=3.0, search_range=4, margin=96, mem_mb=2048):
     """Round 5 on the GPU (wgpu compute shaders); same parameters as rust_blend.
 
-    GPUs cap how big one buffer binding can be (128 MB on some drivers), so the clip is
-    processed in overlapping tiles: windows of frames (with tr frames of context each
-    side) and, if needed, spatial tiles (with `margin` pixels of context)."""
+    The clip is processed in overlapping pieces that fit in GPU memory: windows of frames (with
+    tr frames of context each side) and, if needed, spatial tiles (with `margin` pixels of
+    context). _gpu_plan picks the split with the least extra work for a working set of mem_mb."""
+    import gigdenoise_gpu
     frames = np.asarray(frames, np.float32)
     t_len, h, w, _ = frames.shape
-    per_frame_mb = 3 * h * w * 4 / 2 ** 20
-    # Spatial tiling only if even a single window of 2*tr+1 frames is too big.
-    tiles_y = tiles_x = 1
-    while per_frame_mb / (tiles_y * tiles_x) * (2 * tr + 2) > max_mb:
-        if tiles_x <= tiles_y:
-            tiles_x += 1
-        else:
-            tiles_y += 1
+    tiles_y, tiles_x, span = _gpu_plan(t_len, h, w, tr, margin, mem_mb, gigdenoise_gpu.max_binding() / 2 ** 20)
     th_, tw_ = -(-h // tiles_y), -(-w // tiles_x)
-    tile_mb = 3 * (th_ + 2 * margin) * (tw_ + 2 * margin) * 4 / 2 ** 20
-    # Frame windows only bound memory: each output frame depends on its own references alone, so
-    # the window length does not change the result. Use as long a window as the device allows
-    # (spatial tiles above still follow max_mb, since they do change the result near seams).
-    import gigdenoise_gpu
-    window_mb = min(gigdenoise_gpu.max_binding() / 2 ** 20, window_budget_mb)
-    span = max(int(window_mb // tile_mb) - 2 * tr, 1)  # output frames per window
     out = np.empty_like(frames)
     for ty in range(tiles_y):
         for tx in range(tiles_x):
