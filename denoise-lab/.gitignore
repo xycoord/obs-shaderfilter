@@ -13,3 +13,4 @@ testset/*/real/
 fetch.log
 bench_input.npy
 rust/target/
+gpu/target/

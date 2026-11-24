@@ -367,3 +367,59 @@ for _n in ("round5", "round5_fast", "round7", "rust_blend"):
 # spatial DCT pass. Matches round 5's brightness noise reduction with far more detail kept.
 ROUND8_PARAMS = {"thsad": 220, "spatial_y": 0.4, "spatial_c": 0.8}
 DENOISERS["round8"] = (with_axis("grey", "rust_blend"), ROUND8_PARAMS)
+
+
+# --- GPU implementation (gpu/, built with `maturin develop --release`) ---------
+
+def gpu_blend(frames, tr=6, light_tr=2, thsad=300, thsadc=450, tex_lo=0.3, tex_hi=1.0, hp_sigma=1.5,
+              energy_sigma=3.0, search_range=4, max_mb=96, margin=96):
+    """Round 5 on the GPU (wgpu compute shaders); same parameters as rust_blend.
+
+    GPUs cap how big one buffer binding can be (128 MB on some drivers), so the clip is
+    processed in overlapping tiles: windows of frames (with tr frames of context each
+    side) and, if needed, spatial tiles (with `margin` pixels of context)."""
+    frames = np.asarray(frames, np.float32)
+    t_len, h, w, _ = frames.shape
+    per_frame_mb = 3 * h * w * 4 / 2 ** 20
+    # Spatial tiling only if even a single window of 2*tr+1 frames is too big.
+    tiles_y = tiles_x = 1
+    while per_frame_mb / (tiles_y * tiles_x) * (2 * tr + 2) > max_mb:
+        if tiles_x <= tiles_y:
+            tiles_x += 1
+        else:
+            tiles_y += 1
+    th_, tw_ = -(-h // tiles_y), -(-w // tiles_x)
+    tile_mb = 3 * (th_ + 2 * margin) * (tw_ + 2 * margin) * 4 / 2 ** 20
+    span = max(int(max_mb // tile_mb) - 2 * tr, 1)  # output frames per window
+    out = np.empty_like(frames)
+    for ty in range(tiles_y):
+        for tx in range(tiles_x):
+            y0, y1 = ty * th_, min((ty + 1) * th_, h)
+            x0, x1 = tx * tw_, min((tx + 1) * tw_, w)
+            Y0, Y1 = (max(y0 - margin, 0), min(y1 + margin, h)) if tiles_y > 1 else (0, h)
+            X0, X1 = (max(x0 - margin, 0), min(x1 + margin, w)) if tiles_x > 1 else (0, w)
+            for s in range(0, t_len, span):
+                e = min(s + span, t_len)
+                S, E = max(s - tr, 0), min(e + tr, t_len)
+                res = _gpu_call(frames[S:E, Y0:Y1, X0:X1], tr, light_tr, thsad, thsadc, tex_lo, tex_hi,
+                                hp_sigma, energy_sigma, search_range)
+                out[s:e, y0:y1, x0:x1] = res[s - S:e - S, y0 - Y0:y1 - Y0, x0 - X0:x1 - X0]
+    return out
+
+
+def _gpu_call(frames, tr, light_tr, thsad, thsadc, tex_lo, tex_hi, hp_sigma, energy_sigma, search_range):
+    import gigdenoise_gpu
+    T = noise_transform()
+    inv = T._inverse_tables()
+    unit = 64 * 255.0 / VST_SCALE
+    step = (T.grid[-1] - T.grid[0]) / (len(T.grid) - 1)
+    return gigdenoise_gpu.denoise(
+        np.ascontiguousarray(frames, np.float32), T.curves.astype(np.float32), float(T.grid[0]), float(step),
+        T.matrix.astype(np.float32), T.inverse.astype(np.float32),
+        np.stack([t[2] for t in inv]).astype(np.float32),
+        np.array([t[0] for t in inv], np.float32), np.array([t[1] for t in inv], np.float32),
+        tr=tr, light_tr=light_tr, th_y=thsad / unit, th_c=thsadc / unit, tex_lo=tex_lo, tex_hi=tex_hi,
+        hp_sigma=hp_sigma, energy_sigma=energy_sigma, search_range=search_range)
+
+
+DENOISERS["gpu_blend"] = (gpu_blend, {})
