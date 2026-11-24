@@ -11,7 +11,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     let pix = (t * P.h + y) * P.w + x;
     var v: array<f32, 3>;
     for (var c = 0u; c < 3u; c++) {
-        let f = clamp((src[pix * 3u + c] - P.fwd_lo) / P.fwd_step, 0.0, f32(P.fwd_n - 1u) - 1e-3);
+        let f = clamp((src[P.in_off + t * P.in_st + y * P.in_sy + x * P.in_sx + c] - P.fwd_lo) / P.fwd_step, 0.0, f32(P.fwd_n - 1u) - 1e-3);
         let i = u32(f);
         let a = f - f32(i);
         v[c] = tab[c * P.fwd_n + i] * (1.0 - a) + tab[c * P.fwd_n + i + 1u] * a;

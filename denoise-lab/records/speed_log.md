@@ -78,9 +78,24 @@ overall and 0.15 dB on the worst 5 % of regions. Rounds 1-5 kept output bit-iden
 | 13 | search workgroup shapes 16x4, 32x2, 64x1 | | | 8x8 stays fastest |
 | 14 | directly mapped input/output buffers | 0.032 | | undone (no gain) |
 | 15 | multi-threaded upload/readback copies | 0.038 | | undone (slower) |
+| 16 | zero copy: numpy arrays imported as GPU buffers (VK_EXT_external_memory_host), once per call | 0.0275 | 0.035 | kept as opt-in (`GIGDENOISE_IMPORT=1`): lost the GPU twice at 4K |
 
 Rust CPU on the same machine: 0.048-0.049 at 1080p, so the GPU version is about 1.5x faster there. At 4K
 both vary widely with memory pressure on this 16 GB machine (Rust 0.054-0.092, GPU 0.040-0.078).
 The search is memory-bound, not arithmetic-bound: shrinking the data it reads gave the big wins, while
 spreading each sum across lanes, textures and on-chip tiles all slowed it down. Remaining time at 1080p
 (about 1 s per 13-frame clip): search 41 %, averaging 21 %, copies in and out about 17 %, blurs 8 %.
+
+Round 16 (zero copy, opt-in). The laptop's GPU shares main memory with the CPU, and its Vulkan driver supports
+VK_EXT_external_memory_host, so the frames and the output array are imported in place as GPU buffers:
+the forward transform reads the numpy frames directly (any positive strides) and the final stage writes
+the kept crop straight into `out`. Both arrays are imported once per `denoise_tiles` call and shared by
+all tiles; importing per tile was slower at 4K, because column tiles each span the whole array and
+pinning it seven times cost more than the copies saved. Interleaved A/B on the same build, 4 pairs each: 1080p 0.0275 vs 0.0318 (14 % faster), 4K 0.035 vs 0.039 (11 %
+faster). Output identical to round 11 at both sizes. Without the extension (other drivers, other
+backends) or for arrays too large for one binding, it falls back to copying per tile.
+It is off by default because it is not yet reliable: in 15 runs of four 4K clips each, 2 ended with the
+Vulkan device lost, both while the machine had only about 5 GB free and was swapping; 8 runs of the
+copy path in the same conditions, and every 1080p run, were fine. The likely cause is the kernel
+moving or reclaiming the imported pages while the GPU uses them (they can't be locked in memory: the
+memlock limit here is 8 MB). Turn it on with `GIGDENOISE_IMPORT=1`.

@@ -11,5 +11,10 @@ struct Params {
     fwd_lo: f32, fwd_step: f32, fwd_n: u32, inv_n: u32,
     inv_lo: vec4<f32>,
     inv_step: vec4<f32>,
+    // input element (word) offset and strides; output offset and strides; crop start and size
+    in_off: u32, in_st: u32, in_sy: u32, in_sx: u32,
+    out_off: u32, out_st: u32, out_sy: u32, out_sx: u32,
+    ct: u32, cy: u32, cx: u32, ot: u32,
+    oh: u32, ow: u32, pad3: u32, pad4: u32,
 };
 @group(0) @binding(0) var<uniform> P: Params;

@@ -406,6 +406,7 @@ def gpu_blend(frames, tr=6, light_tr=2, thsad=300, thsadc=450, tex_lo=0.3, tex_h
     tiles_y, tiles_x, span = _gpu_plan(t_len, h, w, tr, margin, mem_mb, gigdenoise_gpu.max_binding() / 2 ** 20)
     th_, tw_ = -(-h // tiles_y), -(-w // tiles_x)
     out = np.empty_like(frames)
+    tiles = []
     for ty in range(tiles_y):
         for tx in range(tiles_x):
             y0, y1 = ty * th_, min((ty + 1) * th_, h)
@@ -415,24 +416,19 @@ def gpu_blend(frames, tr=6, light_tr=2, thsad=300, thsadc=450, tex_lo=0.3, tex_h
             for s in range(0, t_len, span):
                 e = min(s + span, t_len)
                 S, E = max(s - tr, 0), min(e + tr, t_len)
-                _gpu_call(frames[S:E, Y0:Y1, X0:X1], out[s:e, y0:y1, x0:x1], (s - S, y0 - Y0, x0 - X0),
-                          tr, light_tr, thsad, thsadc, tex_lo, tex_hi, hp_sigma, energy_sigma, search_range)
-    return out
-
-
-def _gpu_call(frames, out, crop, tr, light_tr, thsad, thsadc, tex_lo, tex_hi, hp_sigma, energy_sigma, search_range):
-    import gigdenoise_gpu
+                tiles.append((S, E, Y0, Y1, X0, X1, s, e, y0, y1, x0, x1))
     T = noise_transform()
     inv = T._inverse_tables()
     unit = 64 * 255.0 / VST_SCALE
     step = (T.grid[-1] - T.grid[0]) / (len(T.grid) - 1)
-    gigdenoise_gpu.denoise_into(
-        frames, out, crop, T.curves.astype(np.float32), float(T.grid[0]), float(step),
+    gigdenoise_gpu.denoise_tiles(
+        frames, out, tiles, T.curves.astype(np.float32), float(T.grid[0]), float(step),
         T.matrix.astype(np.float32), T.inverse.astype(np.float32),
         np.stack([t[2] for t in inv]).astype(np.float32),
         np.array([t[0] for t in inv], np.float32), np.array([t[1] for t in inv], np.float32),
         tr=tr, light_tr=light_tr, th_y=thsad / unit, th_c=thsadc / unit, tex_lo=tex_lo, tex_hi=tex_hi,
         hp_sigma=hp_sigma, energy_sigma=energy_sigma, search_range=search_range)
+    return out
 
 
 DENOISERS["gpu_blend"] = (gpu_blend, {})

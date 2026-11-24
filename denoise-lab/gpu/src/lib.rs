@@ -26,10 +26,23 @@ struct Params {
     fwd_lo: f32, fwd_step: f32, fwd_n: u32, inv_n: u32,
     inv_lo: [f32; 4],
     inv_step: [f32; 4],
+    in_off: u32, in_st: u32, in_sy: u32, in_sx: u32,
+    out_off: u32, out_st: u32, out_sy: u32, out_sx: u32,
+    ct: u32, cy: u32, cx: u32, ot: u32,
+    oh: u32, ow: u32, pad3: u32, pad4: u32,
+}
+
+/// Vulkan's VK_EXT_external_memory_host: lets the GPU use ordinary program memory (here the
+/// numpy arrays) as a buffer in place, so the frames are not copied in or out.
+struct HostImport {
+    dev: ash::Device,
+    ext: ash::ext::external_memory_host::Device,
+    align: usize,
 }
 
 pub struct Gpu {
     pub max_binding: u64,
+    host: Option<HostImport>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     pub adapter_name: String,
@@ -51,13 +64,55 @@ impl Gpu {
         limits.max_buffer_size = al.max_buffer_size;
         limits.max_storage_buffers_per_shader_stage = al.max_storage_buffers_per_shader_stage.min(16);
         let max_binding = limits.max_storage_buffer_binding_size as u64;
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        let desc = wgpu::DeviceDescriptor {
             label: None,
             required_features: wgpu::Features::empty(),
-            required_limits: limits,
+            required_limits: limits.clone(),
             ..Default::default()
-        }))
+        };
+        // With GIGDENOISE_IMPORT set, open the device with VK_EXT_external_memory_host where the
+        // driver has it, so frames are used in place; otherwise they are copied in and out.
+        // Opt-in because it lost the device twice at 4K under memory pressure (see speed_log.md).
+        let ext_name = ash::ext::external_memory_host::NAME;
+        let open = if std::env::var_os("GIGDENOISE_IMPORT").is_none() {
+            None
+        } else {
+            unsafe { adapter.as_hal::<wgpu::hal::api::Vulkan>() }.and_then(|ha| {
+                let inst = ha.shared_instance().raw_instance();
+                let has = unsafe { inst.enumerate_device_extension_properties(ha.raw_physical_device()) }
+                    .map(|v| v.iter().any(|e| e.extension_name_as_c_str() == Ok(ext_name)))
+                    .unwrap_or(false);
+                if !has {
+                    return None;
+                }
+                unsafe {
+                    ha.open_with_callback(
+                        wgpu::Features::empty(), &limits, &wgpu::MemoryHints::default(),
+                        Some(Box::new(move |args: wgpu::hal::vulkan::CreateDeviceCallbackArgs| args.extensions.push(ext_name))),
+                    )
+                }
+                .ok()
+            })
+        };
+        let (device, queue) = match open {
+            Some(open) => unsafe { adapter.create_device_from_hal(open, &desc) },
+            None => pollster::block_on(adapter.request_device(&desc)),
+        }
         .map_err(|e| format!("device: {e}"))?;
+        let host = if open_is_import(&device, ext_name) {
+            unsafe { device.as_hal::<wgpu::hal::api::Vulkan>() }.map(|hd| {
+                let inst = hd.shared_instance().raw_instance();
+                let dev = hd.raw_device().clone();
+                let ext = ash::ext::external_memory_host::Device::new(inst, &dev);
+                let mut emh = ash::vk::PhysicalDeviceExternalMemoryHostPropertiesEXT::default();
+                let mut p2 = ash::vk::PhysicalDeviceProperties2::default().push_next(&mut emh);
+                unsafe { inst.get_physical_device_properties2(hd.raw_physical_device(), &mut p2) };
+                let align = emh.min_imported_host_pointer_alignment.max(4096) as usize;
+                HostImport { dev, ext, align }
+            })
+        } else {
+            None
+        };
         let mut pipes = std::collections::HashMap::new();
         for (name, src) in [
             ("forward", include_str!("wgsl/forward.wgsl")),
@@ -83,7 +138,7 @@ impl Gpu {
             });
             pipes.insert(name, pipe);
         }
-        Ok(Gpu { max_binding, device, queue, adapter_name: format!("{} ({:?})", info.name, info.backend), pipes })
+        Ok(Gpu { max_binding, host, device, queue, adapter_name: format!("{} ({:?})", info.name, info.backend), pipes })
     }
 
     fn storage(&self, bytes: &[u8]) -> wgpu::Buffer {
@@ -157,6 +212,56 @@ impl Gpu {
         f(bytemuck::cast_slice::<u8, f32>(&view));
     }
 
+    /// Wrap the memory holding `len` bytes at `ptr` as a GPU buffer, in place. Returns the buffer
+    /// and the word offset of `ptr` inside it (the buffer starts at the page holding `ptr`).
+    /// The memory must stay valid, and not be touched by the CPU, until the buffer is destroyed.
+    unsafe fn import(&self, ptr: *const u8, len: usize) -> Option<(wgpu::Buffer, u32)> {
+        use ash::vk;
+        let hi = self.host.as_ref()?;
+        let a = hi.align;
+        let start = ptr as usize & !(a - 1);
+        let end = (ptr as usize + len + a - 1) & !(a - 1);
+        let size = (end - start) as u64;
+        if size > self.max_binding || (ptr as usize - start) % 4 != 0 {
+            return None;
+        }
+        let ht = vk::ExternalMemoryHandleTypeFlags::HOST_ALLOCATION_EXT;
+        let mut hp = vk::MemoryHostPointerPropertiesEXT::default();
+        (hi.ext.fp().get_memory_host_pointer_properties_ext)(hi.ext.device(), ht, start as *const std::ffi::c_void, &mut hp).result().ok()?;
+        let mut ebi = vk::ExternalMemoryBufferCreateInfo::default().handle_types(ht);
+        let bci = vk::BufferCreateInfo::default()
+            .size(size)
+            .usage(vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST)
+            .sharing_mode(vk::SharingMode::EXCLUSIVE)
+            .push_next(&mut ebi);
+        let b = hi.dev.create_buffer(&bci, None).ok()?;
+        let req = hi.dev.get_buffer_memory_requirements(b);
+        let bits = req.memory_type_bits & hp.memory_type_bits;
+        if bits == 0 || req.size > size {
+            hi.dev.destroy_buffer(b, None);
+            return None;
+        }
+        let mut imp = vk::ImportMemoryHostPointerInfoEXT::default().handle_type(ht).host_pointer(start as *mut std::ffi::c_void);
+        let mai = vk::MemoryAllocateInfo::default().allocation_size(size).memory_type_index(bits.trailing_zeros()).push_next(&mut imp);
+        let mem = match hi.dev.allocate_memory(&mai, None) {
+            Ok(m) => m,
+            Err(_) => { hi.dev.destroy_buffer(b, None); return None; }
+        };
+        if hi.dev.bind_buffer_memory(b, mem, 0).is_err() {
+            hi.dev.free_memory(mem, None);
+            hi.dev.destroy_buffer(b, None);
+            return None;
+        }
+        let hb = wgpu::hal::vulkan::Buffer::from_raw_managed(b, mem, 0, size);
+        let buf = self.device.create_buffer_from_hal::<wgpu::hal::api::Vulkan>(hb, &wgpu::BufferDescriptor {
+            label: None,
+            size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        Some((buf, ((ptr as usize - start) / 4) as u32))
+    }
+
     /// Storage buffer filled row by row from a (possibly strided) [T][H][W][3] view.
     fn upload_frames(&self, v: &ArrayView4<f32>) -> wgpu::Buffer {
         let (t, h, w, c) = v.dim();
@@ -184,6 +289,22 @@ impl Gpu {
     }
 }
 
+/// Bytes from the first to just past the last element of a [T][H][W][3] view whose strides are
+/// all positive and whose channels are adjacent; None otherwise.
+fn view_span(st: &[isize], d: (usize, usize, usize, usize)) -> Option<usize> {
+    if st.iter().any(|&x| x <= 0) || st[3] != 1 || d.0 == 0 || d.1 == 0 || d.2 == 0 {
+        return None;
+    }
+    let last = (d.0 - 1) * st[0] as usize + (d.1 - 1) * st[1] as usize + (d.2 - 1) * st[2] as usize + 3;
+    Some(last * 4)
+}
+
+fn open_is_import(device: &wgpu::Device, ext_name: &std::ffi::CStr) -> bool {
+    unsafe { device.as_hal::<wgpu::hal::api::Vulkan>() }
+        .map(|hd| hd.enabled_device_extensions().contains(&ext_name))
+        .unwrap_or(false)
+}
+
 fn gauss_kernel(sigma: f32) -> Vec<f32> {
     let r = (4.0 * sigma + 0.5) as i32;
     let mut k: Vec<f32> = (-r..=r).map(|i| (-(i * i) as f32 / (2.0 * sigma * sigma)).exp()).collect();
@@ -197,8 +318,25 @@ fn groups(n: u32) -> u32 {
 }
 
 #[allow(clippy::too_many_arguments)]
+/// A whole numpy array imported once and shared by all the tiles cut from it: the buffer, the
+/// word offset of the array's first element in it, and that element's address.
+pub struct Whole {
+    buf: wgpu::Buffer,
+    off: u32,
+    ptr: usize,
+}
+
+impl Whole {
+    /// The buffer and the word offset of the element at `p`, which must lie inside the array.
+    fn at(&self, p: usize) -> (wgpu::Buffer, u32) {
+        (self.buf.clone(), self.off + ((p - self.ptr) / 4) as u32)
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     gpu: &Gpu, input: ArrayView4<f32>, out: &mut ArrayViewMut4<f32>, crop: (usize, usize, usize),
+    in_whole: Option<&Whole>, out_whole: Option<&Whole>,
     fwd_tab: &[f32], fwd_lo: f32, fwd_step: f32, mat: &[f32], imat: &[f32],
     inv_tab: &[f32], inv_lo: [f32; 3], inv_step: [f32; 3],
     tr: usize, light_tr: usize, th_y: f32, th_c: f32, tex_lo: f32, tex_hi: f32,
@@ -235,7 +373,22 @@ pub fn run(
     };
     let prof = std::env::var_os("GIGDENOISE_PROFILE").is_some();
     let t_up = std::time::Instant::now();
-    let b_in = gpu.upload_frames(&input);
+    // Input: use the numpy memory in place if the driver allows, else copy it in.
+    let in_import = match in_whole {
+        Some(wh) => Some(wh.at(input.as_ptr() as usize)),
+        None => view_span(input.strides(), input.dim()).and_then(|len| unsafe { gpu.import(input.as_ptr() as *const u8, len) }),
+    };
+    let b_in = match &in_import {
+        Some((buf, off)) => {
+            let st = input.strides();
+            (base.in_off, base.in_st, base.in_sy, base.in_sx) = (*off, st[0] as u32, st[1] as u32, st[2] as u32);
+            buf.clone()
+        }
+        None => {
+            (base.in_off, base.in_st, base.in_sy, base.in_sx) = (0, hh * ww * 3, ww * 3, 3);
+            gpu.upload_frames(&input)
+        }
+    };
     if prof { PROFILE.with(|m| *m.borrow_mut().entry("host_upload".into()).or_insert(0.0) += t_up.elapsed().as_secs_f64()); }
     let b_ftab = gpu.storage(bytemuck::cast_slice(fwd_tab));
     let b_mat = gpu.storage(bytemuck::cast_slice(mat));
@@ -315,26 +468,57 @@ pub fn run(
     let energy = gpu.empty(one);
     blur(&mut enc, &tb, 1, &bk2, k2.len() / 2, 1, &energy);
     // 6. mix and inverse
-    let b_out = gpu.empty(plane_words);
+    // Output: the crop is written straight into `out`'s memory if the driver allows, else into a
+    // compact buffer that is copied out.
+    let (ot, oh, ow, _) = out.dim();
+    (base.ct, base.cy, base.cx, base.ot, base.oh, base.ow) =
+        (crop.0 as u32, crop.1 as u32, crop.2 as u32, ot as u32, oh as u32, ow as u32);
+    let out_import = match out_whole {
+        Some(wh) => Some(wh.at(out.as_mut_ptr() as usize)),
+        None => view_span(out.strides(), out.dim()).and_then(|len| unsafe { gpu.import(out.as_mut_ptr() as *const u8, len) }),
+    };
+    let b_out = match &out_import {
+        Some((buf, off)) => {
+            let st = out.strides();
+            (base.out_off, base.out_st, base.out_sy, base.out_sx) = (*off, st[0] as u32, st[1] as u32, st[2] as u32);
+            buf.clone()
+        }
+        None => {
+            (base.out_off, base.out_st, base.out_sy, base.out_sx) = (0, (oh * ow * 3) as u32, (ow * 3) as u32, 3);
+            gpu.empty(ot * oh * ow * 3)
+        }
+    };
     base.pad1 = 0;
-    gpu.dispatch(&mut enc, "final", &base, &[&b_strong, &b_light, &energy, &b_imat, &b_itab, &b_out], groups(ww), groups(hh), t);
+    gpu.dispatch(&mut enc, "final", &base, &[&b_strong, &b_light, &energy, &b_imat, &b_itab, &b_out], groups(ow as u32), groups(oh as u32), ot as u32);
     gpu.queue.submit([enc.finish()]);
     let t_rd = std::time::Instant::now();
-    // Copy the wanted part of the result (out's shape, starting at crop) straight into out.
-    gpu.read_with(&b_out, plane_words, |res| {
-        let (ot, oh, ow, _) = out.dim();
-        for ti in 0..ot {
-            for y in 0..oh {
-                let at = (((ti + crop.0) * h + y + crop.1) * w + crop.2) * 3;
-                let src = &res[at..at + ow * 3];
-                let mut dst = out.slice_mut(s![ti, y, .., ..]);
-                match dst.as_slice_mut() {
-                    Some(d) => d.copy_from_slice(src),
-                    None => dst.iter_mut().zip(src).for_each(|(d, s)| *d = *s),
+    if out_import.is_some() {
+        gpu.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    } else {
+        gpu.read_with(&b_out, ot * oh * ow * 3, |res| {
+            for ti in 0..ot {
+                for y in 0..oh {
+                    let src = &res[(ti * oh + y) * ow * 3..(ti * oh + y + 1) * ow * 3];
+                    let mut dst = out.slice_mut(s![ti, y, .., ..]);
+                    match dst.as_slice_mut() {
+                        Some(d) => d.copy_from_slice(src),
+                        None => dst.iter_mut().zip(src).for_each(|(d, s)| *d = *s),
+                    }
                 }
             }
-        }
-    });
+        });
+    }
+    if prof {
+        PROFILE.with(|m| {
+            let mut m = m.borrow_mut();
+            *m.entry("imported_in".into()).or_insert(0.0) += in_import.is_some() as u8 as f64;
+            *m.entry("imported_out".into()).or_insert(0.0) += out_import.is_some() as u8 as f64;
+            *m.entry("calls".into()).or_insert(0.0) += 1.0;
+        });
+    }
+    // Release imported memory now, while the numpy arrays are certainly still alive.
+    if in_whole.is_none() { b_in.destroy(); }
+    if out_whole.is_none() { b_out.destroy(); }
     if prof { PROFILE.with(|m| *m.borrow_mut().entry("host_read".into()).or_insert(0.0) += t_rd.elapsed().as_secs_f64()); }
 }
 
@@ -369,15 +553,18 @@ fn max_binding() -> PyResult<u64> {
     })
 }
 
-/// Denoise `frames` ([T][H][W][3], may be a strided view) and write the part of the result that
-/// starts at `crop` (t, y, x) and has `out`'s shape into `out` (may be a strided view).
+/// Denoise `frames` ([T][H][W][3]) piece by piece into `out` (same shape). Each tile is
+/// (S, E, Y0, Y1, X0, X1, s, e, y0, y1, x0, x1): frames[S:E, Y0:Y1, X0:X1] are denoised together
+/// and the part out[s:e, y0:y1, x0:x1] is kept. Where the driver allows, frames and out are each
+/// imported once as GPU buffers and used in place; otherwise each tile is copied in and out.
 #[pyfunction]
 #[allow(clippy::too_many_arguments)]
-#[pyo3(signature = (frames, out, crop, fwd_tables, fwd_lo, fwd_step, matrix, inv_matrix, inv_tables, inv_lo, inv_step,
+#[pyo3(signature = (frames, out, tiles, fwd_tables, fwd_lo, fwd_step, matrix, inv_matrix, inv_tables, inv_lo, inv_step,
                     tr=6, light_tr=2, th_y=2.39, th_c=3.58, tex_lo=0.3, tex_hi=1.0, hp_sigma=1.5,
                     energy_sigma=3.0, search_range=4))]
-fn denoise_into<'py>(
-    py: Python<'py>, frames: PyReadonlyArray4<'py, f32>, mut out: PyReadwriteArray4<'py, f32>, crop: (usize, usize, usize),
+#[allow(non_snake_case)]
+fn denoise_tiles<'py>(
+    py: Python<'py>, frames: PyReadonlyArray4<'py, f32>, mut out: PyReadwriteArray4<'py, f32>, tiles: Vec<[usize; 12]>,
     fwd_tables: PyReadonlyArray2<'py, f32>,
     fwd_lo: f32, fwd_step: f32, matrix: PyReadonlyArray2<'py, f32>, inv_matrix: PyReadonlyArray2<'py, f32>,
     inv_tables: PyReadonlyArray2<'py, f32>, inv_lo: PyReadonlyArray1<'py, f32>, inv_step: PyReadonlyArray1<'py, f32>,
@@ -386,11 +573,17 @@ fn denoise_into<'py>(
 ) -> PyResult<()> {
     let _ = py;
     let fr = frames.as_array();
-    let (t_len, h, w, c) = fr.dim();
     let mut ov = out.as_array_mut();
-    let (ot, oh, ow, oc) = ov.dim();
-    if c != 3 || oc != 3 || crop.0 + ot > t_len || crop.1 + oh > h || crop.2 + ow > w {
-        return Err(pyo3::exceptions::PyValueError::new_err("out and crop must fit inside frames' [T][H][W][3]"));
+    let (t_len, h, w, c) = fr.dim();
+    if c != 3 || ov.dim() != fr.dim() {
+        return Err(pyo3::exceptions::PyValueError::new_err("frames and out must both be [T][H][W][3]"));
+    }
+    for k in &tiles {
+        let [S, E, Y0, Y1, X0, X1, s0, e0, y0, y1, x0, x1] = *k;
+        if !(S <= s0 && s0 < e0 && e0 <= E && E <= t_len && Y0 <= y0 && y0 < y1 && y1 <= Y1 && Y1 <= h
+            && X0 <= x0 && x0 < x1 && x1 <= X1 && X1 <= w) {
+            return Err(pyo3::exceptions::PyValueError::new_err("each tile's kept part must lie inside its input part, inside frames"));
+        }
     }
     let ft: Vec<f32> = fwd_tables.as_array().iter().cloned().collect();
     let m: Vec<f32> = matrix.as_array().iter().cloned().collect();
@@ -401,8 +594,30 @@ fn denoise_into<'py>(
     let (il, is) = ([il[0], il[1], il[2]], [is[0], is[1], is[2]]);
     GPU.with(|g| -> Result<(), String> {
         let gpu = g.get_or_init(Gpu::new).as_ref().map_err(|e| e.clone())?;
-        run(gpu, fr, &mut ov, crop, &ft, fwd_lo, fwd_step, &m, &mi, &it, il, is, tr, light_tr, th_y, th_c,
-            tex_lo, tex_hi, hp_sigma, energy_sigma, search_range);
+        let prof = std::env::var_os("GIGDENOISE_PROFILE").is_some();
+        let t0 = std::time::Instant::now();
+        let whole = |p: usize, st: &[isize]| -> Option<Whole> {
+            let len = view_span(st, (t_len, h, w, 3))?;
+            let (buf, off) = unsafe { gpu.import(p as *const u8, len)? };
+            Some(Whole { buf, off, ptr: p })
+        };
+        let in_whole = whole(fr.as_ptr() as usize, fr.strides());
+        let out_whole = whole(ov.as_mut_ptr() as usize, ov.strides());
+        if prof { PROFILE.with(|m| *m.borrow_mut().entry("host_import".into()).or_insert(0.0) += t0.elapsed().as_secs_f64()); }
+        for k in &tiles {
+            let [S, E, Y0, Y1, X0, X1, s0, e0, y0, y1, x0, x1] = *k;
+            let mut o = ov.slice_mut(s![s0..e0, y0..y1, x0..x1, ..]);
+            run(gpu, fr.slice(s![S..E, Y0..Y1, X0..X1, ..]), &mut o, (s0 - S, y0 - Y0, x0 - X0),
+                in_whole.as_ref(), out_whole.as_ref(), &ft, fwd_lo, fwd_step, &m, &mi, &it, il, is, tr, light_tr,
+                th_y, th_c, tex_lo, tex_hi, hp_sigma, energy_sigma, search_range);
+        }
+        // Release the imported memory before returning, while frames and out are still alive.
+        let t1 = std::time::Instant::now();
+        for wh in [in_whole, out_whole].into_iter().flatten() {
+            wh.buf.destroy();
+        }
+        gpu.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        if prof { PROFILE.with(|m| *m.borrow_mut().entry("host_release".into()).or_insert(0.0) += t1.elapsed().as_secs_f64()); }
         Ok(())
     })
     .map_err(pyo3::exceptions::PyRuntimeError::new_err)
@@ -410,7 +625,7 @@ fn denoise_into<'py>(
 
 #[pymodule]
 fn gigdenoise_gpu(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(denoise_into, m)?)?;
+    m.add_function(wrap_pyfunction!(denoise_tiles, m)?)?;
     m.add_function(wrap_pyfunction!(adapter, m)?)?;
     m.add_function(wrap_pyfunction!(max_binding, m)?)?;
     m.add_function(wrap_pyfunction!(profile, m)?)?;
