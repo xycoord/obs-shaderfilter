@@ -28,6 +28,7 @@ struct Params {
 }
 
 pub struct Gpu {
+    pub max_binding: u64,
     device: wgpu::Device,
     queue: wgpu::Queue,
     pub adapter_name: String,
@@ -48,6 +49,7 @@ impl Gpu {
         limits.max_storage_buffer_binding_size = al.max_storage_buffer_binding_size;
         limits.max_buffer_size = al.max_buffer_size;
         limits.max_storage_buffers_per_shader_stage = al.max_storage_buffers_per_shader_stage.min(16);
+        let max_binding = limits.max_storage_buffer_binding_size as u64;
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: None,
             required_features: wgpu::Features::empty(),
@@ -79,7 +81,7 @@ impl Gpu {
             });
             pipes.insert(name, pipe);
         }
-        Ok(Gpu { device, queue, adapter_name: format!("{} ({:?})", info.name, info.backend), pipes })
+        Ok(Gpu { max_binding, device, queue, adapter_name: format!("{} ({:?})", info.name, info.backend), pipes })
     }
 
     fn storage(&self, bytes: &[u8]) -> wgpu::Buffer {
@@ -115,10 +117,24 @@ impl Gpu {
             layout: &pipe.get_bind_group_layout(0),
             entries: &entries,
         });
-        let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some(name), timestamp_writes: None });
-        pass.set_pipeline(pipe);
-        pass.set_bind_group(0, &bg, &[]);
-        pass.dispatch_workgroups(gx, gy, gz);
+        // GIGDENOISE_PROFILE=1: run each dispatch on its own and wait for it, adding its time to
+        // the per-stage totals that profile() returns.
+        let prof = std::env::var_os("GIGDENOISE_PROFILE").is_some();
+        let mut own = prof.then(|| self.device.create_command_encoder(&Default::default()));
+        {
+            let enc = own.as_mut().unwrap_or(enc);
+            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some(name), timestamp_writes: None });
+            pass.set_pipeline(pipe);
+            pass.set_bind_group(0, &bg, &[]);
+            pass.dispatch_workgroups(gx, gy, gz);
+        }
+        if let Some(e) = own {
+            let t0 = std::time::Instant::now();
+            self.queue.submit([e.finish()]);
+            self.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            let dt = t0.elapsed().as_secs_f64();
+            PROFILE.with(|m| *m.borrow_mut().entry(name.to_string()).or_insert(0.0) += dt);
+        }
     }
 
     fn read(&self, buf: &wgpu::Buffer, n_words: usize) -> Vec<f32> {
@@ -285,6 +301,16 @@ pub fn run(
 }
 
 thread_local! {
+    static PROFILE: std::cell::RefCell<std::collections::BTreeMap<String, f64>> = const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
+}
+
+/// Per-stage GPU seconds since the last call (only collected with GIGDENOISE_PROFILE set).
+#[pyfunction]
+fn profile() -> std::collections::BTreeMap<String, f64> {
+    PROFILE.with(|m| std::mem::take(&mut *m.borrow_mut()))
+}
+
+thread_local! {
     static GPU: std::cell::OnceCell<Result<Gpu, String>> = const { std::cell::OnceCell::new() };
 }
 
@@ -292,6 +318,15 @@ thread_local! {
 fn adapter() -> PyResult<String> {
     GPU.with(|g| match g.get_or_init(Gpu::new) {
         Ok(gpu) => Ok(gpu.adapter_name.clone()),
+        Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.clone())),
+    })
+}
+
+/// Largest storage buffer binding the device accepts, in bytes.
+#[pyfunction]
+fn max_binding() -> PyResult<u64> {
+    GPU.with(|g| match g.get_or_init(Gpu::new) {
+        Ok(gpu) => Ok(gpu.max_binding),
         Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.clone())),
     })
 }
@@ -333,5 +368,7 @@ fn denoise<'py>(
 fn gigdenoise_gpu(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(denoise, m)?)?;
     m.add_function(wrap_pyfunction!(adapter, m)?)?;
+    m.add_function(wrap_pyfunction!(max_binding, m)?)?;
+    m.add_function(wrap_pyfunction!(profile, m)?)?;
     Ok(())
 }

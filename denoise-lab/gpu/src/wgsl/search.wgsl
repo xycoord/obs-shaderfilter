@@ -19,12 +19,38 @@ fn px(f: u32, x: i32, y: i32) -> f32 {
 fn sad(cur: u32, rf: u32, ox: i32, oy: i32, dx: i32, dy: i32) -> f32 {
     var s = 0.0;
     let b = i32(P.bsl);
+    let wl = i32(P.wl); let hl = i32(P.hl);
+    // Fast path when both blocks lie inside the level: no clamping (same values, same order).
+    if (min(min(ox, ox + dx), min(oy, oy + dy)) >= 0 && max(ox, ox + dx) + b <= wl && max(oy, oy + dy) + b <= hl) {
+        var ci = (cur * P.hl + u32(oy)) * P.wl + u32(ox);
+        var ri = (rf * P.hl + u32(oy + dy)) * P.wl + u32(ox + dx);
+        for (var j = 0; j < b; j++) {
+            for (var i = 0u; i < u32(b); i++) {
+                s += abs(lum[ci + i] - lum[ri + i]);
+            }
+            ci += P.wl; ri += P.wl;
+        }
+        return s / f32(b * b);
+    }
     for (var j = 0; j < b; j++) {
         for (var i = 0; i < b; i++) {
             s += abs(px(cur, ox + i, oy + j) - px(rf, ox + i + dx, oy + j + dy));
         }
     }
     return s / f32(b * b);
+}
+
+const NSEEN: u32 = 32u;
+var<private> seen: array<vec2<i32>, 32>;
+var<private> nseen: u32 = 0u;
+
+// True if v was scored already (its SAD can't beat best_s, so scoring it again changes nothing).
+fn was_seen(v: vec2<i32>) -> bool {
+    for (var i = 0u; i < nseen; i++) {
+        if (all(seen[i] == v)) { return true; }
+    }
+    if (nseen < NSEEN) { seen[nseen] = v; nseen++; }
+    return false;
 }
 
 @compute @workgroup_size(8, 8, 1)
@@ -37,8 +63,9 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     let lim = 128;
     var best = vec2<i32>(0, 0);
     var best_s = sad(cur, rf, ox, oy, 0, 0);
+    _ = was_seen(best);
     if (P.has_coarse == 2u) {
-        // Second pass on the same level: the block's own first-pass vector and its 8
+        // Refinement pass on the same level: the block's own earlier vector and its 8
         // neighbours' (the parallel stand-in for the CPU version's left/top predictors).
         for (var dy = -1; dy <= 1; dy++) {
             for (var dx = -1; dx <= 1; dx++) {
@@ -46,6 +73,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
                 let qy = clamp(i32(by) + dy, 0, i32(P.nbyl) - 1);
                 let ci = pi * P.nbxl * P.nbyl + u32(qy) * P.nbxl + u32(qx);
                 let c = vec2<i32>(cvx[ci], cvy[ci]);
+                if (was_seen(c)) { continue; }
                 let s = sad(cur, rf, ox, oy, c.x, c.y);
                 if (s < best_s) { best_s = s; best = c; }
             }
@@ -60,6 +88,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
             let qy = clamp(cyb + offs[k].y, 0, i32(P.nbyc) - 1);
             let ci = pi * P.nbxc * P.nbyc + u32(qy) * P.nbxc + u32(qx);
             let c = clamp(vec2<i32>(cvx[ci] * 2, cvy[ci] * 2), vec2(-lim), vec2(lim));
+            if (was_seen(c)) { continue; }
             let s = sad(cur, rf, ox, oy, c.x, c.y);
             if (s < best_s) { best_s = s; best = c; }
         }
@@ -71,6 +100,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         var improved = false;
         for (var k = 0u; k < 4u; k++) {
             let c = clamp(centre + dia[k], vec2(-lim), vec2(lim));
+            if (was_seen(c)) { continue; }
             let s = sad(cur, rf, ox, oy, c.x, c.y);
             if (s < best_s) { best_s = s; best = c; improved = true; }
         }
@@ -79,6 +109,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     let centre = best;
     for (var k = 0u; k < 4u; k++) {
         let c = clamp(centre + diag[k], vec2(-lim), vec2(lim));
+        if (was_seen(c)) { continue; }
         let s = sad(cur, rf, ox, oy, c.x, c.y);
         if (s < best_s) { best_s = s; best = c; }
     }

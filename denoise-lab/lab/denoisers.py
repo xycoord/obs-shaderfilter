@@ -372,7 +372,7 @@ DENOISERS["round8"] = (with_axis("grey", "rust_blend"), ROUND8_PARAMS)
 # --- GPU implementation (gpu/, built with `maturin develop --release`) ---------
 
 def gpu_blend(frames, tr=6, light_tr=2, thsad=300, thsadc=450, tex_lo=0.3, tex_hi=1.0, hp_sigma=1.5,
-              energy_sigma=3.0, search_range=4, max_mb=96, margin=96, refine_passes=1):
+              energy_sigma=3.0, search_range=4, max_mb=96, margin=96, window_budget_mb=256, refine_passes=1):
     """Round 5 on the GPU (wgpu compute shaders); same parameters as rust_blend.
 
     GPUs cap how big one buffer binding can be (128 MB on some drivers), so the clip is
@@ -390,7 +390,12 @@ def gpu_blend(frames, tr=6, light_tr=2, thsad=300, thsadc=450, tex_lo=0.3, tex_h
             tiles_y += 1
     th_, tw_ = -(-h // tiles_y), -(-w // tiles_x)
     tile_mb = 3 * (th_ + 2 * margin) * (tw_ + 2 * margin) * 4 / 2 ** 20
-    span = max(int(max_mb // tile_mb) - 2 * tr, 1)  # output frames per window
+    # Frame windows only bound memory: each output frame depends on its own references alone, so
+    # the window length does not change the result. Use as long a window as the device allows
+    # (spatial tiles above still follow max_mb, since they do change the result near seams).
+    import gigdenoise_gpu
+    window_mb = min(gigdenoise_gpu.max_binding() / 2 ** 20, window_budget_mb)
+    span = max(int(window_mb // tile_mb) - 2 * tr, 1)  # output frames per window
     out = np.empty_like(frames)
     for ty in range(tiles_y):
         for tx in range(tiles_x):
