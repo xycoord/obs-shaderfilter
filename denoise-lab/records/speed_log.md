@@ -51,3 +51,36 @@ judges preferred Rust (cleaner colour noise, crisper moving hair); one preferred
 colour shift in the darkest panning shot. Averaged over all frames there is no colour bias (R-G +0.2, B-G +0.7,
 brightness +0.8 levels for Rust against -0.1, +0.7, +0.7 for MVTools): the per-frame difference is Rust removing
 more of the coarse colour mottle. Both lift near-blacks by under a level on average.
+
+## GPU speed climb on an Intel Arc 130V laptop (Core Ultra 5 226V, Vulkan, plugged in, performance mode)
+
+Measure: median of 5 runs (3 at 4K) of `gpu_blend` on 13 synthetic frames, seconds per megapixel-frame.
+Quality guard: PSNR against the clean picture on three synthetic 1080p scenes (slow pan; texture with a
+moving object; smooth uneven sub-pixel flow, which loses 0.58 dB with `search_range=1`), within 0.05 dB
+overall and 0.15 dB on the worst 5 % of regions. Rounds 1-5 kept output bit-identical; later rounds are
+"same quality".
+
+| Round | Change | 1080p | 4K | Result |
+|---|---|---|---|---|
+| start | | 0.98 | 1.06 | |
+| 1 | frame windows as long as memory allows (were 1 output frame each) | 0.112 | 0.124 | kept |
+| 2 | unclamped SAD fast path | 0.103 | 0.115 | kept |
+| 3 | don't re-score vectors already tried | 0.081 | 0.090 | kept |
+| 4 | current block cached in workgroup memory | 0.172 | 0.191 | undone |
+| 5 | stop a SAD once it can't win | 0.076 | 0.085 | kept |
+| 6 | one subgroup per block (lanes over pixels) | search 1.4 s vs 1.06 s | | undone |
+| 7 | brightness in textures | search 3.0 s vs 1.06 s | | undone |
+| 8 | search on half-float brightness, 2 pixels per word | 0.056 | 0.063 | kept |
+| 9 | one copy each way between numpy and the GPU | 0.042 | 0.050 | kept |
+| 10 | tiles and windows chosen for least work in a 2 GB working set | 0.037 | 0.044 | kept |
+| 11 | search on 8-bit brightness, 4 pixels per word | 0.032 | 0.040 | kept |
+| 12 | averaging: vector read once for 3 planes; interleaved planes; half-float references | | | undone (no gain / slower) |
+| 13 | search workgroup shapes 16x4, 32x2, 64x1 | | | 8x8 stays fastest |
+| 14 | directly mapped input/output buffers | 0.032 | | undone (no gain) |
+| 15 | multi-threaded upload/readback copies | 0.038 | | undone (slower) |
+
+Rust CPU on the same machine: 0.048-0.049 at 1080p, so the GPU version is about 1.5x faster there. At 4K
+both vary widely with memory pressure on this 16 GB machine (Rust 0.054-0.092, GPU 0.040-0.078).
+The search is memory-bound, not arithmetic-bound: shrinking the data it reads gave the big wins, while
+spreading each sum across lanes, textures and on-chip tiles all slowed it down. Remaining time at 1080p
+(about 1 s per 13-frame clip): search 41 %, averaging 21 %, copies in and out about 17 %, blurs 8 %.
