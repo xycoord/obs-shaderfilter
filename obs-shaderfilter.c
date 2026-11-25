@@ -2916,6 +2916,28 @@ static char *new_look_name(const preset_list_t *presets, const char *wanted)
 	return name.array;
 }
 
+/* Has OBS build the filter's settings panel again, once whatever is being
+ * done in the panel has finished. Asked for at once from the UI thread (a
+ * Look picked, a box ticked, a button pressed), OBS's Filters window rebuilds
+ * the panel there and then, deleting the list or tick that was clicked while
+ * it's still handling the click, and OBS crashes. Asked from the graphics
+ * thread, OBS queues the rebuild for the UI thread instead. */
+static void props_rebuild_task(void *param)
+{
+	obs_weak_source_t *weak = param;
+	obs_source_t *source = obs_weak_source_get_source(weak);
+	if (source) {
+		obs_source_update_properties(source);
+		obs_source_release(source);
+	}
+	obs_weak_source_release(weak);
+}
+
+static void props_rebuild_later(struct shader_filter_data *filter)
+{
+	obs_queue_task(OBS_TASK_GRAPHICS, props_rebuild_task, obs_source_get_weak_source(filter->context), false);
+}
+
 static void set_ui_flag(struct shader_filter_data *filter, const char *key, bool on, const char *name)
 {
 	obs_data_t *settings = obs_source_get_settings(filter->context);
@@ -2923,7 +2945,7 @@ static void set_ui_flag(struct shader_filter_data *filter, const char *key, bool
 	if (name)
 		obs_data_set_string(settings, "look_new_name", name);
 	obs_data_release(settings);
-	obs_source_update_properties(filter->context);
+	props_rebuild_later(filter);
 }
 
 static bool look_save_start_clicked(obs_properties_t *props, obs_property_t *property, void *data)
@@ -2994,7 +3016,7 @@ static bool look_save_clicked(obs_properties_t *props, obs_property_t *property,
 	bfree(wanted);
 	presets_free(&presets);
 	obs_data_release(settings);
-	obs_source_update_properties(filter->context);
+	props_rebuild_later(filter);
 	return false;
 }
 
@@ -3008,7 +3030,7 @@ static bool look_delete_clicked(obs_properties_t *props, obs_property_t *propert
 			NULL);
 	obs_data_unset_user_value(settings, "shader_look");
 	obs_data_release(settings);
-	obs_source_update_properties(filter->context);
+	props_rebuild_later(filter);
 	return false;
 }
 
@@ -3079,7 +3101,7 @@ static bool section_toggled(obs_properties_t *props, obs_property_t *p, obs_data
 				    now.array ? now.array : "") != 0;
 	dstr_free(&now);
 	if (changed)
-		obs_source_update_properties(filter->context);
+		props_rebuild_later(filter);
 	return false;
 }
 
@@ -3109,7 +3131,7 @@ static bool shader_preset_changed(obs_properties_t *props, obs_property_t *p, ob
 	/* (Built again, so the Look list matches; that does all a refresh
 	 * would.) */
 	if (applied)
-		obs_source_update_properties(filter->context);
+		props_rebuild_later(filter);
 	return false;
 }
 
@@ -5591,7 +5613,7 @@ static void shader_filter_update(void *data, obs_data_t *settings)
 		if (filter->carry)
 			carry_apply(filter, settings);
 		filter->props_refresh_until = os_gettime_ns() + 1000000000ULL;
-		obs_source_update_properties(filter->context);
+		props_rebuild_later(filter);
 	}
 
 	if (filter->param_audio_magnitude || filter->param_audio_peak) {
